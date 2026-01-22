@@ -1,0 +1,19 @@
+# Simple ARIA program
+
+s Point
+    x: Float
+    y: Float
+
+f add(a: Int, b: Int) -> Int
+    a + b
+
+f double(n: Int) -> Int = n * 2
+
+e Direction
+    North
+    South
+    East
+    West
+
+t Display
+    f display(&self) -> Str

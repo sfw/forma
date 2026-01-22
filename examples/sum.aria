@@ -1,0 +1,9 @@
+# Sum of 1 to n using a while loop
+f main() -> Int
+    limit := 100
+    sum := 0
+    count := 1
+    wh count <= limit
+        sum = sum + count
+        count = count + 1
+    sum

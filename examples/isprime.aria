@@ -1,0 +1,8 @@
+# Check if a number is prime
+f is_prime_helper(num: Int, divisor: Int) -> Bool
+    if divisor * divisor > num then true else (if num % divisor == 0 then false else is_prime_helper(num, divisor + 1))
+
+f is_prime(num: Int) -> Bool
+    if num < 2 then false else is_prime_helper(num, 2)
+
+f main() -> Bool = is_prime(17)

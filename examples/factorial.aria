@@ -1,0 +1,5 @@
+# Recursive factorial function
+f factorial(n: Int) -> Int
+    if n <= 1 then 1 else n * factorial(n - 1)
+
+f main() -> Int = factorial(10)

@@ -1,0 +1,2 @@
+# Simple hello world program
+f main() -> Int = 42

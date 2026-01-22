@@ -1,0 +1,28 @@
+# A simple ARIA program
+
+s Point
+    x: Float
+    y: Float
+
+f add(a: Int, b: Int) -> Int
+    a + b
+
+f main
+    x = 42
+    y := 0
+    name = "Alice"
+
+    if x > 10
+        print "big"
+    else
+        print "small"
+
+    for i in 0..10
+        y += i
+
+    result = x | add(10) | double
+
+    m x
+        0 -> "zero"
+        1..=9 -> "digit"
+        _ -> "other"

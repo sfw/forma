@@ -1,0 +1,65 @@
+# Comprehensive ARIA program example
+
+us std.io
+
+s Point
+    x: Float
+    y: Float
+
+s Color(r: u8, g: u8, b: u8)
+
+e Option[T]
+    Some(T)
+    None
+
+e Result[T, E]
+    Ok(T)
+    Err(E)
+
+t Display
+    f display(&self) -> Str
+
+t Clone
+    f clone(&self) -> Self
+
+i Display for Point
+    f display(&self) -> Str
+        result = "point"
+        result
+
+i Point
+    f new(x: Float, y: Float) -> Point
+        Point { x: x, y: y }
+
+    f origin -> Point
+        Point { x: 0.0, y: 0.0 }
+
+f add(a: Int, b: Int) -> Int
+    a + b
+
+f factorial(n: Int) -> Int
+    if n <= 1 then 1 else n * factorial(n - 1)
+
+f process_list(items: [Int]) -> Int
+    total = 0
+    total
+
+as f fetch_data(url: Str) -> Str!
+    data = aw get_url(url)?
+    data
+
+f main
+    x = 42
+    y := 0
+    name = "Alice"
+
+    point = Point { x: 1.0, y: 2.0 }
+
+    numbers = [1, 2, 3, 4, 5]
+
+    result = add(x, 10)
+
+    m x
+        0 -> "zero"
+        n if n < 0 -> "negative"
+        _ -> "positive"
