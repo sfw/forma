@@ -1,0 +1,44 @@
+# A simple FORMA program demonstrating FORMA syntax
+# Run with: forma run examples/hello.forma
+
+s Point
+    x: Float
+    y: Float
+
+f add(a: Int, b: Int) -> Int
+    a + b
+
+f double(n: Int) -> Int = n * 2
+
+f main() -> Int
+    x = 42
+    name = "Alice"
+
+    # Conditionals
+    if x > 10
+        print("big")
+    else
+        print("small")
+
+    # For loops work with arrays
+    nums := [1, 2, 3, 4, 5]
+    total := 0
+    for n in nums
+        total = total + n
+
+    print("Sum of 1..5:")
+    print(total)
+
+    # Pipeline operator (single-arg functions)
+    result = x | double | double
+    print("Pipeline result 42 * 2 * 2:")
+    print(result)
+
+    # Match expression
+    msg = m x
+        0 -> "zero"
+        42 -> "the answer"
+        _ -> "other"
+    print(msg)
+
+    result
