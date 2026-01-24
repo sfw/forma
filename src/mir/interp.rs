@@ -1549,6 +1549,121 @@ impl Interpreter {
                 Ok(Some(arr[idx].clone()))
             }
 
+            // ===== Float math operations =====
+            "sqrt" => {
+                // sqrt(x: Float) -> Float
+                let x = match &args[0] {
+                    Value::Float(f) => *f,
+                    Value::Int(i) => *i as f64,
+                    _ => return Err(InterpError { message: "sqrt: expected Float".to_string() })
+                };
+                Ok(Some(Value::Float(x.sqrt())))
+            }
+            "pow" => {
+                // pow(base: Float, exp: Float) -> Float
+                let base = match &args[0] {
+                    Value::Float(f) => *f,
+                    Value::Int(i) => *i as f64,
+                    _ => return Err(InterpError { message: "pow: expected Float for base".to_string() })
+                };
+                let exp = match &args[1] {
+                    Value::Float(f) => *f,
+                    Value::Int(i) => *i as f64,
+                    _ => return Err(InterpError { message: "pow: expected Float for exp".to_string() })
+                };
+                Ok(Some(Value::Float(base.powf(exp))))
+            }
+            "sin" => {
+                // sin(x: Float) -> Float
+                let x = match &args[0] {
+                    Value::Float(f) => *f,
+                    Value::Int(i) => *i as f64,
+                    _ => return Err(InterpError { message: "sin: expected Float".to_string() })
+                };
+                Ok(Some(Value::Float(x.sin())))
+            }
+            "cos" => {
+                // cos(x: Float) -> Float
+                let x = match &args[0] {
+                    Value::Float(f) => *f,
+                    Value::Int(i) => *i as f64,
+                    _ => return Err(InterpError { message: "cos: expected Float".to_string() })
+                };
+                Ok(Some(Value::Float(x.cos())))
+            }
+            "tan" => {
+                // tan(x: Float) -> Float
+                let x = match &args[0] {
+                    Value::Float(f) => *f,
+                    Value::Int(i) => *i as f64,
+                    _ => return Err(InterpError { message: "tan: expected Float".to_string() })
+                };
+                Ok(Some(Value::Float(x.tan())))
+            }
+            "log" => {
+                // log(x: Float) -> Float (natural log)
+                let x = match &args[0] {
+                    Value::Float(f) => *f,
+                    Value::Int(i) => *i as f64,
+                    _ => return Err(InterpError { message: "log: expected Float".to_string() })
+                };
+                Ok(Some(Value::Float(x.ln())))
+            }
+            "log10" => {
+                // log10(x: Float) -> Float
+                let x = match &args[0] {
+                    Value::Float(f) => *f,
+                    Value::Int(i) => *i as f64,
+                    _ => return Err(InterpError { message: "log10: expected Float".to_string() })
+                };
+                Ok(Some(Value::Float(x.log10())))
+            }
+            "exp" => {
+                // exp(x: Float) -> Float (e^x)
+                let x = match &args[0] {
+                    Value::Float(f) => *f,
+                    Value::Int(i) => *i as f64,
+                    _ => return Err(InterpError { message: "exp: expected Float".to_string() })
+                };
+                Ok(Some(Value::Float(x.exp())))
+            }
+            "floor" => {
+                // floor(x: Float) -> Int
+                let x = match &args[0] {
+                    Value::Float(f) => *f,
+                    Value::Int(i) => *i as f64,
+                    _ => return Err(InterpError { message: "floor: expected Float".to_string() })
+                };
+                Ok(Some(Value::Int(x.floor() as i64)))
+            }
+            "ceil" => {
+                // ceil(x: Float) -> Int
+                let x = match &args[0] {
+                    Value::Float(f) => *f,
+                    Value::Int(i) => *i as f64,
+                    _ => return Err(InterpError { message: "ceil: expected Float".to_string() })
+                };
+                Ok(Some(Value::Int(x.ceil() as i64)))
+            }
+            "round" => {
+                // round(x: Float) -> Int
+                let x = match &args[0] {
+                    Value::Float(f) => *f,
+                    Value::Int(i) => *i as f64,
+                    _ => return Err(InterpError { message: "round: expected Float".to_string() })
+                };
+                Ok(Some(Value::Int(x.round() as i64)))
+            }
+            "abs_float" => {
+                // abs_float(x: Float) -> Float
+                let x = match &args[0] {
+                    Value::Float(f) => *f,
+                    Value::Int(i) => *i as f64,
+                    _ => return Err(InterpError { message: "abs_float: expected Float".to_string() })
+                };
+                Ok(Some(Value::Float(x.abs())))
+            }
+
             // Not a built-in function
             _ => Ok(None)
         }

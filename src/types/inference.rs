@@ -724,6 +724,79 @@ impl TypeEnv {
             },
         );
 
+        // ===== Float math operations =====
+        // sqrt(Float) -> Float
+        env.bindings.insert(
+            "sqrt".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Float)) },
+        );
+
+        // pow(Float, Float) -> Float
+        env.bindings.insert(
+            "pow".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Float, Ty::Float], Box::new(Ty::Float)) },
+        );
+
+        // sin(Float) -> Float
+        env.bindings.insert(
+            "sin".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Float)) },
+        );
+
+        // cos(Float) -> Float
+        env.bindings.insert(
+            "cos".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Float)) },
+        );
+
+        // tan(Float) -> Float
+        env.bindings.insert(
+            "tan".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Float)) },
+        );
+
+        // log(Float) -> Float (natural log)
+        env.bindings.insert(
+            "log".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Float)) },
+        );
+
+        // log10(Float) -> Float
+        env.bindings.insert(
+            "log10".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Float)) },
+        );
+
+        // exp(Float) -> Float
+        env.bindings.insert(
+            "exp".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Float)) },
+        );
+
+        // floor(Float) -> Int
+        env.bindings.insert(
+            "floor".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Int)) },
+        );
+
+        // ceil(Float) -> Int
+        env.bindings.insert(
+            "ceil".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Int)) },
+        );
+
+        // round(Float) -> Int
+        env.bindings.insert(
+            "round".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Int)) },
+        );
+
+        // abs_float(Float) -> Float
+        env.bindings.insert(
+            "abs_float".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Float)) },
+        );
+
         env
     }
 
