@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use crate::lexer::Span;
 use crate::parser::{
-    BinOp, Block, Expr, ExprKind, FnBody, GenericParam, Item, ItemKind,
+    BinOp, Block, Expr, ExprKind, FnBody, GenericParam, Generics, Item, ItemKind,
     LiteralKind, Pattern, PatternKind, Stmt, StmtKind, Type as AstType, TypeKind as AstTypeKind,
     UnaryOp, VariantKind, GenericArg,
 };
@@ -964,6 +964,9 @@ pub struct InferenceEngine {
     unifier: Unifier,
     /// Current function's return type (for checking return statements)
     return_type: Option<Ty>,
+    /// Current type parameters (for generic functions/structs)
+    /// Maps type parameter names (e.g., "T") to their type variables
+    type_params: HashMap<String, TypeVar>,
 }
 
 impl InferenceEngine {
@@ -972,6 +975,7 @@ impl InferenceEngine {
             env: TypeEnv::with_builtins(),
             unifier: Unifier::new(),
             return_type: None,
+            type_params: HashMap::new(),
         }
     }
 
@@ -980,6 +984,67 @@ impl InferenceEngine {
             env,
             unifier: Unifier::new(),
             return_type: None,
+            type_params: HashMap::new(),
+        }
+    }
+
+    /// Set up type parameters from a generic declaration.
+    /// Returns the mapping of type param names to fresh type variables.
+    fn setup_type_params(&mut self, generics: &Option<Generics>) -> HashMap<String, TypeVar> {
+        let mut params = HashMap::new();
+        if let Some(g) = generics {
+            for param in &g.params {
+                if let GenericParam::Type(tp) = param {
+                    let tv = TypeVar::fresh();
+                    params.insert(tp.name.name.clone(), tv);
+                }
+            }
+        }
+        params
+    }
+
+    /// Substitute named type parameters with concrete types.
+    /// Used when instantiating generic struct types.
+    fn substitute_type_params(&self, ty: &Ty, subst: &HashMap<String, Ty>) -> Ty {
+        match ty {
+            Ty::Var(tv) => {
+                // Type variables from struct field definitions might be Named("T", [])
+                // since they were created before we had fresh vars
+                Ty::Var(*tv)
+            }
+            Ty::Named(id, args) => {
+                // Check if this is a type parameter reference
+                if args.is_empty() {
+                    if let Some(replacement) = subst.get(&id.name) {
+                        return replacement.clone();
+                    }
+                }
+                // Otherwise, recursively substitute in args
+                let new_args = args.iter()
+                    .map(|a| self.substitute_type_params(a, subst))
+                    .collect();
+                Ty::Named(id.clone(), new_args)
+            }
+            Ty::List(elem) => Ty::List(Box::new(self.substitute_type_params(elem, subst))),
+            Ty::Tuple(elems) => Ty::Tuple(elems.iter().map(|e| self.substitute_type_params(e, subst)).collect()),
+            Ty::Fn(params, ret) => Ty::Fn(
+                params.iter().map(|p| self.substitute_type_params(p, subst)).collect(),
+                Box::new(self.substitute_type_params(ret, subst)),
+            ),
+            Ty::Option(inner) => Ty::Option(Box::new(self.substitute_type_params(inner, subst))),
+            Ty::Result(ok, err) => Ty::Result(
+                Box::new(self.substitute_type_params(ok, subst)),
+                Box::new(self.substitute_type_params(err, subst)),
+            ),
+            Ty::Ref(inner, m) => Ty::Ref(Box::new(self.substitute_type_params(inner, subst)), *m),
+            Ty::Ptr(inner, m) => Ty::Ptr(Box::new(self.substitute_type_params(inner, subst)), *m),
+            Ty::Map(k, v) => Ty::Map(
+                Box::new(self.substitute_type_params(k, subst)),
+                Box::new(self.substitute_type_params(v, subst)),
+            ),
+            Ty::Set(elem) => Ty::Set(Box::new(self.substitute_type_params(elem, subst))),
+            // Primitive types don't need substitution
+            _ => ty.clone(),
         }
     }
 
@@ -1025,6 +1090,10 @@ impl InferenceEngine {
             ItemKind::Struct(s) => {
                 let type_params = self.get_type_params(&s.generics);
 
+                // Set up type params context before processing fields
+                let old_type_params = std::mem::take(&mut self.type_params);
+                self.type_params = self.setup_type_params(&s.generics);
+
                 let fields = match &s.kind {
                     crate::parser::StructKind::Named(fields) => {
                         fields
@@ -1048,6 +1117,9 @@ impl InferenceEngine {
                     crate::parser::StructKind::Unit => vec![],
                 };
 
+                // Restore old type params
+                self.type_params = old_type_params;
+
                 self.env.insert_type(
                     s.name.name.clone(),
                     TypeDef::Struct { type_params, fields },
@@ -1056,6 +1128,10 @@ impl InferenceEngine {
             ItemKind::Enum(e) => {
                 let type_params = self.get_type_params(&e.generics);
                 let enum_name = e.name.name.clone();
+
+                // Set up type params context before processing variants
+                let old_type_params = std::mem::take(&mut self.type_params);
+                self.type_params = self.setup_type_params(&e.generics);
 
                 let variants = e
                     .variants
@@ -1080,10 +1156,12 @@ impl InferenceEngine {
                     })
                     .collect::<Result<Vec<_>, TypeError>>()?;
 
-                // Create type variables for each generic parameter
-                let type_var_map: Vec<(String, TypeVar)> = type_params
-                    .iter()
-                    .map(|name| (name.clone(), TypeVar::fresh()))
+                // Restore old type params
+                let current_type_params = std::mem::replace(&mut self.type_params, old_type_params);
+
+                // Use the type variables we created for the variant field processing
+                let type_var_map: Vec<(String, TypeVar)> = current_type_params
+                    .into_iter()
                     .collect();
 
                 // Build the enum type with fresh type variables
@@ -1135,6 +1213,10 @@ impl InferenceEngine {
     /// Collect a function signature into the environment.
     fn collect_function_sig(&mut self, item: &Item) -> Result<(), TypeError> {
         if let ItemKind::Function(f) = &item.kind {
+            // Set up type parameters for generic functions
+            let old_type_params = std::mem::take(&mut self.type_params);
+            self.type_params = self.setup_type_params(&f.generics);
+
             let param_types: Vec<Ty> = f
                 .params
                 .iter()
@@ -1149,11 +1231,20 @@ impl InferenceEngine {
 
             let fn_type = Ty::Fn(param_types, Box::new(return_type));
 
-            // Generalize the function type
-            let env_vars = self.env.free_vars();
-            let scheme = TypeScheme::generalize(fn_type, &env_vars);
+            // For generic functions, create a TypeScheme with the type variables
+            let scheme = if f.generics.is_some() {
+                let vars: Vec<TypeVar> = self.type_params.values().copied().collect();
+                TypeScheme { vars, ty: fn_type }
+            } else {
+                // Non-generic: generalize normally
+                let env_vars = self.env.free_vars();
+                TypeScheme::generalize(fn_type, &env_vars)
+            };
 
             self.env.insert(f.name.name.clone(), scheme);
+
+            // Restore old type params
+            self.type_params = old_type_params;
         }
         Ok(())
     }
@@ -1167,6 +1258,10 @@ impl InferenceEngine {
                     Some(body) => body,
                     None => return Ok(()),
                 };
+
+                // Set up type parameters for generic functions
+                let old_type_params = std::mem::take(&mut self.type_params);
+                self.type_params = self.setup_type_params(&f.generics);
 
                 // Create a new scope for the function body
                 let mut body_env = self.env.child();
@@ -1195,6 +1290,9 @@ impl InferenceEngine {
                 };
                 self.env = old_env;
                 self.return_type = old_return;
+
+                // Restore old type params
+                self.type_params = old_type_params;
 
                 // Unify body type with return type
                 self.unifier.unify(&body_type, &return_type, item.span)?;
@@ -1610,17 +1708,49 @@ impl InferenceEngine {
                 let type_name = path.segments.last().map(|s| s.name.name.as_str()).unwrap_or("");
                 let type_id = TypeId::new(type_name);
 
-                for field in fields {
-                    if let Some(value) = &field.value {
-                        self.infer_expr(value)?;
+                // Look up the struct definition to get type parameters and field types
+                if let Some(TypeDef::Struct { type_params, fields: def_fields }) = self.env.get_type(type_name).cloned() {
+                    // Create fresh type variables for each type parameter
+                    let type_args: Vec<Ty> = type_params.iter().map(|_| Ty::fresh_var()).collect();
+
+                    // Build substitution from param names to fresh type vars
+                    let subst: HashMap<String, Ty> = type_params.iter()
+                        .zip(type_args.iter())
+                        .map(|(name, ty)| (name.clone(), ty.clone()))
+                        .collect();
+
+                    // Check each provided field and unify with definition
+                    for field in fields {
+                        if let Some(value) = &field.value {
+                            let value_ty = self.infer_expr(value)?;
+
+                            // Find the field in the definition
+                            if let Some((_, def_field_ty)) = def_fields.iter().find(|(n, _)| n == &field.name.name) {
+                                // Apply type parameter substitution to the definition type
+                                let expected_ty = self.substitute_type_params(def_field_ty, &subst);
+                                self.unifier.unify(&value_ty, &expected_ty, expr.span)?;
+                            }
+                        }
                     }
-                }
 
-                if let Some(b) = base {
-                    self.infer_expr(b)?;
-                }
+                    if let Some(b) = base {
+                        let base_ty = self.infer_expr(b)?;
+                        self.unifier.unify(&base_ty, &Ty::Named(type_id.clone(), type_args.clone()), expr.span)?;
+                    }
 
-                Ok(Ty::Named(type_id, vec![]))
+                    Ok(Ty::Named(type_id, type_args))
+                } else {
+                    // Fallback for unknown struct types - just infer field types
+                    for field in fields {
+                        if let Some(value) = &field.value {
+                            self.infer_expr(value)?;
+                        }
+                    }
+                    if let Some(b) = base {
+                        self.infer_expr(b)?;
+                    }
+                    Ok(Ty::Named(type_id, vec![]))
+                }
             }
 
             ExprKind::Path(p) => {
@@ -1906,6 +2036,11 @@ impl InferenceEngine {
                     })
                     .transpose()?
                     .unwrap_or_default();
+
+                // First check if this is a type parameter
+                if let Some(tv) = self.type_params.get(name) {
+                    return Ok(Ty::Var(*tv));
+                }
 
                 match name {
                     "Int" => Ok(Ty::Int),

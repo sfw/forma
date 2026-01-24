@@ -18,12 +18,14 @@
 //! - [`types`]: Type system and inference
 //! - [`borrow`]: Borrow checker for memory safety
 //! - [`mir`]: Mid-level intermediate representation
+//! - [`module`]: Module loading and resolution
 //! - [`errors`]: Error types and diagnostics
 
 pub mod borrow;
 pub mod errors;
 pub mod lexer;
 pub mod mir;
+pub mod module;
 pub mod parser;
 pub mod types;
 
@@ -31,5 +33,6 @@ pub use borrow::{BorrowChecker, BorrowError, BorrowErrorKind};
 pub use errors::{CompileError, Result};
 pub use lexer::{Scanner, Span, Token, TokenKind};
 pub use mir::{Interpreter, Lowerer, Program, Value};
+pub use module::{ModuleLoader, ModuleError};
 pub use parser::{Parser, SourceFile};
 pub use types::{TypeChecker, Ty, TypeError};

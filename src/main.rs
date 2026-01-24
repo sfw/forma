@@ -5,6 +5,7 @@
 use aria::errors::ErrorContext;
 use aria::lexer::Span;
 use aria::mir::{Interpreter, Lowerer};
+use aria::module::ModuleLoader;
 use aria::{BorrowChecker, Parser as AriaParser, Scanner, TypeChecker};
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::Serialize;
@@ -216,7 +217,7 @@ fn run(file: &PathBuf, dump_mir: bool, error_format: ErrorFormat) -> Result<(), 
 
     // Parse
     let parser = AriaParser::new(&tokens);
-    let ast = match parser.parse() {
+    let parsed_ast = match parser.parse() {
         Ok(ast) => ast,
         Err(e) => {
             match error_format {
@@ -237,6 +238,42 @@ fn run(file: &PathBuf, dump_mir: bool, error_format: ErrorFormat) -> Result<(), 
                 }
             }
             return Err("parse error".to_string());
+        }
+    };
+
+    // Load imports (module system)
+    let mut module_loader = ModuleLoader::from_source_file(file);
+    let ast = match module_loader.load_imports(&parsed_ast) {
+        Ok(imported_items) => {
+            // Combine imports with main file items
+            let mut combined_items = imported_items;
+            combined_items.extend(parsed_ast.items);
+            aria::parser::SourceFile {
+                items: combined_items,
+                span: parsed_ast.span,
+            }
+        }
+        Err(e) => {
+            match error_format {
+                ErrorFormat::Human => {
+                    ctx.error(aria::lexer::Span { start: 0, end: 0, line: 1, column: 1 }, &format!("module error: {}", e));
+                }
+                ErrorFormat::Json => {
+                    json_errors.push(JsonError {
+                        file: filename.clone(),
+                        line: 1,
+                        column: 1,
+                        end_line: 1,
+                        end_column: 1,
+                        severity: "error".to_string(),
+                        code: "MODULE".to_string(),
+                        message: format!("{}", e),
+                        help: None,
+                    });
+                    output_json_errors(json_errors, None);
+                }
+            }
+            return Err(format!("module error: {}", e));
         }
     };
 

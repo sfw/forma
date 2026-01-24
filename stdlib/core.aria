@@ -1,81 +1,5 @@
 # ARIA Standard Library - Core Module
-# Provides fundamental utilities for error handling and assertions
-
-# ============================================================
-# Option helpers
-# ============================================================
-
-# Map a function over an Option value
-# If Some(x), returns Some(f(x)); if None, returns None
-f option_map(opt: Option[Int], mapper: |Int| -> Int) -> Option[Int]
-    m opt
-        Some(v) -> Some(mapper(v))
-        None -> None
-
-# Flat map (bind) for Option
-# If Some(x), returns f(x); if None, returns None
-f option_flat_map(opt: Option[Int], mapper: |Int| -> Option[Int]) -> Option[Int]
-    m opt
-        Some(v) -> mapper(v)
-        None -> None
-
-# Get value from Option or return default
-f option_unwrap_or(opt: Option[Int], default: Int) -> Int
-    m opt
-        Some(v) -> v
-        None -> default
-
-# Check if Option is Some
-f option_is_some(opt: Option[Int]) -> Bool
-    m opt
-        Some(_) -> true
-        None -> false
-
-# Check if Option is None
-f option_is_none(opt: Option[Int]) -> Bool
-    m opt
-        Some(_) -> false
-        None -> true
-
-# ============================================================
-# Result helpers
-# ============================================================
-
-# Map a function over a Result's Ok value
-f result_map(res: Result[Int, Str], mapper: |Int| -> Int) -> Result[Int, Str]
-    m res
-        Ok(v) -> Ok(mapper(v))
-        Err(e) -> Err(e)
-
-# Map a function over a Result's Err value
-f result_map_err(res: Result[Int, Str], mapper: |Str| -> Str) -> Result[Int, Str]
-    m res
-        Ok(v) -> Ok(v)
-        Err(e) -> Err(mapper(e))
-
-# Get value from Result or return default
-f result_unwrap_or(res: Result[Int, Str], default: Int) -> Int
-    m res
-        Ok(v) -> v
-        Err(_) -> default
-
-# Check if Result is Ok
-f result_is_ok(res: Result[Int, Str]) -> Bool
-    m res
-        Ok(_) -> true
-        Err(_) -> false
-
-# Check if Result is Err
-f result_is_err(res: Result[Int, Str]) -> Bool
-    m res
-        Ok(_) -> false
-        Err(_) -> true
-
-# Convert Option to Result with error message
-f option_ok_or(opt: Option[Int], err: Str) -> Result[Int, Str]
-    m opt
-        Some(v) -> Ok(v)
-        None -> Err(err)
+# Provides fundamental utilities for assertions and numeric operations
 
 # ============================================================
 # Assertion helpers
@@ -148,3 +72,39 @@ f sign(n: Int) -> Int
     if n < 0 then 0 - 1
     else if n > 0 then 1
     else 0
+
+# Power function (integer exponent)
+f pow(base: Int, exp: Int) -> Int
+    if exp == 0 then 1
+    else if exp == 1 then base
+    else base * pow(base, exp - 1)
+
+# GCD using Euclidean algorithm
+f gcd(a: Int, b: Int) -> Int
+    if b == 0 then abs(a)
+    else gcd(b, a % b)
+
+# LCM using GCD
+f lcm(a: Int, b: Int) -> Int
+    if a == 0 || b == 0 then 0
+    else abs(a * b) / gcd(a, b)
+
+# Check if a number is even
+f is_even(n: Int) -> Bool
+    n % 2 == 0
+
+# Check if a number is odd
+f is_odd(n: Int) -> Bool
+    n % 2 != 0
+
+# Check if a number is positive
+f is_positive(n: Int) -> Bool
+    n > 0
+
+# Check if a number is negative
+f is_negative(n: Int) -> Bool
+    n < 0
+
+# Check if a number is zero
+f is_zero(n: Int) -> Bool
+    n == 0
