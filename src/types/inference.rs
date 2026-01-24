@@ -1664,9 +1664,23 @@ impl InferenceEngine {
             ExprKind::For(pattern, iter, body) => {
                 let iter_ty = self.infer_expr(iter)?;
 
+                // For loops can iterate over:
+                // 1. Ranges: Range[T] yields T
+                // 2. Lists/Arrays: [T] yields T
                 let elem_ty = Ty::fresh_var();
-                let list_ty = Ty::List(Box::new(elem_ty.clone()));
-                self.unifier.unify(&iter_ty, &list_ty, expr.span)?;
+
+                // Check if iterator is a Range expression directly
+                let is_range = matches!(&iter.kind, ExprKind::Range(_, _, _));
+
+                if is_range {
+                    // For range iteration, unify with Range[elem_ty]
+                    let range_ty = Ty::Named(TypeId::new("Range"), vec![elem_ty.clone()]);
+                    self.unifier.unify(&iter_ty, &range_ty, expr.span)?;
+                } else {
+                    // For array iteration, unify with List[elem_ty]
+                    let list_ty = Ty::List(Box::new(elem_ty.clone()));
+                    self.unifier.unify(&iter_ty, &list_ty, expr.span)?;
+                }
 
                 let mut loop_env = self.env.child();
                 self.collect_pattern_bindings(pattern, &elem_ty, &mut loop_env)?;

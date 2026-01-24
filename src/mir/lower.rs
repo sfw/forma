@@ -1298,7 +1298,14 @@ impl Lowerer {
         body: &AstBlock,
         _span: Span,
     ) -> Option<Operand> {
-        // For loops iterate over arrays: `for x in arr` or `for i, x in arr.enumerate()`
+        // For loops can iterate over:
+        // 1. Ranges: `for i in 0..10` or `for i in start..end` or `for i in 0..=10`
+        // 2. Arrays: `for x in arr` or `for i, x in arr.enumerate()`
+
+        // Check if this is a range iteration
+        if let ExprKind::Range(start_opt, end_opt, inclusive) = &iter.kind {
+            return self.lower_for_range(pattern, start_opt, end_opt, *inclusive, body);
+        }
 
         // Check if this is an enumerate call: `arr.enumerate()`
         let (iter_expr, is_enumerate) = match &iter.kind {
@@ -1398,6 +1405,99 @@ impl Lowerer {
                     self.vars.insert(ident.name.clone(), var_local);
                 }
             }
+        }
+
+        // Execute loop body
+        self.lower_block(body);
+
+        // If body didn't terminate, go to increment
+        if self.current_fn.as_ref().unwrap().block(self.current_block.unwrap()).terminator.is_none() {
+            self.terminate(Terminator::Goto(incr_block));
+        }
+
+        // Increment block: idx = idx + 1
+        self.current_block = Some(incr_block);
+        self.emit(StatementKind::Assign(
+            idx_local,
+            Rvalue::BinaryOp(BinOp::Add, Operand::Copy(idx_local), Operand::Constant(Constant::Int(1))),
+        ));
+        self.terminate(Terminator::Goto(cond_block));
+
+        self.loop_stack.pop();
+        self.current_block = Some(exit_block);
+        None
+    }
+
+    /// Lower a for loop with range iteration: `for i in 0..10` or `for i in start..=end`
+    fn lower_for_range(
+        &mut self,
+        pattern: &Pattern,
+        start_opt: &Option<Box<Expr>>,
+        end_opt: &Option<Box<Expr>>,
+        inclusive: bool,
+        body: &AstBlock,
+    ) -> Option<Operand> {
+        // Get the start value (default to 0 if not specified)
+        let start_val = if let Some(start_expr) = start_opt {
+            self.lower_expr(start_expr)?
+        } else {
+            Operand::Constant(Constant::Int(0))
+        };
+
+        // Get the end value (required for iteration)
+        let end_val = if let Some(end_expr) = end_opt {
+            self.lower_expr(end_expr)?
+        } else {
+            // Open-ended ranges like `0..` are not supported in for loops
+            // Default to start value (empty iteration)
+            start_val.clone()
+        };
+
+        // Store the end value in a local
+        let end_local = self.new_temp(Ty::Int);
+        self.emit(StatementKind::Assign(end_local, Rvalue::Use(end_val)));
+
+        // Create the loop variable, initialized to start
+        let idx_local = self.new_temp(Ty::Int);
+        self.emit(StatementKind::Assign(idx_local, Rvalue::Use(start_val)));
+
+        let cond_block = self.new_block();
+        let body_block = self.new_block();
+        let incr_block = self.new_block();
+        let exit_block = self.new_block();
+
+        // Push loop context (continue goes to increment, break goes to exit)
+        self.loop_stack.push(LoopContext {
+            continue_block: incr_block,
+            break_block: exit_block,
+            result_local: None,
+        });
+
+        // Jump to condition check
+        self.terminate(Terminator::Goto(cond_block));
+
+        // Condition block: check if idx < end (exclusive) or idx <= end (inclusive)
+        self.current_block = Some(cond_block);
+        let cond_val = self.new_temp(Ty::Bool);
+        let cmp_op = if inclusive { BinOp::Le } else { BinOp::Lt };
+        self.emit(StatementKind::Assign(
+            cond_val,
+            Rvalue::BinaryOp(cmp_op, Operand::Copy(idx_local), Operand::Copy(end_local)),
+        ));
+        self.terminate(Terminator::If {
+            cond: Operand::Local(cond_val),
+            then_block: body_block,
+            else_block: exit_block,
+        });
+
+        // Body block: bind pattern variable to current index value
+        self.current_block = Some(body_block);
+
+        // Bind the loop variable based on pattern
+        if let PatternKind::Ident(ident, _, _) = &pattern.kind {
+            let var_local = self.new_local(Ty::Int, Some(ident.name.clone()));
+            self.emit(StatementKind::Assign(var_local, Rvalue::Use(Operand::Copy(idx_local))));
+            self.vars.insert(ident.name.clone(), var_local);
         }
 
         // Execute loop body

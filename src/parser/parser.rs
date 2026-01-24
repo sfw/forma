@@ -1666,6 +1666,26 @@ impl<'a> Parser<'a> {
 
         // Literals
         if let Some(lit) = self.try_parse_literal()? {
+            // Check for range: literal..end or literal..=end
+            if self.check(TokenKind::DotDot) || self.check(TokenKind::DotDotEq) {
+                let inclusive = self.match_token(TokenKind::DotDotEq);
+                if !inclusive {
+                    self.expect(TokenKind::DotDot)?;
+                }
+                let start_expr = Expr {
+                    kind: ExprKind::Literal(lit),
+                    span: start,
+                };
+                let end = if self.check_expr_start() {
+                    Some(Box::new(self.parse_unary()?))
+                } else {
+                    None
+                };
+                return Ok(Expr {
+                    kind: ExprKind::Range(Some(Box::new(start_expr)), end, inclusive),
+                    span: start.merge(self.previous_span()),
+                });
+            }
             return Ok(Expr {
                 kind: ExprKind::Literal(lit),
                 span: start.merge(self.previous_span()),
