@@ -1,0 +1,463 @@
+# MIR Interpreter for Bootstrap Compiler
+# Executes MIR programs produced by the lowering pass
+# Uses integer discriminants for value types (consistent with other bootstrap code)
+
+# ============================================================================
+# Import MIR types (we'll inline the definitions for now)
+# ============================================================================
+
+# Program structure
+s Program
+    functions: [Function]
+    function_names: [Str]
+    entry: Int
+
+s Function
+    name: Str
+    params: [Param]
+    return_ty: Str
+    locals: [LocalDecl]
+    blocks: [BasicBlock]
+    entry_block: Int
+
+s Param
+    local: Int
+    ty: Str
+
+s LocalDecl
+    ty: Str
+    name: Str
+
+s BasicBlock
+    id: Int
+    stmts: [Statement]
+    terminator: Terminator
+
+s Statement
+    kind: Int
+    local: Int
+    rvalue: Rvalue
+
+f STMT_ASSIGN() -> Int = 1
+f STMT_NOP() -> Int = 2
+
+s Rvalue
+    kind: Int
+    operand: Operand
+    operand2: Operand
+    binop: Int
+    unop: Int
+    name: Str
+    idx: Int
+
+f RV_USE() -> Int = 1
+f RV_BINOP() -> Int = 2
+f RV_UNOP() -> Int = 3
+f RV_TUPLE() -> Int = 4
+f RV_ARRAY() -> Int = 5
+f RV_STRUCT() -> Int = 6
+f RV_FIELD() -> Int = 7
+f RV_TUPLE_FIELD() -> Int = 8
+f RV_INDEX() -> Int = 9
+f RV_CALL() -> Int = 10
+
+s Operand
+    kind: Int
+    int_val: Int
+    str_val: Str
+    bool_val: Bool
+    local: Int
+
+f OP_CONST_UNIT() -> Int = 1
+f OP_CONST_BOOL() -> Int = 2
+f OP_CONST_INT() -> Int = 3
+f OP_CONST_STR() -> Int = 4
+f OP_LOCAL() -> Int = 5
+f OP_COPY() -> Int = 6
+f OP_MOVE() -> Int = 7
+
+f BIN_ADD() -> Int = 1
+f BIN_SUB() -> Int = 2
+f BIN_MUL() -> Int = 3
+f BIN_DIV() -> Int = 4
+f BIN_REM() -> Int = 5
+f BIN_EQ() -> Int = 6
+f BIN_NE() -> Int = 7
+f BIN_LT() -> Int = 8
+f BIN_LE() -> Int = 9
+f BIN_GT() -> Int = 10
+f BIN_GE() -> Int = 11
+f BIN_AND() -> Int = 12
+f BIN_OR() -> Int = 13
+
+f UN_NEG() -> Int = 1
+f UN_NOT() -> Int = 2
+
+s Terminator
+    kind: Int
+    operand: Operand
+    block1: Int
+    block2: Int
+    func_name: Str
+    args: [Operand]
+    dest: Int
+    targets: [SwitchTarget]
+
+f TERM_RETURN() -> Int = 1
+f TERM_RETURN_VOID() -> Int = 2
+f TERM_GOTO() -> Int = 3
+f TERM_IF() -> Int = 4
+f TERM_SWITCH() -> Int = 5
+f TERM_CALL() -> Int = 6
+f TERM_UNREACHABLE() -> Int = 7
+
+s SwitchTarget
+    value: Int
+    block: Int
+
+# ============================================================================
+# Runtime Values
+# ============================================================================
+
+# A runtime value (using discriminant)
+s Value
+    kind: Int
+    int_val: Int
+    str_val: Str
+    bool_val: Bool
+
+f VAL_UNIT() -> Int = 1
+f VAL_BOOL() -> Int = 2
+f VAL_INT() -> Int = 3
+f VAL_STR() -> Int = 4
+
+# Value constructors
+f value_unit() -> Value
+    Value { kind: VAL_UNIT(), int_val: 0, str_val: "", bool_val: false }
+
+f value_int(n: Int) -> Value
+    Value { kind: VAL_INT(), int_val: n, str_val: "", bool_val: false }
+
+f value_bool(b: Bool) -> Value
+    Value { kind: VAL_BOOL(), int_val: 0, str_val: "", bool_val: b }
+
+f value_str(s: Str) -> Value
+    Value { kind: VAL_STR(), int_val: 0, str_val: s, bool_val: false }
+
+# ============================================================================
+# Interpreter State
+# ============================================================================
+
+# Interpreter frame (activation record)
+s Frame
+    func: Function
+    locals: [Value]
+    current_block: Int
+
+# Create a new frame
+f frame_new(func: Function, args: [Value]) -> Frame
+    locals := init_locals(func, args)
+    Frame { func: func, locals: locals, current_block: func.entry_block }
+
+# Initialize locals with arguments
+f init_locals(func: Function, args: [Value]) -> [Value]
+    n := vec_len_locals(func.locals)
+    init_locals_rec(n, args, 0, [])
+
+f init_locals_rec(n: Int, args: [Value], idx: Int, acc: [Value]) -> [Value]
+    if idx >= n
+        acc
+    else
+        val := get_arg_or_unit(args, idx)
+        new_acc := vec_push_values(acc, val)
+        init_locals_rec(n, args, idx + 1, new_acc)
+
+f get_arg_or_unit(args: [Value], idx: Int) -> Value
+    if idx < vec_len_values(args)
+        vec_get_values(args, idx)
+    else
+        value_unit()
+
+# ============================================================================
+# Type-specific Vec functions
+# ============================================================================
+
+f vec_len_locals(v: [LocalDecl]) -> Int = 0
+f vec_len_values(v: [Value]) -> Int = 0
+f vec_len_stmts(v: [Statement]) -> Int = 0
+f vec_len_operands(v: [Operand]) -> Int = 0
+f vec_len_functions(v: [Function]) -> Int = 0
+f vec_len_blocks(v: [BasicBlock]) -> Int = 0
+
+f vec_get_values(v: [Value], idx: Int) -> Value = value_unit()
+f vec_get_blocks(v: [BasicBlock], idx: Int) -> BasicBlock
+    BasicBlock { id: 0, stmts: [], terminator: terminator_default() }
+f vec_get_stmts(v: [Statement], idx: Int) -> Statement
+    Statement { kind: STMT_NOP(), local: 0, rvalue: rvalue_default() }
+f vec_get_operands(v: [Operand], idx: Int) -> Operand
+    Operand { kind: OP_CONST_UNIT(), int_val: 0, str_val: "", bool_val: false, local: 0 }
+f vec_get_functions(v: [Function], idx: Int) -> Function
+    Function { name: "", params: [], return_ty: "", locals: [], blocks: [], entry_block: 0 }
+
+f vec_push_values(v: [Value], elem: Value) -> [Value] = v
+f vec_set_values(v: [Value], idx: Int, elem: Value) -> [Value] = v
+
+# Default constructors
+f terminator_default() -> Terminator
+    Terminator {
+        kind: TERM_UNREACHABLE(),
+        operand: operand_unit(),
+        block1: 0,
+        block2: 0,
+        func_name: "",
+        args: [],
+        dest: 0,
+        targets: []
+    }
+
+f rvalue_default() -> Rvalue
+    Rvalue {
+        kind: RV_USE(),
+        operand: operand_unit(),
+        operand2: operand_unit(),
+        binop: 0,
+        unop: 0,
+        name: "",
+        idx: 0
+    }
+
+f operand_unit() -> Operand
+    Operand { kind: OP_CONST_UNIT(), int_val: 0, str_val: "", bool_val: false, local: 0 }
+
+# ============================================================================
+# Interpreter Core
+# ============================================================================
+
+# Interpret a program
+f interpret(prog: Program) -> Value
+    if prog.entry < 0
+        print("No main function")
+        value_unit()
+    else
+        main_func := vec_get_functions(prog.functions, prog.entry)
+        interpret_function(prog, main_func, [])
+
+# Interpret a function call
+f interpret_function(prog: Program, func: Function, args: [Value]) -> Value
+    frame := frame_new(func, args)
+    interpret_loop(prog, frame)
+
+# Main interpretation loop
+f interpret_loop(prog: Program, frame: Frame) -> Value
+    block := vec_get_blocks(frame.func.blocks, frame.current_block)
+    frame2 := execute_stmts(prog, frame, block.stmts, 0)
+    execute_terminator(prog, frame2, block.terminator)
+
+# Execute statements in a block
+f execute_stmts(prog: Program, frame: Frame, stmts: [Statement], idx: Int) -> Frame
+    if idx >= vec_len_stmts(stmts)
+        frame
+    else
+        stmt := vec_get_stmts(stmts, idx)
+        frame2 := execute_stmt(prog, frame, stmt)
+        execute_stmts(prog, frame2, stmts, idx + 1)
+
+# Execute a single statement
+f execute_stmt(prog: Program, frame: Frame, stmt: Statement) -> Frame
+    if stmt.kind == STMT_NOP()
+        frame
+    else
+        val := eval_rvalue(prog, frame, stmt.rvalue)
+        new_locals := vec_set_values(frame.locals, stmt.local, val)
+        Frame { func: frame.func, locals: new_locals, current_block: frame.current_block }
+
+# Execute a terminator
+f execute_terminator(prog: Program, frame: Frame, term: Terminator) -> Value
+    if term.kind == TERM_RETURN()
+        eval_operand(frame, term.operand)
+    else if term.kind == TERM_RETURN_VOID()
+        value_unit()
+    else if term.kind == TERM_GOTO()
+        new_frame := Frame { func: frame.func, locals: frame.locals, current_block: term.block1 }
+        interpret_loop(prog, new_frame)
+    else if term.kind == TERM_IF()
+        cond := eval_operand(frame, term.operand)
+        next_block := select_if_block(cond.bool_val, term.block1, term.block2)
+        new_frame := Frame { func: frame.func, locals: frame.locals, current_block: next_block }
+        interpret_loop(prog, new_frame)
+    else if term.kind == TERM_CALL()
+        result := execute_call(prog, frame, term)
+        new_locals := vec_set_values(frame.locals, term.dest, result)
+        new_frame := Frame { func: frame.func, locals: new_locals, current_block: term.block1 }
+        interpret_loop(prog, new_frame)
+    else
+        print("Unreachable terminator")
+        value_unit()
+
+f select_if_block(cond: Bool, then_block: Int, else_block: Int) -> Int
+    if cond
+        then_block
+    else
+        else_block
+
+# Execute a function call
+f execute_call(prog: Program, frame: Frame, term: Terminator) -> Value
+    args := eval_args(frame, term.args, 0, [])
+    if term.func_name == "print"
+        execute_print(args)
+    else
+        func := find_function(prog, term.func_name)
+        interpret_function(prog, func, args)
+
+f execute_print(args: [Value]) -> Value
+    do_print(args)
+    value_unit()
+
+f do_print(args: [Value]) -> Int
+    if vec_len_values(args) > 0
+        arg := vec_get_values(args, 0)
+        print_value(arg)
+    else
+        print("")
+        0
+
+f print_value(val: Value) -> Int
+    print_value_impl(val)
+    0
+
+f print_value_impl(val: Value) -> Int
+    if val.kind == VAL_INT()
+        print(val.int_val)
+        0
+    else if val.kind == VAL_STR()
+        print(val.str_val)
+        0
+    else if val.kind == VAL_BOOL()
+        print_bool_impl(val.bool_val)
+    else
+        print("()")
+        0
+
+f print_bool(b: Bool) -> Int
+    print_bool_impl(b)
+
+f print_bool_impl(b: Bool) -> Int
+    if b
+        print("true")
+        0
+    else
+        print("false")
+        0
+
+# Find a function by name
+f find_function(prog: Program, name: Str) -> Function
+    find_function_rec(prog.functions, prog.function_names, name, 0)
+
+f find_function_rec(funcs: [Function], names: [Str], target: Str, idx: Int) -> Function
+    if idx >= vec_len_functions(funcs)
+        vec_get_functions(funcs, 0)  # Should not happen
+    else
+        func := vec_get_functions(funcs, idx)
+        if func.name == target
+            func
+        else
+            find_function_rec(funcs, names, target, idx + 1)
+
+# Evaluate function arguments
+f eval_args(frame: Frame, ops: [Operand], idx: Int, acc: [Value]) -> [Value]
+    if idx >= vec_len_operands(ops)
+        acc
+    else
+        op := vec_get_operands(ops, idx)
+        val := eval_operand(frame, op)
+        new_acc := vec_push_values(acc, val)
+        eval_args(frame, ops, idx + 1, new_acc)
+
+# ============================================================================
+# Evaluate Rvalues
+# ============================================================================
+
+f eval_rvalue(prog: Program, frame: Frame, rv: Rvalue) -> Value
+    if rv.kind == RV_USE()
+        eval_operand(frame, rv.operand)
+    else if rv.kind == RV_BINOP()
+        eval_binop(frame, rv)
+    else if rv.kind == RV_UNOP()
+        eval_unop(frame, rv)
+    else
+        value_unit()
+
+f eval_binop(frame: Frame, rv: Rvalue) -> Value
+    left := eval_operand(frame, rv.operand)
+    right := eval_operand(frame, rv.operand2)
+    apply_binop(rv.binop, left, right)
+
+f apply_binop(op: Int, left: Value, right: Value) -> Value
+    if op == BIN_ADD()
+        value_int(left.int_val + right.int_val)
+    else if op == BIN_SUB()
+        value_int(left.int_val - right.int_val)
+    else if op == BIN_MUL()
+        value_int(left.int_val * right.int_val)
+    else if op == BIN_DIV()
+        value_int(left.int_val / right.int_val)
+    else if op == BIN_REM()
+        value_int(left.int_val % right.int_val)
+    else if op == BIN_EQ()
+        value_bool(left.int_val == right.int_val)
+    else if op == BIN_NE()
+        value_bool(left.int_val != right.int_val)
+    else if op == BIN_LT()
+        value_bool(left.int_val < right.int_val)
+    else if op == BIN_LE()
+        value_bool(left.int_val <= right.int_val)
+    else if op == BIN_GT()
+        value_bool(left.int_val > right.int_val)
+    else if op == BIN_GE()
+        value_bool(left.int_val >= right.int_val)
+    else if op == BIN_AND()
+        value_bool(left.bool_val && right.bool_val)
+    else if op == BIN_OR()
+        value_bool(left.bool_val || right.bool_val)
+    else
+        value_unit()
+
+f eval_unop(frame: Frame, rv: Rvalue) -> Value
+    val := eval_operand(frame, rv.operand)
+    apply_unop(rv.unop, val)
+
+f apply_unop(op: Int, val: Value) -> Value
+    if op == UN_NEG()
+        value_int(0 - val.int_val)
+    else
+        value_bool(!val.bool_val)
+
+# ============================================================================
+# Evaluate Operands
+# ============================================================================
+
+f eval_operand(frame: Frame, op: Operand) -> Value
+    if op.kind == OP_CONST_UNIT()
+        value_unit()
+    else if op.kind == OP_CONST_BOOL()
+        value_bool(op.bool_val)
+    else if op.kind == OP_CONST_INT()
+        value_int(op.int_val)
+    else if op.kind == OP_CONST_STR()
+        value_str(op.str_val)
+    else if op.kind == OP_LOCAL()
+        vec_get_values(frame.locals, op.local)
+    else if op.kind == OP_COPY()
+        vec_get_values(frame.locals, op.local)
+    else if op.kind == OP_MOVE()
+        vec_get_values(frame.locals, op.local)
+    else
+        value_unit()
+
+# ============================================================================
+# Test
+# ============================================================================
+
+f main() -> Int
+    print("Interpreter module loaded")
+    42

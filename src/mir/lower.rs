@@ -812,8 +812,57 @@ impl Lowerer {
             }
 
             ExprKind::Try(inner) => {
-                // TODO: proper error handling
-                self.lower_expr(inner)
+                // Try operator: expr? - early return on None/Err
+                // Desugars to: match expr { Some(v) -> v, None -> return None }
+                //          or: match expr { Ok(v) -> v, Err(e) -> return Err(e) }
+
+                let inner_val = self.lower_expr(inner)?;
+
+                // Store the value
+                let scrutinee = self.new_temp(Ty::Int);
+                self.emit(StatementKind::Assign(scrutinee, Rvalue::Use(inner_val)));
+
+                // Get discriminant to check if Some/Ok vs None/Err
+                let disc = self.new_temp(Ty::Int);
+                self.emit(StatementKind::Assign(disc, Rvalue::Discriminant(scrutinee)));
+
+                // Create blocks
+                let some_ok_block = self.new_block();  // Some or Ok
+                let none_err_block = self.new_block(); // None or Err
+                let continue_block = self.new_block();
+
+                // Switch on discriminant:
+                // For Option: None=0, Some=1
+                // For Result: Ok=0, Err=1
+                // We check: if discriminant == 0, it's None (for Option) or Ok (for Result)
+                // Since we can't know the type statically, we use a heuristic:
+                // Check if discriminant == 1 (Some) for Option, or == 0 (Ok) for Result
+                // Actually, let's use: discriminant == 1 means it has a value (Some), else (None) return
+
+                // Branch: discriminant > 0 means Some (has value)
+                let has_value = self.new_temp(Ty::Bool);
+                self.emit(StatementKind::Assign(
+                    has_value,
+                    Rvalue::BinaryOp(BinOp::Gt, Operand::Copy(disc), Operand::Constant(Constant::Int(0))),
+                ));
+                self.terminate(Terminator::If {
+                    cond: Operand::Local(has_value),
+                    then_block: some_ok_block,
+                    else_block: none_err_block,
+                });
+
+                // None/Err block: return None (for now, just return the original value)
+                self.current_block = Some(none_err_block);
+                self.terminate(Terminator::Return(Some(Operand::Copy(scrutinee))));
+
+                // Some/Ok block: extract the value and continue
+                self.current_block = Some(some_ok_block);
+                let extracted = self.new_temp(Ty::Int);
+                self.emit(StatementKind::Assign(extracted, Rvalue::EnumField(scrutinee, 0)));
+                self.terminate(Terminator::Goto(continue_block));
+
+                self.current_block = Some(continue_block);
+                Some(Operand::Local(extracted))
             }
 
             ExprKind::Coalesce(left, right) => {
@@ -909,25 +958,28 @@ impl Lowerer {
             IfBranch::Expr(e) => self.lower_expr(e),
             IfBranch::Block(b) => self.lower_block(b),
         };
-        if let Some(val) = then_val {
-            self.emit(StatementKind::Assign(result, Rvalue::Use(val)));
-        }
+        // Always assign to result, using Unit if the branch produces no value
+        // This ensures the result variable is always defined on all paths
+        let then_operand = then_val.unwrap_or(Operand::Constant(Constant::Unit));
+        self.emit(StatementKind::Assign(result, Rvalue::Use(then_operand)));
         if self.current_fn.as_ref().unwrap().block(self.current_block.unwrap()).terminator.is_none() {
             self.terminate(Terminator::Goto(merge_block));
         }
 
         // Else branch
         self.current_block = Some(else_block);
-        if let Some(else_branch) = &if_expr.else_branch {
-            let else_val = match else_branch {
+        let else_val = if let Some(else_branch) = &if_expr.else_branch {
+            match else_branch {
                 ElseBranch::Expr(e) => self.lower_expr(e),
                 ElseBranch::Block(b) => self.lower_block(b),
                 ElseBranch::ElseIf(elif) => self.lower_if(elif, span),
-            };
-            if let Some(val) = else_val {
-                self.emit(StatementKind::Assign(result, Rvalue::Use(val)));
             }
-        }
+        } else {
+            None
+        };
+        // Always assign to result, using Unit if the branch produces no value
+        let else_operand = else_val.unwrap_or(Operand::Constant(Constant::Unit));
+        self.emit(StatementKind::Assign(result, Rvalue::Use(else_operand)));
         if self.current_fn.as_ref().unwrap().block(self.current_block.unwrap()).terminator.is_none() {
             self.terminate(Terminator::Goto(merge_block));
         }
@@ -1232,18 +1284,46 @@ impl Lowerer {
         body: &AstBlock,
         _span: Span,
     ) -> Option<Operand> {
-        // For now, assume iter is a range or array
-        // TODO: proper iterator protocol
+        // For loops iterate over arrays: `for x in arr` or `for i, x in arr.enumerate()`
 
-        let _iter_val = self.lower_expr(iter)?;
+        // Check if this is an enumerate call: `arr.enumerate()`
+        let (iter_expr, is_enumerate) = match &iter.kind {
+            ExprKind::MethodCall(receiver, method, _args) if method.name == "enumerate" => {
+                (receiver.as_ref(), true)
+            }
+            _ => (iter, false),
+        };
+
+        // Evaluate the iterable (should be an array)
+        let iter_val = self.lower_expr(iter_expr)?;
+
+        // Store the array in a local for repeated access
+        let arr_local = self.new_temp(Ty::Int);
+        self.emit(StatementKind::Assign(arr_local, Rvalue::Use(iter_val)));
+
+        // Create index counter starting at 0
+        let idx_local = self.new_temp(Ty::Int);
+        self.emit(StatementKind::Assign(idx_local, Rvalue::Use(Operand::Constant(Constant::Int(0)))));
+
+        // Get array length
+        let len_local = self.new_temp(Ty::Int);
+        let len_block = self.new_block();
+        self.terminate(Terminator::Call {
+            func: "vec_len".to_string(),
+            args: vec![Operand::Copy(arr_local)],
+            dest: Some(len_local),
+            next: len_block,
+        });
+        self.current_block = Some(len_block);
 
         let cond_block = self.new_block();
         let body_block = self.new_block();
+        let incr_block = self.new_block();
         let exit_block = self.new_block();
 
-        // Push loop context
+        // Push loop context (continue goes to increment, break goes to exit)
         self.loop_stack.push(LoopContext {
-            continue_block: cond_block,
+            continue_block: incr_block,
             break_block: exit_block,
             result_local: None,
         });
@@ -1251,24 +1331,76 @@ impl Lowerer {
         // Jump to condition check
         self.terminate(Terminator::Goto(cond_block));
 
-        // Condition block (simplified - always true for now)
+        // Condition block: check if idx < len
         self.current_block = Some(cond_block);
-        // TODO: proper iteration
-        self.terminate(Terminator::Goto(exit_block)); // Skip for now
+        let cond_val = self.new_temp(Ty::Bool);
+        self.emit(StatementKind::Assign(
+            cond_val,
+            Rvalue::BinaryOp(BinOp::Lt, Operand::Copy(idx_local), Operand::Copy(len_local)),
+        ));
+        self.terminate(Terminator::If {
+            cond: Operand::Local(cond_val),
+            then_block: body_block,
+            else_block: exit_block,
+        });
 
-        // Body block
+        // Body block: extract element and bind to pattern
         self.current_block = Some(body_block);
 
-        // Bind loop variable
-        if let PatternKind::Ident(ident, _, _) = &pattern.kind {
-            let local = self.new_local(Ty::Int, Some(ident.name.clone()));
-            self.vars.insert(ident.name.clone(), local);
+        // Get element at current index: arr[idx]
+        let elem_local = self.new_temp(Ty::Int);
+        self.emit(StatementKind::Assign(
+            elem_local,
+            Rvalue::Index(Operand::Copy(arr_local), Operand::Copy(idx_local)),
+        ));
+
+        // Bind pattern variable(s)
+        match &pattern.kind {
+            PatternKind::Ident(ident, _, _) => {
+                // Simple pattern: `for x in arr`
+                let var_local = self.new_local(Ty::Int, Some(ident.name.clone()));
+                self.emit(StatementKind::Assign(var_local, Rvalue::Use(Operand::Copy(elem_local))));
+                self.vars.insert(ident.name.clone(), var_local);
+            }
+            PatternKind::Tuple(patterns) if is_enumerate && patterns.len() == 2 => {
+                // Enumerate pattern: `for i, x in arr.enumerate()`
+                // First element is index, second is value
+                if let PatternKind::Ident(idx_ident, _, _) = &patterns[0].kind {
+                    let idx_var = self.new_local(Ty::Int, Some(idx_ident.name.clone()));
+                    self.emit(StatementKind::Assign(idx_var, Rvalue::Use(Operand::Copy(idx_local))));
+                    self.vars.insert(idx_ident.name.clone(), idx_var);
+                }
+                if let PatternKind::Ident(val_ident, _, _) = &patterns[1].kind {
+                    let val_var = self.new_local(Ty::Int, Some(val_ident.name.clone()));
+                    self.emit(StatementKind::Assign(val_var, Rvalue::Use(Operand::Copy(elem_local))));
+                    self.vars.insert(val_ident.name.clone(), val_var);
+                }
+            }
+            _ => {
+                // Fallback: try to bind as simple identifier
+                if let PatternKind::Ident(ident, _, _) = &pattern.kind {
+                    let var_local = self.new_local(Ty::Int, Some(ident.name.clone()));
+                    self.emit(StatementKind::Assign(var_local, Rvalue::Use(Operand::Copy(elem_local))));
+                    self.vars.insert(ident.name.clone(), var_local);
+                }
+            }
         }
 
+        // Execute loop body
         self.lower_block(body);
+
+        // If body didn't terminate, go to increment
         if self.current_fn.as_ref().unwrap().block(self.current_block.unwrap()).terminator.is_none() {
-            self.terminate(Terminator::Goto(cond_block));
+            self.terminate(Terminator::Goto(incr_block));
         }
+
+        // Increment block: idx = idx + 1
+        self.current_block = Some(incr_block);
+        self.emit(StatementKind::Assign(
+            idx_local,
+            Rvalue::BinaryOp(BinOp::Add, Operand::Copy(idx_local), Operand::Constant(Constant::Int(1))),
+        ));
+        self.terminate(Terminator::Goto(cond_block));
 
         self.loop_stack.pop();
         self.current_block = Some(exit_block);

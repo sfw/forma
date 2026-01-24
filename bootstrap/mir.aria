@@ -1,0 +1,400 @@
+# MIR (Mid-level Intermediate Representation) Types for Bootstrap Compiler
+# Control-flow graph representation with basic blocks and terminators
+# Uses integer discriminants for variant types (like TokenKind approach)
+
+# ============================================================================
+# Program Structure
+# ============================================================================
+
+# A MIR program - collection of functions
+s Program
+    functions: [Function]
+    function_names: [Str]
+    entry: Int
+
+# A function in MIR
+s Function
+    name: Str
+    params: [Param]
+    return_ty: Str
+    locals: [LocalDecl]
+    blocks: [BasicBlock]
+    entry_block: Int
+
+# A function parameter
+s Param
+    local: Int
+    ty: Str
+
+# Declaration of a local variable
+s LocalDecl
+    ty: Str
+    name: Str
+
+# ============================================================================
+# Basic Blocks
+# ============================================================================
+
+# A basic block - sequence of statements ending with a terminator
+s BasicBlock
+    id: Int
+    stmts: [Statement]
+    terminator: Terminator
+
+# ============================================================================
+# Statements
+# ============================================================================
+
+# A statement (using discriminant)
+s Statement
+    kind: Int
+    local: Int
+    rvalue: Rvalue
+
+# Statement kinds
+f STMT_ASSIGN() -> Int = 1
+f STMT_NOP() -> Int = 2
+
+# ============================================================================
+# Rvalues - things that produce values
+# ============================================================================
+
+s Rvalue
+    kind: Int
+    # Fields for different rvalue kinds
+    operand: Operand
+    operand2: Operand
+    binop: Int
+    unop: Int
+    name: Str
+    idx: Int
+
+# Rvalue kinds
+f RV_USE() -> Int = 1
+f RV_BINOP() -> Int = 2
+f RV_UNOP() -> Int = 3
+f RV_TUPLE() -> Int = 4
+f RV_ARRAY() -> Int = 5
+f RV_STRUCT() -> Int = 6
+f RV_FIELD() -> Int = 7
+f RV_TUPLE_FIELD() -> Int = 8
+f RV_INDEX() -> Int = 9
+f RV_CALL() -> Int = 10
+
+# ============================================================================
+# Operands - inputs to operations
+# ============================================================================
+
+s Operand
+    kind: Int
+    int_val: Int
+    str_val: Str
+    bool_val: Bool
+    local: Int
+
+# Operand kinds
+f OP_CONST_UNIT() -> Int = 1
+f OP_CONST_BOOL() -> Int = 2
+f OP_CONST_INT() -> Int = 3
+f OP_CONST_STR() -> Int = 4
+f OP_LOCAL() -> Int = 5
+f OP_COPY() -> Int = 6
+f OP_MOVE() -> Int = 7
+
+# ============================================================================
+# Binary and Unary Operators
+# ============================================================================
+
+# Binary operators
+f BIN_ADD() -> Int = 1
+f BIN_SUB() -> Int = 2
+f BIN_MUL() -> Int = 3
+f BIN_DIV() -> Int = 4
+f BIN_REM() -> Int = 5
+f BIN_EQ() -> Int = 6
+f BIN_NE() -> Int = 7
+f BIN_LT() -> Int = 8
+f BIN_LE() -> Int = 9
+f BIN_GT() -> Int = 10
+f BIN_GE() -> Int = 11
+f BIN_AND() -> Int = 12
+f BIN_OR() -> Int = 13
+
+# Unary operators
+f UN_NEG() -> Int = 1
+f UN_NOT() -> Int = 2
+
+# ============================================================================
+# Terminators - end of basic block
+# ============================================================================
+
+s Terminator
+    kind: Int
+    operand: Operand
+    block1: Int
+    block2: Int
+    func_name: Str
+    args: [Operand]
+    dest: Int
+    targets: [SwitchTarget]
+
+# Terminator kinds
+f TERM_RETURN() -> Int = 1
+f TERM_RETURN_VOID() -> Int = 2
+f TERM_GOTO() -> Int = 3
+f TERM_IF() -> Int = 4
+f TERM_SWITCH() -> Int = 5
+f TERM_CALL() -> Int = 6
+f TERM_UNREACHABLE() -> Int = 7
+
+# A switch target: value -> block
+s SwitchTarget
+    value: Int
+    block: Int
+
+# ============================================================================
+# Constructor Functions
+# ============================================================================
+
+# Default operand (unit)
+f operand_unit() -> Operand
+    Operand {
+        kind: OP_CONST_UNIT(),
+        int_val: 0,
+        str_val: "",
+        bool_val: false,
+        local: 0
+    }
+
+# Create int constant operand
+f operand_int(n: Int) -> Operand
+    Operand {
+        kind: OP_CONST_INT(),
+        int_val: n,
+        str_val: "",
+        bool_val: false,
+        local: 0
+    }
+
+# Create bool constant operand
+f operand_bool(b: Bool) -> Operand
+    Operand {
+        kind: OP_CONST_BOOL(),
+        int_val: 0,
+        str_val: "",
+        bool_val: b,
+        local: 0
+    }
+
+# Create string constant operand
+f operand_str(s: Str) -> Operand
+    Operand {
+        kind: OP_CONST_STR(),
+        int_val: 0,
+        str_val: s,
+        bool_val: false,
+        local: 0
+    }
+
+# Create local reference operand
+f operand_local(l: Int) -> Operand
+    Operand {
+        kind: OP_LOCAL(),
+        int_val: 0,
+        str_val: "",
+        bool_val: false,
+        local: l
+    }
+
+# Create copy operand
+f operand_copy(l: Int) -> Operand
+    Operand {
+        kind: OP_COPY(),
+        int_val: 0,
+        str_val: "",
+        bool_val: false,
+        local: l
+    }
+
+# Default rvalue
+f rvalue_default() -> Rvalue
+    Rvalue {
+        kind: RV_USE(),
+        operand: operand_unit(),
+        operand2: operand_unit(),
+        binop: 0,
+        unop: 0,
+        name: "",
+        idx: 0
+    }
+
+# Create use rvalue
+f rvalue_use(op: Operand) -> Rvalue
+    Rvalue {
+        kind: RV_USE(),
+        operand: op,
+        operand2: operand_unit(),
+        binop: 0,
+        unop: 0,
+        name: "",
+        idx: 0
+    }
+
+# Create binary op rvalue
+f rvalue_binop(binop: Int, left: Operand, right: Operand) -> Rvalue
+    Rvalue {
+        kind: RV_BINOP(),
+        operand: left,
+        operand2: right,
+        binop: binop,
+        unop: 0,
+        name: "",
+        idx: 0
+    }
+
+# Create unary op rvalue
+f rvalue_unop(unop: Int, op: Operand) -> Rvalue
+    Rvalue {
+        kind: RV_UNOP(),
+        operand: op,
+        operand2: operand_unit(),
+        binop: 0,
+        unop: unop,
+        name: "",
+        idx: 0
+    }
+
+# Default terminator
+f terminator_default() -> Terminator
+    Terminator {
+        kind: TERM_UNREACHABLE(),
+        operand: operand_unit(),
+        block1: 0,
+        block2: 0,
+        func_name: "",
+        args: [],
+        dest: 0,
+        targets: []
+    }
+
+# Create return terminator
+f terminator_return(op: Operand) -> Terminator
+    Terminator {
+        kind: TERM_RETURN(),
+        operand: op,
+        block1: 0,
+        block2: 0,
+        func_name: "",
+        args: [],
+        dest: 0,
+        targets: []
+    }
+
+# Create return void terminator
+f terminator_return_void() -> Terminator
+    Terminator {
+        kind: TERM_RETURN_VOID(),
+        operand: operand_unit(),
+        block1: 0,
+        block2: 0,
+        func_name: "",
+        args: [],
+        dest: 0,
+        targets: []
+    }
+
+# Create goto terminator
+f terminator_goto(block: Int) -> Terminator
+    Terminator {
+        kind: TERM_GOTO(),
+        operand: operand_unit(),
+        block1: block,
+        block2: 0,
+        func_name: "",
+        args: [],
+        dest: 0,
+        targets: []
+    }
+
+# Create if terminator
+f terminator_if(cond: Operand, then_block: Int, else_block: Int) -> Terminator
+    Terminator {
+        kind: TERM_IF(),
+        operand: cond,
+        block1: then_block,
+        block2: else_block,
+        func_name: "",
+        args: [],
+        dest: 0,
+        targets: []
+    }
+
+# Create call terminator
+f terminator_call(func: Str, args: [Operand], dest: Int, next: Int) -> Terminator
+    Terminator {
+        kind: TERM_CALL(),
+        operand: operand_unit(),
+        block1: next,
+        block2: 0,
+        func_name: func,
+        args: args,
+        dest: dest,
+        targets: []
+    }
+
+# Create empty program
+f program_new() -> Program
+    Program {
+        functions: [],
+        function_names: [],
+        entry: 0 - 1
+    }
+
+# Create a new function
+f function_new(name: Str, return_ty: Str) -> Function
+    Function {
+        name: name,
+        params: [],
+        return_ty: return_ty,
+        locals: [],
+        blocks: [],
+        entry_block: 0
+    }
+
+# Create assignment statement
+f stmt_assign(local_id: Int, rv: Rvalue) -> Statement
+    Statement {
+        kind: STMT_ASSIGN(),
+        local: local_id,
+        rvalue: rv
+    }
+
+# Create nop statement
+f stmt_nop() -> Statement
+    Statement {
+        kind: STMT_NOP(),
+        local: 0,
+        rvalue: rvalue_default()
+    }
+
+# Create empty basic block
+f basicblock_new(id: Int) -> BasicBlock
+    BasicBlock {
+        id: id,
+        stmts: [],
+        terminator: terminator_default()
+    }
+
+# ============================================================================
+# Test
+# ============================================================================
+
+f main() -> Int
+    prog := program_new()
+    func := function_new("test", "Int")
+    op := operand_int(42)
+    rv := rvalue_use(op)
+    stmt := stmt_assign(0, rv)
+    term := terminator_return(op)
+    print("MIR types defined")
+    42

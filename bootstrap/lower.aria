@@ -1,0 +1,889 @@
+# MIR Lowering - AST to MIR transformation
+# Converts high-level AST to control-flow graph MIR
+
+# ============================================================================
+# MIR Types (from mir.aria)
+# ============================================================================
+
+s Program
+    functions: [Function]
+    function_names: [Str]
+    entry: Int
+
+s Function
+    name: Str
+    params: [Param]
+    return_ty: Str
+    locals: [LocalDecl]
+    blocks: [BasicBlock]
+    entry_block: Int
+
+s Param
+    local: Int
+    ty: Str
+
+s LocalDecl
+    ty: Str
+    name: Str
+
+s BasicBlock
+    id: Int
+    stmts: [Statement]
+    terminator: Terminator
+
+s Statement
+    kind: Int
+    local: Int
+    rvalue: Rvalue
+
+f STMT_ASSIGN() -> Int = 1
+f STMT_NOP() -> Int = 2
+
+s Rvalue
+    kind: Int
+    operand: Operand
+    operand2: Operand
+    binop: Int
+    unop: Int
+    name: Str
+    idx: Int
+
+f RV_USE() -> Int = 1
+f RV_BINOP() -> Int = 2
+f RV_UNOP() -> Int = 3
+
+s Operand
+    kind: Int
+    int_val: Int
+    str_val: Str
+    bool_val: Bool
+    local: Int
+
+f OP_CONST_UNIT() -> Int = 1
+f OP_CONST_BOOL() -> Int = 2
+f OP_CONST_INT() -> Int = 3
+f OP_CONST_STR() -> Int = 4
+f OP_LOCAL() -> Int = 5
+f OP_COPY() -> Int = 6
+
+f BIN_ADD() -> Int = 1
+f BIN_SUB() -> Int = 2
+f BIN_MUL() -> Int = 3
+f BIN_DIV() -> Int = 4
+f BIN_REM() -> Int = 5
+f BIN_EQ() -> Int = 6
+f BIN_NE() -> Int = 7
+f BIN_LT() -> Int = 8
+f BIN_LE() -> Int = 9
+f BIN_GT() -> Int = 10
+f BIN_GE() -> Int = 11
+f BIN_AND() -> Int = 12
+f BIN_OR() -> Int = 13
+
+f UN_NEG() -> Int = 1
+f UN_NOT() -> Int = 2
+
+s Terminator
+    kind: Int
+    operand: Operand
+    block1: Int
+    block2: Int
+    func_name: Str
+    args: [Operand]
+    dest: Int
+    targets: [SwitchTarget]
+
+f TERM_RETURN() -> Int = 1
+f TERM_RETURN_VOID() -> Int = 2
+f TERM_GOTO() -> Int = 3
+f TERM_IF() -> Int = 4
+f TERM_SWITCH() -> Int = 5
+f TERM_CALL() -> Int = 6
+f TERM_UNREACHABLE() -> Int = 7
+
+s SwitchTarget
+    value: Int
+    block: Int
+
+# MIR constructors
+f operand_unit() -> Operand
+    Operand { kind: OP_CONST_UNIT(), int_val: 0, str_val: "", bool_val: false, local: 0 }
+
+f operand_int(n: Int) -> Operand
+    Operand { kind: OP_CONST_INT(), int_val: n, str_val: "", bool_val: false, local: 0 }
+
+f operand_bool(b: Bool) -> Operand
+    Operand { kind: OP_CONST_BOOL(), int_val: 0, str_val: "", bool_val: b, local: 0 }
+
+f operand_str(s: Str) -> Operand
+    Operand { kind: OP_CONST_STR(), int_val: 0, str_val: s, bool_val: false, local: 0 }
+
+f operand_local(l: Int) -> Operand
+    Operand { kind: OP_LOCAL(), int_val: 0, str_val: "", bool_val: false, local: l }
+
+f rvalue_default() -> Rvalue
+    Rvalue { kind: RV_USE(), operand: operand_unit(), operand2: operand_unit(), binop: 0, unop: 0, name: "", idx: 0 }
+
+f rvalue_use(op: Operand) -> Rvalue
+    Rvalue { kind: RV_USE(), operand: op, operand2: operand_unit(), binop: 0, unop: 0, name: "", idx: 0 }
+
+f rvalue_binop(binop: Int, left: Operand, right: Operand) -> Rvalue
+    Rvalue { kind: RV_BINOP(), operand: left, operand2: right, binop: binop, unop: 0, name: "", idx: 0 }
+
+f rvalue_unop(unop: Int, op: Operand) -> Rvalue
+    Rvalue { kind: RV_UNOP(), operand: op, operand2: operand_unit(), binop: 0, unop: unop, name: "", idx: 0 }
+
+f terminator_default() -> Terminator
+    Terminator { kind: TERM_UNREACHABLE(), operand: operand_unit(), block1: 0, block2: 0, func_name: "", args: [], dest: 0, targets: [] }
+
+f terminator_return(op: Operand) -> Terminator
+    Terminator { kind: TERM_RETURN(), operand: op, block1: 0, block2: 0, func_name: "", args: [], dest: 0, targets: [] }
+
+f terminator_return_void() -> Terminator
+    Terminator { kind: TERM_RETURN_VOID(), operand: operand_unit(), block1: 0, block2: 0, func_name: "", args: [], dest: 0, targets: [] }
+
+f terminator_goto(block: Int) -> Terminator
+    Terminator { kind: TERM_GOTO(), operand: operand_unit(), block1: block, block2: 0, func_name: "", args: [], dest: 0, targets: [] }
+
+f terminator_if(cond: Operand, then_block: Int, else_block: Int) -> Terminator
+    Terminator { kind: TERM_IF(), operand: cond, block1: then_block, block2: else_block, func_name: "", args: [], dest: 0, targets: [] }
+
+f terminator_call(func: Str, args: [Operand], dest: Int, next: Int) -> Terminator
+    Terminator { kind: TERM_CALL(), operand: operand_unit(), block1: next, block2: 0, func_name: func, args: args, dest: dest, targets: [] }
+
+f program_new() -> Program
+    Program { functions: [], function_names: [], entry: 0 - 1 }
+
+f compute_entry(prog: Program, func_name: Str, idx: Int) -> Int
+    if func_name == "main"
+        idx
+    else
+        prog.entry
+
+f program_add_function(prog: Program, func: Function) -> (Program, Int)
+    idx := vec_len_funcs(prog.functions)
+    new_funcs := vec_push_funcs(prog.functions, func)
+    new_names := vec_push_strs(prog.function_names, func.name)
+    new_entry := compute_entry(prog, func.name, idx)
+    (Program { functions: new_funcs, function_names: new_names, entry: new_entry }, idx)
+
+f function_new(name: Str, return_ty: Str) -> Function
+    Function { name: name, params: [], return_ty: return_ty, locals: [], blocks: [], entry_block: 0 }
+
+f stmt_assign(local_id: Int, rv: Rvalue) -> Statement
+    Statement { kind: STMT_ASSIGN(), local: local_id, rvalue: rv }
+
+f basicblock_new(id: Int) -> BasicBlock
+    BasicBlock { id: id, stmts: [], terminator: terminator_default() }
+
+# ============================================================================
+# AST Types (from ast.aria)
+# ============================================================================
+
+s Span
+    start: Int
+    end: Int
+    line: Int
+    column: Int
+
+f EXPR_INT() -> Int = 1
+f EXPR_FLOAT() -> Int = 2
+f EXPR_BOOL() -> Int = 3
+f EXPR_CHAR() -> Int = 4
+f EXPR_STR() -> Int = 5
+f EXPR_IDENT() -> Int = 10
+f EXPR_BINARY() -> Int = 20
+f EXPR_UNARY() -> Int = 21
+f EXPR_CALL() -> Int = 30
+f EXPR_IF() -> Int = 50
+f EXPR_WHILE() -> Int = 52
+f EXPR_BLOCK() -> Int = 55
+f EXPR_RETURN() -> Int = 60
+
+s ExprNode
+    kind: Int
+    span: Span
+    int_val: Int
+    float_val: Float
+    bool_val: Bool
+    char_val: Char
+    str_val: Str
+    name: Str
+    left: Int
+    op: Int
+    right: Int
+    operand: Int
+    callee: Int
+    args: [Int]
+    object: Int
+    field: Str
+    elements: [Int]
+    condition: Int
+    then_branch: Int
+    else_branch: Int
+    scrutinee: Int
+    arms: [Int]
+    body_block: Int
+    stmts: [Int]
+    type_name: Str
+    field_inits: [(Str, Int)]
+
+f STMT_EXPR() -> Int = 1
+f STMT_LET() -> Int = 2
+
+s StmtNode
+    kind: Int
+    span: Span
+    expr: Int
+    pattern: Int
+    init: Int
+    mutable: Bool
+    item: Int
+
+f ITEM_FN() -> Int = 1
+
+s ItemNode
+    kind: Int
+    span: Span
+    name: Str
+    params: [(Str, Int)]
+    return_type: Int
+    body: Int
+    fields: [(Str, Int)]
+    variants: [(Str, [Int])]
+
+s TypeNode
+    kind: Int
+    span: Span
+    name: Str
+    elements: [Int]
+    inner: Int
+    error: Int
+
+s PatternNode
+    kind: Int
+    span: Span
+    name: Str
+    mutable: Bool
+    literal: Int
+    elements: [Int]
+    fields: [(Str, Int)]
+
+s MatchArm
+    pattern: Int
+    guard: Int
+    body: Int
+    span: Span
+
+f OP_ADD() -> Int = 1
+f OP_SUB() -> Int = 2
+f OP_MUL() -> Int = 3
+f OP_DIV() -> Int = 4
+f OP_REM() -> Int = 5
+f OP_EQ() -> Int = 10
+f OP_NE() -> Int = 11
+f OP_LT() -> Int = 12
+f OP_LE() -> Int = 13
+f OP_GT() -> Int = 14
+f OP_GE() -> Int = 15
+f OP_AND() -> Int = 20
+f OP_OR() -> Int = 21
+
+f UNOP_NEG() -> Int = 1
+f UNOP_NOT() -> Int = 2
+
+s AST
+    exprs: [ExprNode]
+    stmts: [StmtNode]
+    items: [ItemNode]
+    types: [TypeNode]
+    patterns: [PatternNode]
+    match_arms: [MatchArm]
+    top_items: [Int]
+
+# ============================================================================
+# Lowering Context
+# ============================================================================
+
+# Context for lowering a function
+s LowerCtx
+    # Current function being built
+    func: Function
+    # Variable name to local index mapping (parallel arrays)
+    var_names: [Str]
+    var_locals: [Int]
+    # Current block we are emitting to
+    current_block: Int
+    # Counter for generating fresh locals
+    next_local: Int
+
+# Initialize context for lowering a function
+f ctx_new(name: Str, return_ty: Str) -> LowerCtx
+    func := function_new(name, return_ty)
+    LowerCtx {
+        func: func,
+        var_names: [],
+        var_locals: [],
+        current_block: 0,
+        next_local: 0
+    }
+
+# Add a local variable to context
+f ctx_add_local(ctx: LowerCtx, name: Str, ty: Str) -> (LowerCtx, Int)
+    local_id := ctx.next_local
+    new_local := LocalDecl { ty: ty, name: name }
+    new_locals := vec_push_locals(ctx.func.locals, new_local)
+    new_func := Function {
+        name: ctx.func.name,
+        params: ctx.func.params,
+        return_ty: ctx.func.return_ty,
+        locals: new_locals,
+        blocks: ctx.func.blocks,
+        entry_block: ctx.func.entry_block
+    }
+    new_var_names := vec_push_strs(ctx.var_names, name)
+    new_var_locals := vec_push_ints(ctx.var_locals, local_id)
+    (LowerCtx {
+        func: new_func,
+        var_names: new_var_names,
+        var_locals: new_var_locals,
+        current_block: ctx.current_block,
+        next_local: ctx.next_local + 1
+    }, local_id)
+
+# Add a temporary (unnamed) local
+f ctx_add_temp(ctx: LowerCtx, ty: Str) -> (LowerCtx, Int)
+    ctx_add_local(ctx, "", ty)
+
+# Look up variable by name
+f ctx_lookup_var(ctx: LowerCtx, name: Str) -> Int
+    ctx_lookup_var_rec(ctx.var_names, ctx.var_locals, name, 0)
+
+f ctx_lookup_var_rec(names: [Str], locals: [Int], target: Str, idx: Int) -> Int
+    if idx >= vec_len_strs(names)
+        0 - 1  # Not found
+    else if vec_get_strs(names, idx) == target
+        vec_get_ints(locals, idx)
+    else
+        ctx_lookup_var_rec(names, locals, target, idx + 1)
+
+# Add a basic block
+f ctx_add_block(ctx: LowerCtx) -> (LowerCtx, Int)
+    block_id := vec_len_blocks(ctx.func.blocks)
+    new_block := basicblock_new(block_id)
+    new_blocks := vec_push_blocks(ctx.func.blocks, new_block)
+    new_func := Function {
+        name: ctx.func.name,
+        params: ctx.func.params,
+        return_ty: ctx.func.return_ty,
+        locals: ctx.func.locals,
+        blocks: new_blocks,
+        entry_block: ctx.func.entry_block
+    }
+    (LowerCtx {
+        func: new_func,
+        var_names: ctx.var_names,
+        var_locals: ctx.var_locals,
+        current_block: ctx.current_block,
+        next_local: ctx.next_local
+    }, block_id)
+
+# Set current block
+f ctx_set_block(ctx: LowerCtx, block_id: Int) -> LowerCtx
+    LowerCtx {
+        func: ctx.func,
+        var_names: ctx.var_names,
+        var_locals: ctx.var_locals,
+        current_block: block_id,
+        next_local: ctx.next_local
+    }
+
+# Emit a statement to current block
+f ctx_emit_stmt(ctx: LowerCtx, stmt: Statement) -> LowerCtx
+    block := vec_get_blocks(ctx.func.blocks, ctx.current_block)
+    new_stmts := vec_push_stmts(block.stmts, stmt)
+    new_block := BasicBlock {
+        id: block.id,
+        stmts: new_stmts,
+        terminator: block.terminator
+    }
+    new_blocks := vec_set_blocks(ctx.func.blocks, ctx.current_block, new_block)
+    new_func := Function {
+        name: ctx.func.name,
+        params: ctx.func.params,
+        return_ty: ctx.func.return_ty,
+        locals: ctx.func.locals,
+        blocks: new_blocks,
+        entry_block: ctx.func.entry_block
+    }
+    LowerCtx {
+        func: new_func,
+        var_names: ctx.var_names,
+        var_locals: ctx.var_locals,
+        current_block: ctx.current_block,
+        next_local: ctx.next_local
+    }
+
+# Set terminator for current block
+f ctx_set_terminator(ctx: LowerCtx, term: Terminator) -> LowerCtx
+    block := vec_get_blocks(ctx.func.blocks, ctx.current_block)
+    new_block := BasicBlock {
+        id: block.id,
+        stmts: block.stmts,
+        terminator: term
+    }
+    new_blocks := vec_set_blocks(ctx.func.blocks, ctx.current_block, new_block)
+    new_func := Function {
+        name: ctx.func.name,
+        params: ctx.func.params,
+        return_ty: ctx.func.return_ty,
+        locals: ctx.func.locals,
+        blocks: new_blocks,
+        entry_block: ctx.func.entry_block
+    }
+    LowerCtx {
+        func: new_func,
+        var_names: ctx.var_names,
+        var_locals: ctx.var_locals,
+        current_block: ctx.current_block,
+        next_local: ctx.next_local
+    }
+
+# ============================================================================
+# Lower Program
+# ============================================================================
+
+f lower_program(ast: AST) -> Program
+    lower_items(ast, program_new(), 0)
+
+f lower_items(ast: AST, prog: Program, idx: Int) -> Program
+    if idx >= vec_len_top(ast.top_items)
+        prog
+    else
+        item_idx := vec_get_top(ast.top_items, idx)
+        item := vec_get_items(ast.items, item_idx)
+        new_prog := if item.kind == ITEM_FN()
+            lower_function(ast, prog, item)
+        else
+            prog
+        lower_items(ast, new_prog, idx + 1)
+
+# ============================================================================
+# Lower Function
+# ============================================================================
+
+f lower_function(ast: AST, prog: Program, item: ItemNode) -> Program
+    # Create context
+    ctx := ctx_new(item.name, "Int")
+
+    # Add parameters
+    ctx2 := lower_params(ctx, item.params, 0)
+
+    # Add entry block
+    (ctx3, entry_block) := ctx_add_block(ctx2)
+    ctx4 := ctx_set_block(ctx3, entry_block)
+
+    # Lower body if present
+    ctx5 := if item.body >= 0
+        (ctx_after, result_local) := lower_expr(ast, ctx4, item.body)
+        # Return the result
+        ctx_set_terminator(ctx_after, terminator_return(operand_local(result_local)))
+    else
+        ctx_set_terminator(ctx4, terminator_return_void())
+
+    # Add function to program
+    result2 := program_add_function(prog, ctx5.func)
+    fst(result2)
+
+f lower_params(ctx: LowerCtx, params: [(Str, Int)], idx: Int) -> LowerCtx
+    if idx >= vec_len_params(params)
+        ctx
+    else
+        (param_name, _) := vec_get_params(params, idx)
+        (ctx2, _) := ctx_add_local(ctx, param_name, "Int")
+        lower_params(ctx2, params, idx + 1)
+
+# ============================================================================
+# Lower Expression - returns (new_ctx, result_local)
+# ============================================================================
+
+f lower_expr(ast: AST, ctx: LowerCtx, expr_idx: Int) -> (LowerCtx, Int)
+    expr := vec_get_exprs(ast.exprs, expr_idx)
+
+    if expr.kind == EXPR_INT()
+        lower_int_literal(ctx, expr.int_val)
+    else if expr.kind == EXPR_BOOL()
+        lower_bool_literal(ctx, expr.bool_val)
+    else if expr.kind == EXPR_STR()
+        lower_str_literal(ctx, expr.str_val)
+    else if expr.kind == EXPR_IDENT()
+        lower_ident(ctx, expr.name)
+    else if expr.kind == EXPR_BINARY()
+        lower_binary(ast, ctx, expr)
+    else if expr.kind == EXPR_UNARY()
+        lower_unary(ast, ctx, expr)
+    else if expr.kind == EXPR_CALL()
+        lower_call(ast, ctx, expr)
+    else if expr.kind == EXPR_IF()
+        lower_if(ast, ctx, expr)
+    else if expr.kind == EXPR_WHILE()
+        lower_while(ast, ctx, expr)
+    else if expr.kind == EXPR_BLOCK()
+        lower_block(ast, ctx, expr)
+    else if expr.kind == EXPR_RETURN()
+        lower_return(ast, ctx, expr)
+    else
+        # Default: return 0
+        lower_int_literal(ctx, 0)
+
+# ============================================================================
+# Lower Literals
+# ============================================================================
+
+f lower_int_literal(ctx: LowerCtx, val: Int) -> (LowerCtx, Int)
+    (ctx2, local) := ctx_add_temp(ctx, "Int")
+    stmt := stmt_assign(local, rvalue_use(operand_int(val)))
+    ctx3 := ctx_emit_stmt(ctx2, stmt)
+    (ctx3, local)
+
+f lower_bool_literal(ctx: LowerCtx, val: Bool) -> (LowerCtx, Int)
+    (ctx2, local) := ctx_add_temp(ctx, "Bool")
+    stmt := stmt_assign(local, rvalue_use(operand_bool(val)))
+    ctx3 := ctx_emit_stmt(ctx2, stmt)
+    (ctx3, local)
+
+f lower_str_literal(ctx: LowerCtx, val: Str) -> (LowerCtx, Int)
+    (ctx2, local) := ctx_add_temp(ctx, "Str")
+    stmt := stmt_assign(local, rvalue_use(operand_str(val)))
+    ctx3 := ctx_emit_stmt(ctx2, stmt)
+    (ctx3, local)
+
+# ============================================================================
+# Lower Identifier
+# ============================================================================
+
+f lower_ident(ctx: LowerCtx, name: Str) -> (LowerCtx, Int)
+    local := ctx_lookup_var(ctx, name)
+    if local >= 0
+        (ctx, local)
+    else
+        # Unknown variable, return 0
+        lower_int_literal(ctx, 0)
+
+# ============================================================================
+# Lower Binary Operations
+# ============================================================================
+
+f lower_binary(ast: AST, ctx: LowerCtx, expr: ExprNode) -> (LowerCtx, Int)
+    # Lower left operand
+    (ctx2, left_local) := lower_expr(ast, ctx, expr.left)
+
+    # Lower right operand
+    (ctx3, right_local) := lower_expr(ast, ctx2, expr.right)
+
+    # Map AST operator to MIR operator
+    mir_op := ast_op_to_mir_op(expr.op)
+
+    # Create result
+    (ctx4, result_local) := ctx_add_temp(ctx3, "Int")
+
+    # Emit binary op
+    rv := rvalue_binop(mir_op, operand_local(left_local), operand_local(right_local))
+    stmt := stmt_assign(result_local, rv)
+    ctx5 := ctx_emit_stmt(ctx4, stmt)
+    (ctx5, result_local)
+
+f ast_op_to_mir_op(op: Int) -> Int
+    if op == OP_ADD()
+        BIN_ADD()
+    else if op == OP_SUB()
+        BIN_SUB()
+    else if op == OP_MUL()
+        BIN_MUL()
+    else if op == OP_DIV()
+        BIN_DIV()
+    else if op == OP_REM()
+        BIN_REM()
+    else if op == OP_EQ()
+        BIN_EQ()
+    else if op == OP_NE()
+        BIN_NE()
+    else if op == OP_LT()
+        BIN_LT()
+    else if op == OP_LE()
+        BIN_LE()
+    else if op == OP_GT()
+        BIN_GT()
+    else if op == OP_GE()
+        BIN_GE()
+    else if op == OP_AND()
+        BIN_AND()
+    else if op == OP_OR()
+        BIN_OR()
+    else
+        BIN_ADD()  # Default
+
+# ============================================================================
+# Lower Unary Operations
+# ============================================================================
+
+f ast_unop_to_mir_op(op: Int) -> Int
+    if op == UNOP_NEG()
+        UN_NEG()
+    else
+        UN_NOT()
+
+f lower_unary(ast: AST, ctx: LowerCtx, expr: ExprNode) -> (LowerCtx, Int)
+    # Lower operand
+    (ctx2, op_local) := lower_expr(ast, ctx, expr.operand)
+
+    # Map unary op
+    mir_op := ast_unop_to_mir_op(expr.op)
+
+    # Create result
+    (ctx3, result_local) := ctx_add_temp(ctx2, "Int")
+
+    unop_rv := rvalue_unop(mir_op, operand_local(op_local))
+    stmt := stmt_assign(result_local, unop_rv)
+    ctx4 := ctx_emit_stmt(ctx3, stmt)
+    (ctx4, result_local)
+
+# ============================================================================
+# Lower Function Call
+# ============================================================================
+
+f lower_call(ast: AST, ctx: LowerCtx, expr: ExprNode) -> (LowerCtx, Int)
+    # Get function name
+    callee_expr := vec_get_exprs(ast.exprs, expr.callee)
+    func_name := callee_expr.name
+
+    # Lower arguments
+    (ctx2, arg_ops) := lower_call_args(ast, ctx, expr.args, 0, [])
+
+    # Create result local
+    (ctx3, result_local) := ctx_add_temp(ctx2, "Int")
+
+    # Create a continuation block
+    (ctx4, cont_block) := ctx_add_block(ctx3)
+
+    # Emit call terminator
+    call_term := terminator_call(func_name, arg_ops, result_local, cont_block)
+    ctx5 := ctx_set_terminator(ctx4, call_term)
+
+    # Continue in the continuation block
+    ctx6 := ctx_set_block(ctx5, cont_block)
+    (ctx6, result_local)
+
+f lower_call_args(ast: AST, ctx: LowerCtx, args: [Int], idx: Int, ops: [Operand]) -> (LowerCtx, [Operand])
+    if idx >= vec_len_ints(args)
+        (ctx, ops)
+    else
+        arg_idx := vec_get_ints(args, idx)
+        (ctx2, arg_local) := lower_expr(ast, ctx, arg_idx)
+        new_ops := vec_push_ops(ops, operand_local(arg_local))
+        lower_call_args(ast, ctx2, args, idx + 1, new_ops)
+
+# ============================================================================
+# Lower If Expression
+# ============================================================================
+
+f lower_if(ast: AST, ctx: LowerCtx, expr: ExprNode) -> (LowerCtx, Int)
+    # Create result local
+    (ctx2, result_local) := ctx_add_temp(ctx, "Int")
+
+    # Lower condition
+    (ctx3, cond_local) := lower_expr(ast, ctx2, expr.condition)
+
+    # Create blocks
+    (ctx4, then_block) := ctx_add_block(ctx3)
+    (ctx5, else_block) := ctx_add_block(ctx4)
+    (ctx6, merge_block) := ctx_add_block(ctx5)
+
+    # Emit branch
+    cond_op := operand_local(cond_local)
+    branch_term := terminator_if(cond_op, then_block, else_block)
+    ctx7 := ctx_set_terminator(ctx6, branch_term)
+
+    # Lower then branch
+    ctx8 := ctx_set_block(ctx7, then_block)
+    (ctx9, then_val) := lower_expr(ast, ctx8, expr.then_branch)
+    ctx10 := ctx_emit_stmt(ctx9, stmt_assign(result_local, rvalue_use(operand_local(then_val))))
+    ctx11 := ctx_set_terminator(ctx10, terminator_goto(merge_block))
+
+    # Lower else branch
+    ctx12 := ctx_set_block(ctx11, else_block)
+    ctx13 := if expr.else_branch >= 0
+        (ctx_else, else_val) := lower_expr(ast, ctx12, expr.else_branch)
+        ctx_emit_stmt(ctx_else, stmt_assign(result_local, rvalue_use(operand_local(else_val))))
+    else
+        # No else: assign unit/0
+        ctx_emit_stmt(ctx12, stmt_assign(result_local, rvalue_use(operand_int(0))))
+    ctx14 := ctx_set_terminator(ctx13, terminator_goto(merge_block))
+
+    # Continue in merge block
+    ctx15 := ctx_set_block(ctx14, merge_block)
+    (ctx15, result_local)
+
+# ============================================================================
+# Lower While Loop
+# ============================================================================
+
+f lower_while(ast: AST, ctx: LowerCtx, expr: ExprNode) -> (LowerCtx, Int)
+    # Create loop blocks
+    (ctx2, cond_block) := ctx_add_block(ctx)
+    (ctx3, body_block) := ctx_add_block(ctx2)
+    (ctx4, exit_block) := ctx_add_block(ctx3)
+
+    # Jump to condition
+    ctx5 := ctx_set_terminator(ctx4, terminator_goto(cond_block))
+
+    # Lower condition
+    ctx6 := ctx_set_block(ctx5, cond_block)
+    (ctx7, cond_local) := lower_expr(ast, ctx6, expr.condition)
+    loop_cond_op := operand_local(cond_local)
+    loop_term := terminator_if(loop_cond_op, body_block, exit_block)
+    ctx8 := ctx_set_terminator(ctx7, loop_term)
+
+    # Lower body
+    ctx9 := ctx_set_block(ctx8, body_block)
+    (ctx10, _) := lower_expr(ast, ctx9, expr.body_block)
+    ctx11 := ctx_set_terminator(ctx10, terminator_goto(cond_block))
+
+    # Continue in exit block
+    ctx12 := ctx_set_block(ctx11, exit_block)
+
+    # While returns unit (0)
+    (ctx13, result_local) := ctx_add_temp(ctx12, "Int")
+    ctx14 := ctx_emit_stmt(ctx13, stmt_assign(result_local, rvalue_use(operand_int(0))))
+    (ctx14, result_local)
+
+# ============================================================================
+# Lower Block
+# ============================================================================
+
+f lower_block(ast: AST, ctx: LowerCtx, expr: ExprNode) -> (LowerCtx, Int)
+    lower_stmts(ast, ctx, expr.stmts, 0)
+
+f lower_stmts(ast: AST, ctx: LowerCtx, stmts: [Int], idx: Int) -> (LowerCtx, Int)
+    if idx >= vec_len_ints(stmts)
+        # Empty block returns 0
+        lower_int_literal(ctx, 0)
+    else
+        stmt_idx := vec_get_ints(stmts, idx)
+        stmt := vec_get_stmts(ast.stmts, stmt_idx)
+
+        if idx == vec_len_ints(stmts) - 1
+            # Last statement - its value is the block result
+            lower_stmt(ast, ctx, stmt)
+        else
+            # Not last - lower and discard result
+            (ctx2, _) := lower_stmt(ast, ctx, stmt)
+            lower_stmts(ast, ctx2, stmts, idx + 1)
+
+f lower_stmt(ast: AST, ctx: LowerCtx, stmt: StmtNode) -> (LowerCtx, Int)
+    if stmt.kind == STMT_LET()
+        lower_let(ast, ctx, stmt)
+    else if stmt.kind == STMT_EXPR()
+        lower_expr(ast, ctx, stmt.expr)
+    else
+        lower_int_literal(ctx, 0)
+
+f lower_let(ast: AST, ctx: LowerCtx, stmt: StmtNode) -> (LowerCtx, Int)
+    # Get pattern (assuming simple identifier pattern)
+    pat := vec_get_pats(ast.patterns, stmt.pattern)
+    var_name := pat.name
+
+    # Lower init expression
+    (ctx2, init_local) := lower_expr(ast, ctx, stmt.init)
+
+    # Create variable
+    (ctx3, var_local) := ctx_add_local(ctx2, var_name, "Int")
+
+    # Assign init value to variable
+    ctx4 := ctx_emit_stmt(ctx3, stmt_assign(var_local, rvalue_use(operand_local(init_local))))
+    (ctx4, var_local)
+
+# ============================================================================
+# Lower Return
+# ============================================================================
+
+f lower_return(ast: AST, ctx: LowerCtx, expr: ExprNode) -> (LowerCtx, Int)
+    if expr.operand >= 0
+        # Return with value
+        (ctx2, val_local) := lower_expr(ast, ctx, expr.operand)
+        ctx3 := ctx_set_terminator(ctx2, terminator_return(operand_local(val_local)))
+        (ctx3, val_local)
+    else
+        # Return void
+        ctx2 := ctx_set_terminator(ctx, terminator_return_void())
+        lower_int_literal(ctx2, 0)
+
+# ============================================================================
+# Placeholder vec functions (specific types)
+# ============================================================================
+
+# For [LocalDecl]
+f vec_len_locals(v: [LocalDecl]) -> Int = 0
+f vec_push_locals(v: [LocalDecl], elem: LocalDecl) -> [LocalDecl] = v
+f vec_get_locals(v: [LocalDecl], idx: Int) -> LocalDecl = v[0]
+
+# For [Str]
+f vec_len_strs(v: [Str]) -> Int = 0
+f vec_push_strs(v: [Str], elem: Str) -> [Str] = v
+f vec_get_strs(v: [Str], idx: Int) -> Str = v[0]
+
+# For [Int]
+f vec_len_ints(v: [Int]) -> Int = 0
+f vec_push_ints(v: [Int], elem: Int) -> [Int] = v
+f vec_get_ints(v: [Int], idx: Int) -> Int = v[0]
+
+# For [BasicBlock]
+f vec_len_blocks(v: [BasicBlock]) -> Int = 0
+f vec_push_blocks(v: [BasicBlock], elem: BasicBlock) -> [BasicBlock] = v
+f vec_get_blocks(v: [BasicBlock], idx: Int) -> BasicBlock = v[0]
+f vec_set_blocks(v: [BasicBlock], idx: Int, val: BasicBlock) -> [BasicBlock] = v
+
+# For [Statement]
+f vec_push_stmts(v: [Statement], elem: Statement) -> [Statement] = v
+
+# For [Function]
+f vec_len_funcs(v: [Function]) -> Int = 0
+f vec_push_funcs(v: [Function], elem: Function) -> [Function] = v
+
+# For [Operand]
+f vec_len_ops(v: [Operand]) -> Int = 0
+f vec_push_ops(v: [Operand], elem: Operand) -> [Operand] = v
+
+# For [Param]
+f vec_push_params(v: [Param], elem: Param) -> [Param] = v
+
+# For AST access
+f vec_len_top(v: [Int]) -> Int = 0
+f vec_get_top(v: [Int], idx: Int) -> Int = 0
+f vec_len_params(v: [(Str, Int)]) -> Int = 0
+f vec_get_params(v: [(Str, Int)], idx: Int) -> (Str, Int) = ("", 0)
+
+# For Expr/Stmt/Item access
+f vec_get_exprs(v: [ExprNode], idx: Int) -> ExprNode = v[0]
+f vec_get_stmts(v: [StmtNode], idx: Int) -> StmtNode = v[0]
+f vec_get_items(v: [ItemNode], idx: Int) -> ItemNode = v[0]
+f vec_get_pats(v: [PatternNode], idx: Int) -> PatternNode = v[0]
+
+# Aliases for compatibility
+f vec_len[T](v: [T]) -> Int = 0
+f vec_get[T](v: [T], idx: Int) -> T = v[0]
+f vec_push[T](v: [T], elem: T) -> [T] = v
+f vec_set[T](v: [T], idx: Int, val: T) -> [T] = v
+
+# Tuple element extractors
+f fst(p: (Program, Int)) -> Program
+    (x, _) := p
+    x
+
+# ============================================================================
+# Test
+# ============================================================================
+
+f main() -> Int
+    print("Lower module loaded")
+    42

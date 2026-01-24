@@ -1787,9 +1787,18 @@ impl<'a> Parser<'a> {
             let name = self.parse_ident()?;
 
             // Check for struct literal: Name { ... } or Name(...)
-            if self.check(TokenKind::LBrace) && !self.at_newline_boundary() {
+            // Look ahead past newlines to allow multi-line struct literals like:
+            //   token = Token {
+            //       field: value
+            //   }
+            // But preserve newlines if not a struct literal (they may be significant)
+            let saved_pos = self.pos;
+            self.skip_newlines();
+            if self.check(TokenKind::LBrace) {
                 return self.parse_struct_expr(name, start);
             }
+            // Restore position - newlines are significant for indentation
+            self.pos = saved_pos;
 
             // Check for range: name..end or name..=end
             if self.check(TokenKind::DotDot) || self.check(TokenKind::DotDotEq) {
@@ -1826,9 +1835,39 @@ impl<'a> Parser<'a> {
 
         let (then_branch, else_branch) = if self.match_token(TokenKind::Then) {
             // Inline if: if cond then a else b
-            let then_expr = self.parse_expr()?;
+            // But allow multi-line then branch with indented block
+            let then_expr = if self.check(TokenKind::Newline) {
+                self.advance();
+                if self.check(TokenKind::Indent) {
+                    let block = self.parse_indent_block()?;
+                    Expr {
+                        kind: ExprKind::Block(block.clone()),
+                        span: block.span,
+                    }
+                } else {
+                    return Err(self.error("expected expression or indented block after 'then'"));
+                }
+            } else {
+                self.parse_expr()?
+            };
+            // Skip newlines before else - it can be on the next line
+            self.skip_newlines();
             self.expect(TokenKind::Else)?;
-            let else_expr = self.parse_expr()?;
+            // Also allow multi-line else branch
+            let else_expr = if self.check(TokenKind::Newline) {
+                self.advance();
+                if self.check(TokenKind::Indent) {
+                    let block = self.parse_indent_block()?;
+                    Expr {
+                        kind: ExprKind::Block(block.clone()),
+                        span: block.span,
+                    }
+                } else {
+                    return Err(self.error("expected expression or indented block after 'else'"));
+                }
+            } else {
+                self.parse_expr()?
+            };
             (
                 IfBranch::Expr(Box::new(then_expr)),
                 Some(ElseBranch::Expr(Box::new(else_expr))),
@@ -1933,7 +1972,23 @@ impl<'a> Parser<'a> {
         };
 
         self.expect(TokenKind::Arrow)?;
-        let body = self.parse_expr()?;
+
+        // Check if body is on a new line (multi-line arm body)
+        let body = if self.check(TokenKind::Newline) {
+            self.advance(); // consume newline
+            if self.check(TokenKind::Indent) {
+                // Parse indented block as the arm body
+                let block = self.parse_indent_block()?;
+                Expr {
+                    kind: ExprKind::Block(block.clone()),
+                    span: block.span,
+                }
+            } else {
+                return Err(self.error("expected indented block after -> on new line"));
+            }
+        } else {
+            self.parse_expr()?
+        };
 
         Ok(MatchArm {
             pattern,
@@ -2138,6 +2193,8 @@ impl<'a> Parser<'a> {
 
     fn parse_struct_expr(&mut self, name: Ident, start: Span) -> Result<Expr> {
         self.expect(TokenKind::LBrace)?;
+        // Skip newlines and indentation - they're not significant inside braces
+        self.skip_whitespace_tokens();
 
         let mut fields = Vec::new();
         let mut base = None;
@@ -2147,6 +2204,7 @@ impl<'a> Parser<'a> {
                 // Check for struct base: ..expr
                 if self.match_token(TokenKind::DotDot) {
                     base = Some(Box::new(self.parse_expr()?));
+                    self.skip_whitespace_tokens();
                     break;
                 }
 
@@ -2164,10 +2222,16 @@ impl<'a> Parser<'a> {
                     span: field_start.merge(self.previous_span()),
                 });
 
-                if !self.match_token(TokenKind::Comma) {
+                // Allow comma or newline as field separator
+                let had_comma = self.match_token(TokenKind::Comma);
+                self.skip_whitespace_tokens();
+
+                if self.check(TokenKind::RBrace) {
                     break;
                 }
-                if self.check(TokenKind::RBrace) {
+
+                // If no comma and we're not at RBrace, the newline acts as separator
+                if !had_comma && !self.check_ident() && !self.check(TokenKind::DotDot) {
                     break;
                 }
             }
@@ -2529,18 +2593,33 @@ impl<'a> Parser<'a> {
     fn parse_stmt(&mut self) -> Result<Stmt> {
         let start = self.current_span();
 
-        // Check for items
-        if self.check(TokenKind::At)
+        // Check for items. Single-letter keywords (f, s, e, t, i, m) can also be variable names,
+        // so we need to distinguish:
+        // - "s MyStruct" -> struct declaration (keyword followed by identifier = item name)
+        // - "s := 42" or "s = 42" -> variable binding
+        // - "s" alone -> variable reference
+        // Multi-word keywords (Type, Us, Md) and attributes (@, Pub) are unambiguous.
+        let is_unambiguous_item = self.check(TokenKind::At)
             || self.check(TokenKind::Pub)
-            || self.check(TokenKind::F)
+            || self.check(TokenKind::Type)
+            || self.check(TokenKind::Us)
+            || self.check(TokenKind::Md);
+
+        // Single-letter keywords need lookahead: item if followed by an identifier (the item name)
+        let is_single_letter_keyword = self.check(TokenKind::F)
             || self.check(TokenKind::S)
             || self.check(TokenKind::E)
             || self.check(TokenKind::T)
-            || self.check(TokenKind::I)
-            || self.check(TokenKind::Type)
-            || self.check(TokenKind::Us)
-            || self.check(TokenKind::Md)
-        {
+            || self.check(TokenKind::I);
+
+        // For single-letter keywords, check if next token is an identifier or type params
+        // f name(...) - function, f<T> - generic function
+        // s Name - struct
+        // But NOT: s := 42, s = 42, s (alone), s + 1
+        let is_item = is_unambiguous_item
+            || (is_single_letter_keyword && self.next_token_is_item_name());
+
+        if is_item {
             let item = self.parse_item()?;
             return Ok(Stmt {
                 kind: StmtKind::Item(item),
@@ -2812,8 +2891,35 @@ impl<'a> Parser<'a> {
             .is_some_and(|t| t.kind == kind)
     }
 
+    /// Check if the next token (after current) looks like an item name.
+    /// This is used to distinguish:
+    /// - `s MyStruct` (struct declaration) from `s := 42` (variable binding) or `s` (variable ref)
+    /// - `f foo(` (function) from `f := 42` or `f`
+    fn next_token_is_item_name(&self) -> bool {
+        match self.tokens.get(self.pos + 1).map(|t| &t.kind) {
+            // Next token is an identifier - looks like an item name
+            Some(TokenKind::Ident(_)) => true,
+            // Next token is < for generic params like f<T>
+            Some(TokenKind::Lt) => true,
+            // Next token is ( for tuple struct like s Point(x, y) - wait that's not right
+            // Actually `s Point(` would have Point as Ident first, so this is covered
+            _ => false,
+        }
+    }
+
     fn skip_newlines(&mut self) {
         while self.check(TokenKind::Newline) {
+            self.advance();
+        }
+    }
+
+    /// Skip newlines, indents, and dedents. Used inside brace-delimited constructs
+    /// where indentation is not significant.
+    fn skip_whitespace_tokens(&mut self) {
+        while self.check(TokenKind::Newline)
+            || self.check(TokenKind::Indent)
+            || self.check(TokenKind::Dedent)
+        {
             self.advance();
         }
     }

@@ -351,6 +351,18 @@ impl TypeEnv {
             TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Str)) },
         );
 
+        // str_to_int_radix: (Str, Int) -> Int?
+        env.bindings.insert(
+            "str_to_int_radix".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Int], Box::new(Ty::Option(Box::new(Ty::Int)))) },
+        );
+
+        // str_replace_all: (Str, Str, Str) -> Str
+        env.bindings.insert(
+            "str_replace_all".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str, Ty::Str], Box::new(Ty::Str)) },
+        );
+
         // str_concat: (Str, Str) -> Str
         env.bindings.insert(
             "str_concat".to_string(),
@@ -392,6 +404,12 @@ impl TypeEnv {
         env.bindings.insert(
             "int_to_char".to_string(),
             TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Option(Box::new(Ty::Char)))) },
+        );
+
+        // char_to_str: Char -> Str
+        env.bindings.insert(
+            "char_to_str".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Char], Box::new(Ty::Str)) },
         );
 
         // Map operations (using Str keys for simplicity)
@@ -508,6 +526,173 @@ impl TypeEnv {
         env.bindings.insert(
             "assert".to_string(),
             TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Bool], Box::new(Ty::Unit)) },
+        );
+
+        // unwrap[T]: Option[T] -> T
+        let unwrap_t = TypeVar::fresh();
+        env.bindings.insert(
+            "unwrap".to_string(),
+            TypeScheme {
+                vars: vec![unwrap_t],
+                ty: Ty::Fn(
+                    vec![Ty::Named(crate::types::TypeId::new("Option".to_string()), vec![Ty::Var(unwrap_t)])],
+                    Box::new(Ty::Var(unwrap_t))
+                )
+            },
+        );
+
+        // expect[T]: (Option[T], Str) -> T
+        let expect_t = TypeVar::fresh();
+        env.bindings.insert(
+            "expect".to_string(),
+            TypeScheme {
+                vars: vec![expect_t],
+                ty: Ty::Fn(
+                    vec![Ty::Named(crate::types::TypeId::new("Option".to_string()), vec![Ty::Var(expect_t)]), Ty::Str],
+                    Box::new(Ty::Var(expect_t))
+                )
+            },
+        );
+
+        // unwrap_or[T]: (Option[T], T) -> T
+        let unwrap_or_t = TypeVar::fresh();
+        env.bindings.insert(
+            "unwrap_or".to_string(),
+            TypeScheme {
+                vars: vec![unwrap_or_t],
+                ty: Ty::Fn(
+                    vec![Ty::Named(crate::types::TypeId::new("Option".to_string()), vec![Ty::Var(unwrap_or_t)]), Ty::Var(unwrap_or_t)],
+                    Box::new(Ty::Var(unwrap_or_t))
+                )
+            },
+        );
+
+        // is_some[T]: Option[T] -> Bool
+        let is_some_t = TypeVar::fresh();
+        env.bindings.insert(
+            "is_some".to_string(),
+            TypeScheme {
+                vars: vec![is_some_t],
+                ty: Ty::Fn(
+                    vec![Ty::Named(crate::types::TypeId::new("Option".to_string()), vec![Ty::Var(is_some_t)])],
+                    Box::new(Ty::Bool)
+                )
+            },
+        );
+
+        // is_none[T]: Option[T] -> Bool
+        let is_none_t = TypeVar::fresh();
+        env.bindings.insert(
+            "is_none".to_string(),
+            TypeScheme {
+                vars: vec![is_none_t],
+                ty: Ty::Fn(
+                    vec![Ty::Named(crate::types::TypeId::new("Option".to_string()), vec![Ty::Var(is_none_t)])],
+                    Box::new(Ty::Bool)
+                )
+            },
+        );
+
+        // is_ok[T, E]: Result[T, E] -> Bool
+        let is_ok_t = TypeVar::fresh();
+        let is_ok_e = TypeVar::fresh();
+        env.bindings.insert(
+            "is_ok".to_string(),
+            TypeScheme {
+                vars: vec![is_ok_t, is_ok_e],
+                ty: Ty::Fn(
+                    vec![Ty::Named(crate::types::TypeId::new("Result".to_string()), vec![Ty::Var(is_ok_t), Ty::Var(is_ok_e)])],
+                    Box::new(Ty::Bool)
+                )
+            },
+        );
+
+        // is_err[T, E]: Result[T, E] -> Bool
+        let is_err_t = TypeVar::fresh();
+        let is_err_e = TypeVar::fresh();
+        env.bindings.insert(
+            "is_err".to_string(),
+            TypeScheme {
+                vars: vec![is_err_t, is_err_e],
+                ty: Ty::Fn(
+                    vec![Ty::Named(crate::types::TypeId::new("Result".to_string()), vec![Ty::Var(is_err_t), Ty::Var(is_err_e)])],
+                    Box::new(Ty::Bool)
+                )
+            },
+        );
+
+        // ===== File I/O =====
+        // file_read: Str -> Result[Str, Str]
+        env.bindings.insert(
+            "file_read".to_string(),
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str],
+                    Box::new(Ty::Named(crate::types::TypeId::new("Result".to_string()), vec![Ty::Str, Ty::Str]))
+                )
+            },
+        );
+
+        // file_write: (Str, Str) -> Result[Unit, Str]
+        env.bindings.insert(
+            "file_write".to_string(),
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str, Ty::Str],
+                    Box::new(Ty::Named(crate::types::TypeId::new("Result".to_string()), vec![Ty::Unit, Ty::Str]))
+                )
+            },
+        );
+
+        // file_exists: Str -> Bool
+        env.bindings.insert(
+            "file_exists".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Bool)) },
+        );
+
+        // file_append: (Str, Str) -> Result[Unit, Str]
+        env.bindings.insert(
+            "file_append".to_string(),
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str, Ty::Str],
+                    Box::new(Ty::Named(crate::types::TypeId::new("Result".to_string()), vec![Ty::Unit, Ty::Str]))
+                )
+            },
+        );
+
+        // ===== CLI support =====
+        // args: () -> [Str]
+        env.bindings.insert(
+            "args".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![], Box::new(Ty::List(Box::new(Ty::Str)))) },
+        );
+
+        // env_get: Str -> Option[Str]
+        env.bindings.insert(
+            "env_get".to_string(),
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str],
+                    Box::new(Ty::Named(crate::types::TypeId::new("Option".to_string()), vec![Ty::Str]))
+                )
+            },
+        );
+
+        // exit: Int -> Never
+        env.bindings.insert(
+            "exit".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Never)) },
+        );
+
+        // eprintln: Str -> Unit
+        env.bindings.insert(
+            "eprintln".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Unit)) },
         );
 
         env
@@ -678,6 +863,15 @@ impl Unifier {
 
             // Option unification
             (Ty::Option(t1), Ty::Option(t2)) => self.unify(t1, t2, span),
+
+            // Unify Ty::Option with Ty::Named("Option", [...])
+            // This allows T? to unify with Option[T]
+            (Ty::Option(inner), Ty::Named(id, args))
+            | (Ty::Named(id, args), Ty::Option(inner))
+                if id.name == "Option" && args.len() == 1 =>
+            {
+                self.unify(inner, &args[0], span)
+            }
 
             // Result unification
             (Ty::Result(ok1, err1), Ty::Result(ok2, err2)) => {

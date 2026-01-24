@@ -761,6 +761,72 @@ impl Interpreter {
                 })?;
                 Ok(Some(Value::Str(n.to_string())))
             }
+            "str_to_int_radix" => {
+                // str_to_int_radix(s, radix) -> Option[Int]
+                let s = match &args[0] {
+                    Value::Str(s) => s.clone(),
+                    Value::Ref(inner) => {
+                        if let Value::Str(s) = inner.as_ref() {
+                            s.clone()
+                        } else {
+                            return Err(InterpError { message: "str_to_int_radix: expected string".to_string() });
+                        }
+                    }
+                    _ => return Err(InterpError { message: "str_to_int_radix: expected string".to_string() })
+                };
+                let radix = args[1].as_int().ok_or_else(|| InterpError {
+                    message: "str_to_int_radix: expected Int radix".to_string()
+                })? as u32;
+                match i64::from_str_radix(s.trim(), radix) {
+                    Ok(n) => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "Some".to_string(),
+                        fields: vec![Value::Int(n)],
+                    })),
+                    Err(_) => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "None".to_string(),
+                        fields: vec![],
+                    }))
+                }
+            }
+            "str_replace_all" => {
+                // str_replace_all(s, pattern, replacement) -> Str
+                let s = match &args[0] {
+                    Value::Str(s) => s.clone(),
+                    Value::Ref(inner) => {
+                        if let Value::Str(s) = inner.as_ref() {
+                            s.clone()
+                        } else {
+                            return Err(InterpError { message: "str_replace_all: expected string".to_string() });
+                        }
+                    }
+                    _ => return Err(InterpError { message: "str_replace_all: expected string".to_string() })
+                };
+                let pattern = match &args[1] {
+                    Value::Str(s) => s.clone(),
+                    Value::Ref(inner) => {
+                        if let Value::Str(s) = inner.as_ref() {
+                            s.clone()
+                        } else {
+                            return Err(InterpError { message: "str_replace_all: expected string pattern".to_string() });
+                        }
+                    }
+                    _ => return Err(InterpError { message: "str_replace_all: expected string pattern".to_string() })
+                };
+                let replacement = match &args[2] {
+                    Value::Str(s) => s.clone(),
+                    Value::Ref(inner) => {
+                        if let Value::Str(s) = inner.as_ref() {
+                            s.clone()
+                        } else {
+                            return Err(InterpError { message: "str_replace_all: expected string replacement".to_string() });
+                        }
+                    }
+                    _ => return Err(InterpError { message: "str_replace_all: expected string replacement".to_string() })
+                };
+                Ok(Some(Value::Str(s.replace(&pattern, &replacement))))
+            }
             "str_concat" => {
                 let s1 = match &args[0] {
                     Value::Str(s) => s.clone(),
@@ -841,6 +907,14 @@ impl Interpreter {
                     variant: "None".to_string(),
                     fields: vec![],
                 }))
+            }
+            "char_to_str" => {
+                // Convert a Char to a single-character Str
+                let c = match &args[0] {
+                    Value::Char(c) => *c,
+                    _ => return Err(InterpError { message: "char_to_str: expected Char".to_string() })
+                };
+                Ok(Some(Value::Str(c.to_string())))
             }
 
             // ===== HashMap operations =====
@@ -1203,6 +1277,236 @@ impl Interpreter {
                     };
                     return Err(InterpError { message: format!("assertion failed: {}", msg) });
                 }
+                Ok(Some(Value::Unit))
+            }
+
+            // ===== Option/Result unwrapping =====
+            "unwrap" => {
+                // unwrap(opt) - panic if None, return value if Some
+                match &args[0] {
+                    Value::Enum { variant, fields, .. } => {
+                        match variant.as_str() {
+                            "Some" | "Ok" => {
+                                Ok(Some(fields.get(0).cloned().unwrap_or(Value::Unit)))
+                            }
+                            "None" => {
+                                Err(InterpError { message: "unwrap called on None".to_string() })
+                            }
+                            "Err" => {
+                                let err_val = fields.get(0).map(|v| format!("{}", v)).unwrap_or_default();
+                                Err(InterpError { message: format!("unwrap called on Err: {}", err_val) })
+                            }
+                            _ => Err(InterpError { message: "unwrap: expected Option or Result".to_string() })
+                        }
+                    }
+                    _ => Err(InterpError { message: "unwrap: expected Option or Result".to_string() })
+                }
+            }
+            "expect" => {
+                // expect(opt, msg) - like unwrap but with custom error message
+                let msg = if args.len() > 1 {
+                    match &args[1] {
+                        Value::Str(s) => s.clone(),
+                        other => format!("{}", other),
+                    }
+                } else {
+                    "expect failed".to_string()
+                };
+
+                match &args[0] {
+                    Value::Enum { variant, fields, .. } => {
+                        match variant.as_str() {
+                            "Some" | "Ok" => {
+                                Ok(Some(fields.get(0).cloned().unwrap_or(Value::Unit)))
+                            }
+                            "None" | "Err" => {
+                                Err(InterpError { message: msg })
+                            }
+                            _ => Err(InterpError { message: "expect: expected Option or Result".to_string() })
+                        }
+                    }
+                    _ => Err(InterpError { message: "expect: expected Option or Result".to_string() })
+                }
+            }
+            "unwrap_or" => {
+                // unwrap_or(opt, default) - return default if None/Err
+                match &args[0] {
+                    Value::Enum { variant, fields, .. } => {
+                        match variant.as_str() {
+                            "Some" | "Ok" => {
+                                Ok(Some(fields.get(0).cloned().unwrap_or(Value::Unit)))
+                            }
+                            "None" | "Err" => {
+                                Ok(Some(args.get(1).cloned().unwrap_or(Value::Unit)))
+                            }
+                            _ => Err(InterpError { message: "unwrap_or: expected Option or Result".to_string() })
+                        }
+                    }
+                    _ => Err(InterpError { message: "unwrap_or: expected Option or Result".to_string() })
+                }
+            }
+            "is_some" => {
+                // is_some(opt) - returns true if Some, false if None
+                match &args[0] {
+                    Value::Enum { variant, .. } => {
+                        Ok(Some(Value::Bool(variant == "Some")))
+                    }
+                    _ => Err(InterpError { message: "is_some: expected Option".to_string() })
+                }
+            }
+            "is_none" => {
+                // is_none(opt) - returns true if None, false if Some
+                match &args[0] {
+                    Value::Enum { variant, .. } => {
+                        Ok(Some(Value::Bool(variant == "None")))
+                    }
+                    _ => Err(InterpError { message: "is_none: expected Option".to_string() })
+                }
+            }
+            "is_ok" => {
+                // is_ok(result) - returns true if Ok, false if Err
+                match &args[0] {
+                    Value::Enum { variant, .. } => {
+                        Ok(Some(Value::Bool(variant == "Ok")))
+                    }
+                    _ => Err(InterpError { message: "is_ok: expected Result".to_string() })
+                }
+            }
+            "is_err" => {
+                // is_err(result) - returns true if Err, false if Ok
+                match &args[0] {
+                    Value::Enum { variant, .. } => {
+                        Ok(Some(Value::Bool(variant == "Err")))
+                    }
+                    _ => Err(InterpError { message: "is_err: expected Result".to_string() })
+                }
+            }
+
+            // ===== File I/O =====
+            "file_read" => {
+                // file_read(path: Str) -> Result[Str, Str]
+                let path = match &args[0] {
+                    Value::Str(s) => s.clone(),
+                    _ => return Err(InterpError { message: "file_read: expected Str path".to_string() })
+                };
+                match std::fs::read_to_string(&path) {
+                    Ok(content) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Ok".to_string(),
+                        fields: vec![Value::Str(content)],
+                    })),
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    }))
+                }
+            }
+            "file_write" => {
+                // file_write(path: Str, content: Str) -> Result[(), Str]
+                let path = match &args[0] {
+                    Value::Str(s) => s.clone(),
+                    _ => return Err(InterpError { message: "file_write: expected Str path".to_string() })
+                };
+                let content = match &args[1] {
+                    Value::Str(s) => s.clone(),
+                    _ => return Err(InterpError { message: "file_write: expected Str content".to_string() })
+                };
+                match std::fs::write(&path, &content) {
+                    Ok(()) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Ok".to_string(),
+                        fields: vec![Value::Unit],
+                    })),
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    }))
+                }
+            }
+            "file_exists" => {
+                // file_exists(path: Str) -> Bool
+                let path = match &args[0] {
+                    Value::Str(s) => s.clone(),
+                    _ => return Err(InterpError { message: "file_exists: expected Str path".to_string() })
+                };
+                Ok(Some(Value::Bool(std::path::Path::new(&path).exists())))
+            }
+            "file_append" => {
+                // file_append(path: Str, content: Str) -> Result[(), Str]
+                use std::io::Write;
+                let path = match &args[0] {
+                    Value::Str(s) => s.clone(),
+                    _ => return Err(InterpError { message: "file_append: expected Str path".to_string() })
+                };
+                let content = match &args[1] {
+                    Value::Str(s) => s.clone(),
+                    _ => return Err(InterpError { message: "file_append: expected Str content".to_string() })
+                };
+                let result = std::fs::OpenOptions::new()
+                    .append(true)
+                    .create(true)
+                    .open(&path)
+                    .and_then(|mut f| f.write_all(content.as_bytes()));
+                match result {
+                    Ok(()) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Ok".to_string(),
+                        fields: vec![Value::Unit],
+                    })),
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    }))
+                }
+            }
+
+            // ===== CLI support =====
+            "args" => {
+                // args() -> [Str] - command line arguments
+                let args: Vec<Value> = std::env::args()
+                    .map(|s| Value::Str(s))
+                    .collect();
+                Ok(Some(Value::Array(args)))
+            }
+            "env_get" => {
+                // env_get(name: Str) -> Option[Str]
+                let name = match &args[0] {
+                    Value::Str(s) => s.clone(),
+                    _ => return Err(InterpError { message: "env_get: expected Str".to_string() })
+                };
+                match std::env::var(&name) {
+                    Ok(val) => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "Some".to_string(),
+                        fields: vec![Value::Str(val)],
+                    })),
+                    Err(_) => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "None".to_string(),
+                        fields: vec![],
+                    }))
+                }
+            }
+            "exit" => {
+                // exit(code: Int) -> !
+                let code = match &args[0] {
+                    Value::Int(n) => *n as i32,
+                    _ => return Err(InterpError { message: "exit: expected Int".to_string() })
+                };
+                std::process::exit(code);
+            }
+            "eprintln" => {
+                // eprintln(msg: Str) - print to stderr
+                for (i, val) in args.iter().enumerate() {
+                    if i > 0 {
+                        eprint!(" ");
+                    }
+                    eprint!("{}", val);
+                }
+                eprintln!();
                 Ok(Some(Value::Unit))
             }
 
