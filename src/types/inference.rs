@@ -41,6 +41,17 @@ impl std::fmt::Display for TypeError {
 
 impl std::error::Error for TypeError {}
 
+/// Function info for tracking default parameters.
+#[derive(Debug, Clone)]
+pub struct FunctionInfo {
+    /// Number of required parameters (those without defaults)
+    pub required_params: usize,
+    /// Total number of parameters
+    pub total_params: usize,
+    /// Types of all parameters (for filling in defaults)
+    pub param_types: Vec<Ty>,
+}
+
 /// Type environment mapping names to type schemes.
 #[derive(Debug, Clone, Default)]
 pub struct TypeEnv {
@@ -48,6 +59,8 @@ pub struct TypeEnv {
     bindings: HashMap<String, TypeScheme>,
     /// Type definitions (struct, enum names to their info)
     types: HashMap<String, TypeDef>,
+    /// Function info (for tracking default parameters)
+    fn_info: HashMap<String, FunctionInfo>,
 }
 
 /// Definition of a named type.
@@ -865,7 +878,18 @@ impl TypeEnv {
         Self {
             bindings: self.bindings.clone(),
             types: self.types.clone(),
+            fn_info: self.fn_info.clone(),
         }
+    }
+
+    /// Get function info (for checking default parameters).
+    pub fn get_fn_info(&self, name: &str) -> Option<&FunctionInfo> {
+        self.fn_info.get(name)
+    }
+
+    /// Insert function info.
+    pub fn insert_fn_info(&mut self, name: String, info: FunctionInfo) {
+        self.fn_info.insert(name, info);
     }
 
     /// Get all defined variable names in the environment.
@@ -1357,7 +1381,7 @@ impl InferenceEngine {
                 Ty::Unit
             };
 
-            let fn_type = Ty::Fn(param_types, Box::new(return_type));
+            let fn_type = Ty::Fn(param_types.clone(), Box::new(return_type));
 
             // For generic functions, create a TypeScheme with the type variables
             let scheme = if f.generics.is_some() {
@@ -1370,6 +1394,18 @@ impl InferenceEngine {
             };
 
             self.env.insert(f.name.name.clone(), scheme);
+
+            // Track function info for default parameter handling
+            let required_params = f.params.iter().filter(|p| p.default.is_none()).count();
+            let total_params = f.params.len();
+            self.env.insert_fn_info(
+                f.name.name.clone(),
+                FunctionInfo {
+                    required_params,
+                    total_params,
+                    param_types,
+                },
+            );
 
             // Restore old type params
             self.type_params = old_type_params;
@@ -1564,12 +1600,64 @@ impl InferenceEngine {
             }
 
             ExprKind::Call(callee, args) => {
-                let callee_ty = self.infer_expr(callee)?;
+                // Infer argument types first
                 let arg_types: Vec<Ty> = args
                     .iter()
                     .map(|a| self.infer_expr(&a.value))
                     .collect::<Result<Vec<_>, _>>()?;
 
+                // Check if callee is an identifier with function info (for default params)
+                if let ExprKind::Ident(name) = &callee.kind {
+                    if let Some(fn_info) = self.env.get_fn_info(&name.name) {
+                        let provided = arg_types.len();
+                        let required = fn_info.required_params;
+                        let total = fn_info.total_params;
+
+                        // Check if we have enough arguments
+                        if provided < required {
+                            return Err(TypeError::new(
+                                format!(
+                                    "function '{}' requires at least {} argument(s), found {}",
+                                    name.name, required, provided
+                                ),
+                                expr.span,
+                            ));
+                        }
+
+                        if provided > total {
+                            return Err(TypeError::new(
+                                format!(
+                                    "function '{}' takes at most {} argument(s), found {}",
+                                    name.name, total, provided
+                                ),
+                                expr.span,
+                            ));
+                        }
+
+                        // Build a function type with all params (using defaults for missing ones)
+                        let full_arg_types: Vec<Ty> = fn_info.param_types.iter()
+                            .enumerate()
+                            .map(|(i, param_ty)| {
+                                if i < provided {
+                                    // Use provided argument type
+                                    arg_types[i].clone()
+                                } else {
+                                    // Use parameter type (from default)
+                                    param_ty.clone()
+                                }
+                            })
+                            .collect();
+
+                        let callee_ty = self.infer_expr(callee)?;
+                        let result_ty = Ty::fresh_var();
+                        let expected_fn = Ty::Fn(full_arg_types, Box::new(result_ty.clone()));
+                        self.unifier.unify(&callee_ty, &expected_fn, expr.span)?;
+                        return Ok(result_ty);
+                    }
+                }
+
+                // Standard case: no function info (builtins, closures, etc.)
+                let callee_ty = self.infer_expr(callee)?;
                 let result_ty = Ty::fresh_var();
                 let expected_fn = Ty::Fn(arg_types, Box::new(result_ty.clone()));
                 self.unifier.unify(&callee_ty, &expected_fn, expr.span)?;
@@ -1689,10 +1777,8 @@ impl InferenceEngine {
                         crate::parser::ElseBranch::Expr(e) => self.infer_expr(e)?,
                         crate::parser::ElseBranch::Block(b) => self.infer_block(b)?,
                         crate::parser::ElseBranch::ElseIf(elif) => {
-                            let elif_expr = Expr {
-                                kind: ExprKind::If(elif.clone()),
-                                span: elif.span,
-                            };
+                            let elif_expr = Expr::new(ExprKind::If(elif.clone()), elif.span,
+                            );
                             self.infer_expr(&elif_expr)?
                         }
                     };
@@ -1906,8 +1992,19 @@ impl InferenceEngine {
             }
 
             ExprKind::Cast(e, ty) => {
-                self.infer_expr(e)?;
-                self.ast_type_to_ty(ty)
+                let source_ty = self.infer_expr(e)?;
+                let target_ty = self.ast_type_to_ty(ty)?;
+
+                // Validate the cast is allowed
+                let resolved_source = source_ty.apply(&self.unifier.subst);
+                if !self.can_cast(&resolved_source, &target_ty) {
+                    return Err(TypeError::new(
+                        format!("cannot cast {} to {}", resolved_source, target_ty),
+                        expr.span,
+                    ));
+                }
+
+                Ok(target_ty)
             }
 
             ExprKind::Range(start, end, _inclusive) => {
@@ -2197,6 +2294,8 @@ impl InferenceEngine {
                     "u32" => Ok(Ty::U32),
                     "u64" => Ok(Ty::U64),
                     "u128" => Ok(Ty::U128),
+                    "isize" => Ok(Ty::Isize),
+                    "usize" => Ok(Ty::Usize),
                     "Float" => Ok(Ty::Float),
                     "f32" => Ok(Ty::F32),
                     "f64" => Ok(Ty::F64),
@@ -2279,6 +2378,46 @@ impl InferenceEngine {
     /// Get the final type after applying all substitutions.
     pub fn finalize_type(&self, ty: &Ty) -> Ty {
         ty.apply(&self.unifier.subst)
+    }
+
+    /// Check if a type can be cast to another type.
+    /// Returns true if the cast is valid.
+    fn can_cast(&self, from: &Ty, to: &Ty) -> bool {
+        // Same type is always valid
+        if from == to {
+            return true;
+        }
+
+        // Check if both are numeric types (int or float)
+        let from_numeric = from.is_numeric();
+        let to_numeric = to.is_numeric();
+
+        // Numeric to numeric casts are always allowed
+        if from_numeric && to_numeric {
+            return true;
+        }
+
+        // Bool to int is allowed
+        if matches!(from, Ty::Bool) && to.is_integer() {
+            return true;
+        }
+
+        // Char to int is allowed
+        if matches!(from, Ty::Char) && to.is_integer() {
+            return true;
+        }
+
+        // Int to char is allowed (for ASCII conversion)
+        if from.is_integer() && matches!(to, Ty::Char) {
+            return true;
+        }
+
+        // Type variables - allow cast (will be resolved later)
+        if matches!(from, Ty::Var(_)) || matches!(to, Ty::Var(_)) {
+            return true;
+        }
+
+        false
     }
 
     /// Get the current environment.

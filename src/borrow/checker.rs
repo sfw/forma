@@ -485,10 +485,8 @@ impl BorrowChecker {
                         crate::parser::ElseBranch::Expr(e) => self.check_expr(e),
                         crate::parser::ElseBranch::Block(b) => self.check_block(b),
                         crate::parser::ElseBranch::ElseIf(elif) => {
-                            let elif_expr = Expr {
-                                kind: ExprKind::If(elif.clone()),
-                                span: elif.span,
-                            };
+                            let elif_expr = Expr::new(ExprKind::If(elif.clone()), elif.span,
+                            );
                             self.check_expr(&elif_expr);
                         }
                     }
@@ -722,10 +720,8 @@ impl BorrowChecker {
                             }
                         }
                         crate::parser::ElseBranch::ElseIf(elif) => {
-                            let elif_expr = Expr {
-                                kind: ExprKind::If(elif.clone()),
-                                span: elif.span,
-                            };
+                            let elif_expr = Expr::new(ExprKind::If(elif.clone()), elif.span,
+                            );
                             self.check_return_ref(&elif_expr, error_span);
                         }
                     }

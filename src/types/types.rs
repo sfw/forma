@@ -40,6 +40,9 @@ pub enum Ty {
     U32,
     U64,
     U128,
+    // Pointer-sized integers
+    Isize,
+    Usize,
     Float,
     F32,
     F64,
@@ -269,6 +272,8 @@ impl Ty {
                 | Ty::U32
                 | Ty::U64
                 | Ty::U128
+                | Ty::Isize
+                | Ty::Usize
                 | Ty::Float
                 | Ty::F32
                 | Ty::F64
@@ -291,6 +296,8 @@ impl Ty {
                 | Ty::U32
                 | Ty::U64
                 | Ty::U128
+                | Ty::Isize
+                | Ty::Usize
         )
     }
 
@@ -314,6 +321,8 @@ impl Ty {
             | Ty::U32
             | Ty::U64
             | Ty::U128
+            | Ty::Isize
+            | Ty::Usize
             | Ty::Float
             | Ty::F32
             | Ty::F64
@@ -346,6 +355,8 @@ impl fmt::Display for Ty {
             Ty::U32 => write!(f, "u32"),
             Ty::U64 => write!(f, "u64"),
             Ty::U128 => write!(f, "u128"),
+            Ty::Isize => write!(f, "isize"),
+            Ty::Usize => write!(f, "usize"),
             Ty::Float => write!(f, "Float"),
             Ty::F32 => write!(f, "f32"),
             Ty::F64 => write!(f, "f64"),

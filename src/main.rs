@@ -170,6 +170,23 @@ enum Commands {
 
     /// Initialize a FORMA project in the current directory
     Init,
+
+    /// Start an interactive REPL
+    Repl,
+
+    /// Format FORMA source code
+    Fmt {
+        /// Input file
+        file: PathBuf,
+
+        /// Write formatted output back to file
+        #[arg(short, long)]
+        write: bool,
+
+        /// Check if file is formatted (exit with error if not)
+        #[arg(short, long)]
+        check: bool,
+    },
 }
 
 fn main() {
@@ -188,6 +205,8 @@ fn main() {
         Commands::Grammar { format } => grammar(format),
         Commands::New { name } => new_project(&name),
         Commands::Init => init_project(),
+        Commands::Repl => repl(),
+        Commands::Fmt { file, write, check } => fmt(&file, write, check),
     };
 
     if let Err(e) = result {
@@ -1720,6 +1739,305 @@ fn print_grammar_json() {
         }
     });
     println!("{}", serde_json::to_string_pretty(&grammar).unwrap());
+}
+
+/// Start an interactive REPL
+fn repl() -> Result<(), String> {
+    use rustyline::error::ReadlineError;
+    use rustyline::DefaultEditor;
+
+    println!("FORMA REPL v0.1.0");
+    println!("Type :help for commands, :quit to exit");
+    println!();
+
+    let mut rl = DefaultEditor::new().map_err(|e| format!("Failed to initialize readline: {}", e))?;
+
+    // Keep track of defined functions for the session
+    let mut session_code = String::new();
+
+    loop {
+        let readline = rl.readline("forma> ");
+        match readline {
+            Ok(line) => {
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+
+                // Add to history
+                let _ = rl.add_history_entry(line);
+
+                // Handle REPL commands
+                if line.starts_with(':') {
+                    match line {
+                        ":quit" | ":q" | ":exit" => {
+                            println!("Goodbye!");
+                            break;
+                        }
+                        ":help" | ":h" => {
+                            println!("REPL Commands:");
+                            println!("  :help, :h     - Show this help");
+                            println!("  :quit, :q     - Exit the REPL");
+                            println!("  :clear        - Clear session definitions");
+                            println!("  :type <expr>  - Show the type of an expression");
+                            println!("  :defs         - Show current definitions");
+                            println!();
+                            println!("Enter FORMA expressions or definitions.");
+                            println!("Expressions are evaluated immediately.");
+                            println!("Function definitions are saved for the session.");
+                            continue;
+                        }
+                        ":clear" => {
+                            session_code.clear();
+                            println!("Session cleared.");
+                            continue;
+                        }
+                        ":defs" => {
+                            if session_code.is_empty() {
+                                println!("No definitions in session.");
+                            } else {
+                                println!("Session definitions:");
+                                println!("{}", session_code);
+                            }
+                            continue;
+                        }
+                        cmd if cmd.starts_with(":type ") => {
+                            let expr = &cmd[6..];
+                            repl_type_of(expr, &session_code);
+                            continue;
+                        }
+                        _ => {
+                            println!("Unknown command: {}", line);
+                            println!("Type :help for available commands.");
+                            continue;
+                        }
+                    }
+                }
+
+                // Check if this is a definition (starts with f, s, e, t, etc.)
+                let is_definition = line.starts_with("f ") || line.starts_with("s ")
+                    || line.starts_with("e ") || line.starts_with("t ")
+                    || line.starts_with("impl ") || line.starts_with("type ");
+
+                if is_definition {
+                    // Add to session definitions
+                    session_code.push_str(line);
+                    session_code.push('\n');
+
+                    // Try to parse to validate
+                    if let Err(e) = repl_validate_code(&session_code) {
+                        // Remove the bad definition
+                        let lines: Vec<&str> = session_code.lines().collect();
+                        session_code = lines[..lines.len().saturating_sub(1)].join("\n");
+                        if !session_code.is_empty() {
+                            session_code.push('\n');
+                        }
+                        println!("Error: {}", e);
+                    } else {
+                        println!("Defined.");
+                    }
+                } else {
+                    // Evaluate as expression
+                    repl_eval_expr(line, &session_code);
+                }
+            }
+            Err(ReadlineError::Interrupted) => {
+                println!("^C");
+                continue;
+            }
+            Err(ReadlineError::Eof) => {
+                println!("Goodbye!");
+                break;
+            }
+            Err(err) => {
+                println!("Error: {:?}", err);
+                break;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Validate code in the REPL
+fn repl_validate_code(code: &str) -> Result<(), String> {
+    let scanner = Scanner::new(code);
+    let (tokens, lex_errors) = scanner.scan_all();
+
+    if !lex_errors.is_empty() {
+        return Err(format!("Lexer error: {}", lex_errors[0].message));
+    }
+
+    let parser = FormaParser::new(&tokens);
+    parser.parse().map_err(|e| format!("{}", e))?;
+    Ok(())
+}
+
+/// Evaluate an expression in the REPL
+fn repl_eval_expr(expr: &str, session_code: &str) {
+    // Wrap the expression in a main function that prints the result
+    // Use print() to output the value since FORMA requires explicit return types
+    let code = format!(
+        "{}\nf __repl_main__() -> Int\n    __result__ := {}\n    print(__result__)\n    0\n",
+        session_code,
+        expr
+    );
+
+    // Lex
+    let scanner = Scanner::new(&code);
+    let (tokens, lex_errors) = scanner.scan_all();
+
+    if !lex_errors.is_empty() {
+        println!("Error: {}", lex_errors[0].message);
+        return;
+    }
+
+    // Parse
+    let parser = FormaParser::new(&tokens);
+    let ast = match parser.parse() {
+        Ok(ast) => ast,
+        Err(e) => {
+            println!("Parse error: {}", e);
+            return;
+        }
+    };
+
+    // Type check
+    let mut type_checker = TypeChecker::new();
+    if let Err(errors) = type_checker.check(&ast) {
+        for error in errors.iter().take(1) {
+            println!("Type error: {}", error);
+        }
+        return;
+    }
+
+    // Borrow check
+    let mut borrow_checker = BorrowChecker::new();
+    if let Err(errors) = borrow_checker.check(&ast) {
+        for error in errors.iter().take(1) {
+            println!("Borrow error: {}", error);
+        }
+        return;
+    }
+
+    // Lower to MIR
+    let program = match Lowerer::new().lower(&ast) {
+        Ok(prog) => prog,
+        Err(errors) => {
+            for e in errors.iter().take(1) {
+                println!("Lowering error: {}", e.message);
+            }
+            return;
+        }
+    };
+
+    // Check for __repl_main__ function
+    if !program.functions.contains_key("__repl_main__") {
+        println!("Internal error: REPL main function not found");
+        return;
+    }
+
+    // Run the interpreter (print() inside the code handles output, no need to print return value)
+    let mut interp = Interpreter::new(program);
+    if let Err(e) = interp.run("__repl_main__", &[]) {
+        println!("Runtime error: {}", e);
+    }
+}
+
+/// Show the type of an expression in the REPL
+fn repl_type_of(expr: &str, session_code: &str) {
+    // Wrap the expression as a variable assignment to get its type
+    let code = format!(
+        "{}\nf __repl_main__() -> Int\n    __result__ := {}\n    0\n",
+        session_code,
+        expr
+    );
+
+    // Lex
+    let scanner = Scanner::new(&code);
+    let (tokens, lex_errors) = scanner.scan_all();
+
+    if !lex_errors.is_empty() {
+        println!("Error: {}", lex_errors[0].message);
+        return;
+    }
+
+    // Parse
+    let parser = FormaParser::new(&tokens);
+    let ast = match parser.parse() {
+        Ok(ast) => ast,
+        Err(e) => {
+            println!("Parse error: {}", e);
+            return;
+        }
+    };
+
+    // Type check - the expression type-checks if the code compiles
+    let mut type_checker = TypeChecker::new();
+    match type_checker.check(&ast) {
+        Ok(_) => {
+            // Successfully type-checked - expression is well-typed
+            // For a full implementation, we'd need to extract the inferred type from the inference engine
+            println!("Expression is well-typed");
+        }
+        Err(errors) => {
+            for error in errors.iter().take(1) {
+                println!("Type error: {}", error);
+            }
+        }
+    }
+}
+
+/// Format a FORMA source file
+fn fmt(file: &PathBuf, write: bool, check: bool) -> Result<(), String> {
+    let source = read_file(file)?;
+    let filename = file.to_string_lossy().to_string();
+
+    // Lex
+    let scanner = Scanner::new(&source);
+    let (tokens, lex_errors) = scanner.scan_all();
+
+    if !lex_errors.is_empty() {
+        for error in &lex_errors {
+            eprintln!("error[LEX]: {}:{}: {}", error.span.line, error.span.column, error.message);
+        }
+        return Err(format!("{} lexer error(s)", lex_errors.len()));
+    }
+
+    // Parse
+    let parser = FormaParser::new(&tokens);
+    let ast = match parser.parse() {
+        Ok(ast) => ast,
+        Err(e) => {
+            eprintln!("error[PARSE]: {}", e);
+            return Err("parse error".to_string());
+        }
+    };
+
+    // Format
+    let mut formatter = forma::Formatter::new();
+    let formatted = formatter.format(&ast);
+
+    if check {
+        // Check mode: compare formatted output with original
+        if formatted.trim() == source.trim() {
+            println!("{} is formatted", filename);
+            Ok(())
+        } else {
+            println!("{} needs formatting", filename);
+            Err("file needs formatting".to_string())
+        }
+    } else if write {
+        // Write mode: write formatted output back to file
+        fs::write(file, &formatted)
+            .map_err(|e| format!("failed to write '{}': {}", file.display(), e))?;
+        println!("Formatted {}", filename);
+        Ok(())
+    } else {
+        // Default: print to stdout
+        print!("{}", formatted);
+        Ok(())
+    }
 }
 
 fn read_file(path: &PathBuf) -> Result<String, String> {

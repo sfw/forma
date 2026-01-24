@@ -12,6 +12,7 @@ use super::mir::{
     BinOp, BlockId, Constant, Function, Local, Operand, Program, Rvalue,
     StatementKind, Terminator, UnOp,
 };
+use crate::types::Ty;
 
 /// Runtime value.
 #[derive(Debug, Clone, PartialEq)]
@@ -1878,9 +1879,9 @@ impl Interpreter {
                 }
             }
 
-            Rvalue::Cast(op, _ty) => {
-                // For now, just return the value unchanged
-                self.eval_operand(op)
+            Rvalue::Cast(op, target_ty) => {
+                let value = self.eval_operand(op)?;
+                self.cast_value(value, target_ty)
             }
 
             Rvalue::Closure { func_name, captures } => {
@@ -1924,6 +1925,55 @@ impl Interpreter {
         }
     }
 
+    /// Cast a value to a target type.
+    /// The interpreter uses i64 for all integers and f64 for all floats,
+    /// but casts apply truncation/wrapping to simulate the target type.
+    fn cast_value(&self, value: Value, target: &Ty) -> Result<Value, InterpError> {
+        match (&value, target) {
+            // Int to signed integers (apply truncation)
+            (Value::Int(n), Ty::I8) => Ok(Value::Int((*n as i8) as i64)),
+            (Value::Int(n), Ty::I16) => Ok(Value::Int((*n as i16) as i64)),
+            (Value::Int(n), Ty::I32) => Ok(Value::Int((*n as i32) as i64)),
+            (Value::Int(n), Ty::I64 | Ty::Int | Ty::Isize) => Ok(Value::Int(*n)),
+
+            // Int to unsigned integers (apply wrapping)
+            (Value::Int(n), Ty::U8) => Ok(Value::Int((*n as u8) as i64)),
+            (Value::Int(n), Ty::U16) => Ok(Value::Int((*n as u16) as i64)),
+            (Value::Int(n), Ty::U32) => Ok(Value::Int((*n as u32) as i64)),
+            (Value::Int(n), Ty::U64 | Ty::UInt | Ty::Usize) => Ok(Value::Int((*n as u64) as i64)),
+
+            // Int to float
+            (Value::Int(n), Ty::F32) => Ok(Value::Float((*n as f32) as f64)),
+            (Value::Int(n), Ty::F64 | Ty::Float) => Ok(Value::Float(*n as f64)),
+
+            // Float to int (truncate)
+            (Value::Float(f), Ty::I8) => Ok(Value::Int((*f as i8) as i64)),
+            (Value::Float(f), Ty::I16) => Ok(Value::Int((*f as i16) as i64)),
+            (Value::Float(f), Ty::I32) => Ok(Value::Int((*f as i32) as i64)),
+            (Value::Float(f), Ty::I64 | Ty::Int | Ty::Isize) => Ok(Value::Int(*f as i64)),
+            (Value::Float(f), Ty::U8) => Ok(Value::Int((*f as u8) as i64)),
+            (Value::Float(f), Ty::U16) => Ok(Value::Int((*f as u16) as i64)),
+            (Value::Float(f), Ty::U32) => Ok(Value::Int((*f as u32) as i64)),
+            (Value::Float(f), Ty::U64 | Ty::UInt | Ty::Usize) => Ok(Value::Int((*f as u64) as i64)),
+
+            // Float to float
+            (Value::Float(f), Ty::F32) => Ok(Value::Float((*f as f32) as f64)),
+            (Value::Float(f), Ty::F64 | Ty::Float) => Ok(Value::Float(*f)),
+
+            // Bool to int
+            (Value::Bool(b), ty) if ty.is_integer() => Ok(Value::Int(if *b { 1 } else { 0 })),
+
+            // Char to int
+            (Value::Char(c), ty) if ty.is_integer() => Ok(Value::Int(*c as i64)),
+
+            // Int to char
+            (Value::Int(n), Ty::Char) => Ok(Value::Char((*n as u8) as char)),
+
+            // Same type or unhandled - pass through
+            _ => Ok(value),
+        }
+    }
+
     fn eval_binop(&self, op: BinOp, left: Value, right: Value) -> Result<Value, InterpError> {
         match (op, &left, &right) {
             // Integer arithmetic
@@ -1954,6 +2004,14 @@ impl Interpreter {
             (BinOp::Sub, Value::Float(a), Value::Float(b)) => Ok(Value::Float(a - b)),
             (BinOp::Mul, Value::Float(a), Value::Float(b)) => Ok(Value::Float(a * b)),
             (BinOp::Div, Value::Float(a), Value::Float(b)) => Ok(Value::Float(a / b)),
+
+            // Float comparison
+            (BinOp::Eq, Value::Float(a), Value::Float(b)) => Ok(Value::Bool(a == b)),
+            (BinOp::Ne, Value::Float(a), Value::Float(b)) => Ok(Value::Bool(a != b)),
+            (BinOp::Lt, Value::Float(a), Value::Float(b)) => Ok(Value::Bool(a < b)),
+            (BinOp::Le, Value::Float(a), Value::Float(b)) => Ok(Value::Bool(a <= b)),
+            (BinOp::Gt, Value::Float(a), Value::Float(b)) => Ok(Value::Bool(a > b)),
+            (BinOp::Ge, Value::Float(a), Value::Float(b)) => Ok(Value::Bool(a >= b)),
 
             // Integer comparison
             (BinOp::Eq, Value::Int(a), Value::Int(b)) => Ok(Value::Bool(a == b)),

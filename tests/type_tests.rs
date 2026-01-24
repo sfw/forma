@@ -573,3 +573,49 @@ fn test_is_float() {
     assert!(!Ty::Int.is_float());
     assert!(!Ty::I64.is_float());
 }
+
+// ============================================================================
+// Cast Expression Type Checking
+// ============================================================================
+
+#[test]
+fn test_cast_int_to_i32() {
+    let result = check_source(r#"
+f cast_test() -> i32 = i32(255)
+"#);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_cast_int_to_float() {
+    let result = check_source(r#"
+f cast_test() -> f64 = f64(42)
+"#);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_cast_float_to_int() {
+    let result = check_source(r#"
+f cast_test() -> i32 = i32(3.14)
+"#);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_integer_type_i8() {
+    // Test that i8 type annotation is accepted in return type
+    let result = check_source(r#"
+f test() -> i8 = i8(127)
+"#);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_integer_type_u8() {
+    // Test that u8 type annotation is accepted in return type
+    let result = check_source(r#"
+f test() -> u8 = u8(255)
+"#);
+    assert!(result.is_ok());
+}

@@ -26,6 +26,7 @@ pub mod borrow;
 #[cfg(feature = "llvm")]
 pub mod codegen;
 pub mod errors;
+pub mod fmt;
 pub mod lexer;
 pub mod mir;
 pub mod module;
@@ -39,3 +40,4 @@ pub use mir::{Interpreter, Lowerer, Program, Value};
 pub use module::{ModuleLoader, ModuleError};
 pub use parser::{Parser, SourceFile};
 pub use types::{TypeChecker, Ty, TypeError};
+pub use fmt::Formatter;

@@ -356,6 +356,13 @@ pub struct Expr {
     pub span: Span,
 }
 
+impl Expr {
+    /// Create a new expression.
+    pub fn new(kind: ExprKind, span: Span) -> Self {
+        Self { kind, span }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ExprKind {
     /// Literal: `42`, `"hello"`, `true`

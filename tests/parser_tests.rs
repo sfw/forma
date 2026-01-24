@@ -382,6 +382,27 @@ fn test_closure() {
     }
 }
 
+#[test]
+fn test_cast_expression() {
+    // Test T(x) cast syntax
+    let ast = parse_ok("f test -> i32 = i32(255)");
+    if let ItemKind::Function(f) = &ast.items[0].kind {
+        if let Some(FnBody::Expr(e)) = &f.body {
+            assert!(matches!(e.kind, ExprKind::Cast(_, _)));
+        }
+    }
+}
+
+#[test]
+fn test_cast_float_to_int() {
+    let ast = parse_ok("f test -> i32 = i32(3.14)");
+    if let ItemKind::Function(f) = &ast.items[0].kind {
+        if let Some(FnBody::Expr(e)) = &f.body {
+            assert!(matches!(e.kind, ExprKind::Cast(_, _)));
+        }
+    }
+}
+
 // ============================================================================
 // Pattern Parsing
 // ============================================================================

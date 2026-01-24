@@ -43,6 +43,8 @@ pub struct Lowerer {
     current_block: Option<BlockId>,
     /// Variable name to local mapping
     vars: HashMap<String, Local>,
+    /// Variable name to type name mapping (for method resolution)
+    var_types: HashMap<String, String>,
     /// Loop context for break/continue
     loop_stack: Vec<LoopContext>,
     /// Errors accumulated during lowering
@@ -51,6 +53,10 @@ pub struct Lowerer {
     enum_variants: HashMap<String, (String, usize)>,
     /// Counter for generating unique closure function names
     closure_counter: u32,
+    /// Function default parameter expressions: fn_name -> list of defaults (None if no default)
+    fn_defaults: HashMap<String, Vec<Option<Expr>>>,
+    /// Method to qualified name mapping: method_name -> list of qualified names (Type::method)
+    impl_methods: HashMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -67,10 +73,13 @@ impl Lowerer {
             current_fn: None,
             current_block: None,
             vars: HashMap::new(),
+            var_types: HashMap::new(),
             loop_stack: Vec::new(),
             errors: Vec::new(),
             enum_variants: HashMap::new(),
             closure_counter: 0,
+            fn_defaults: HashMap::new(),
+            impl_methods: HashMap::new(),
         }
     }
 
@@ -124,11 +133,16 @@ impl Lowerer {
                     if let crate::parser::ImplItem::Function(f) = impl_item {
                         if let Some(mir_fn) = self.lower_function(f) {
                             // Use qualified name for methods
-                            let name = format!("{}::{}",
+                            let qualified_name = format!("{}::{}",
                                 self.type_to_string(&impl_block.self_type),
                                 mir_fn.name
                             );
-                            self.program.functions.insert(name, mir_fn);
+                            // Track method -> qualified name mapping for method resolution
+                            self.impl_methods
+                                .entry(mir_fn.name.clone())
+                                .or_insert_with(Vec::new)
+                                .push(qualified_name.clone());
+                            self.program.functions.insert(qualified_name, mir_fn);
                         }
                     }
                 }
@@ -168,6 +182,14 @@ impl Lowerer {
     fn lower_function(&mut self, f: &AstFunction) -> Option<Function> {
         // Skip functions without bodies (trait methods)
         let body = f.body.as_ref()?;
+
+        // Store default parameter expressions for later use when lowering calls
+        let defaults: Vec<Option<Expr>> = f.params.iter()
+            .map(|p| p.default.clone())
+            .collect();
+        if defaults.iter().any(|d| d.is_some()) {
+            self.fn_defaults.insert(f.name.name.clone(), defaults);
+        }
 
         // Reset state
         self.vars.clear();
@@ -240,8 +262,17 @@ impl Lowerer {
 
             match &stmt.kind {
                 StmtKind::Let(let_stmt) => {
+                    // Try to infer type from init expression for method resolution
+                    let inferred_type = self.infer_receiver_type(&let_stmt.init);
+
                     let init = self.lower_expr(&let_stmt.init);
                     if let Some(op) = init {
+                        // Record the type if we inferred one and the pattern is an identifier
+                        if let Some(type_name) = inferred_type {
+                            if let PatternKind::Ident(ident, _, _) = &let_stmt.pattern.kind {
+                                self.var_types.insert(ident.name.clone(), type_name);
+                            }
+                        }
                         self.bind_pattern(&let_stmt.pattern, op);
                     }
                     last_value = None;
@@ -480,6 +511,22 @@ impl Lowerer {
                     }
                 }
 
+                // Fill in default arguments if needed
+                if is_direct {
+                    if let Some(fn_name_ref) = &func_name {
+                        if let Some(defaults) = self.fn_defaults.get(fn_name_ref).cloned() {
+                            // Add default values for missing arguments
+                            for i in mir_args.len()..defaults.len() {
+                                if let Some(Some(default_expr)) = defaults.get(i) {
+                                    if let Some(op) = self.lower_expr(default_expr) {
+                                        mir_args.push(op);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 let result = self.new_temp(Ty::Int); // TODO: proper return type
                 let next_block = self.new_block();
 
@@ -518,8 +565,11 @@ impl Lowerer {
                     }
                 }
 
+                // Try to infer receiver type from expression for method resolution
+                let receiver_type = self.infer_receiver_type(receiver);
+
                 // Resolve method name to built-in function or qualified name
-                let func_name = self.resolve_method(&method.name);
+                let func_name = self.resolve_method_with_type(&method.name, receiver_type.as_deref());
 
                 // Create call
                 let result = self.new_temp(Ty::Int);
@@ -893,6 +943,14 @@ impl Lowerer {
                 self.lower_expr(inner)
             }
 
+            ExprKind::Cast(inner, target_ty) => {
+                let operand = self.lower_expr(inner)?;
+                let target = self.lower_type(target_ty);
+                let result = self.new_temp(target.clone());
+                self.emit(StatementKind::Assign(result, Rvalue::Cast(operand, target)));
+                Some(Operand::Local(result))
+            }
+
             ExprKind::Path(path) => {
                 // Try to resolve as variable first
                 if path.segments.len() == 1 {
@@ -1246,6 +1304,60 @@ impl Lowerer {
         }
     }
 
+    /// Try to infer the receiver type from an expression.
+    /// Returns the type name if it can be determined from the expression structure.
+    fn infer_receiver_type(&self, expr: &Expr) -> Option<String> {
+        match &expr.kind {
+            // Variable reference - look up in var_types map
+            ExprKind::Ident(ident) => {
+                self.var_types.get(&ident.name).cloned()
+            }
+            // Struct construction clearly tells us the type
+            ExprKind::Struct(path, _, _) => {
+                path.segments.first().map(|seg| seg.name.name.clone())
+            }
+            // Function call result - could be a constructor
+            ExprKind::Call(callee, _) => {
+                if let ExprKind::Ident(ident) = &callee.kind {
+                    // Check if this is a struct constructor (first char is uppercase)
+                    if ident.name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+                        return Some(ident.name.clone());
+                    }
+                }
+                None
+            }
+            // Field access - the base determines the type
+            ExprKind::Field(base, _) => {
+                self.infer_receiver_type(base)
+            }
+            // Method call result - can't easily determine
+            _ => None,
+        }
+    }
+
+    /// Resolve a method name to a function name with optional type hint.
+    ///
+    /// Maps common method names to their built-in function equivalents.
+    /// For example: `.len()` -> `vec_len` or `str_len`, `.push(x)` -> `vec_push`
+    fn resolve_method_with_type(&self, method_name: &str, receiver_type: Option<&str>) -> String {
+        // If we have a receiver type and this method exists for that type, use it
+        if let Some(type_name) = receiver_type {
+            let qualified = format!("{}::{}", type_name, method_name);
+            if let Some(qualified_names) = self.impl_methods.get(method_name) {
+                if qualified_names.contains(&qualified) {
+                    return qualified;
+                }
+            }
+            // Also check if function exists directly
+            if self.program.functions.contains_key(&qualified) {
+                return qualified;
+            }
+        }
+
+        // Fall back to standard method resolution
+        self.resolve_method(method_name)
+    }
+
     /// Resolve a method name to a function name.
     ///
     /// Maps common method names to their built-in function equivalents.
@@ -1286,8 +1398,30 @@ impl Lowerer {
             "is_alphanumeric" => "char_is_alphanumeric".to_string(),
             "is_whitespace" => "char_is_whitespace".to_string(),
 
-            // Default: use the method name as-is (for user-defined methods)
-            _ => method_name.to_string(),
+            // Check impl methods (from impl blocks)
+            // If there's exactly one qualified name for this method, use it
+            // If multiple types have this method, we need receiver type info for proper resolution
+            // For now, try all qualified names and use the first one that exists in program
+            _ => {
+                if let Some(qualified_names) = self.impl_methods.get(method_name) {
+                    if qualified_names.len() == 1 {
+                        return qualified_names[0].clone();
+                    }
+                    // Multiple types have this method - check which are available
+                    // This is a heuristic; proper resolution needs type info
+                    for qname in qualified_names {
+                        if self.program.functions.contains_key(qname) {
+                            return qname.clone();
+                        }
+                    }
+                    // If none found yet (still lowering), return first one
+                    if !qualified_names.is_empty() {
+                        return qualified_names[0].clone();
+                    }
+                }
+                // Default: use the method name as-is
+                method_name.to_string()
+            }
         }
     }
 
@@ -1710,6 +1844,9 @@ impl Lowerer {
                     "u64" => Ty::U64,
                     "u128" => Ty::U128,
                     "UInt" => Ty::UInt,
+                    // Pointer-sized integers
+                    "isize" => Ty::Isize,
+                    "usize" => Ty::Usize,
                     // Floating point variants
                     "f32" => Ty::F32,
                     "f64" => Ty::F64,
@@ -1957,10 +2094,8 @@ impl Lowerer {
                         }
                         ElseBranch::ElseIf(nested_if) => {
                             // Recurse as an if expression
-                            self.collect_free_vars(&Expr {
-                                kind: ExprKind::If(nested_if.clone()),
-                                span: expr.span,
-                            }, bound, free);
+                            self.collect_free_vars(&Expr::new(ExprKind::If(nested_if.clone()), expr.span,
+                            ), bound, free);
                         }
                     }
                 }

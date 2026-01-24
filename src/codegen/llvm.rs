@@ -254,6 +254,10 @@ impl<'ctx> LLVMCodegen<'ctx> {
                 let val = self.compile_operand(operand)?;
                 self.compile_unaryop(*op, val)
             }
+            Rvalue::Cast(operand, target_ty) => {
+                let val = self.compile_operand(operand)?;
+                self.compile_cast(val, target_ty)
+            }
             // Note: function calls are handled in Terminator::Call, not in Rvalue
             _ => Err(CodegenError {
                 message: format!("Unsupported rvalue: {:?}", rvalue),
@@ -411,6 +415,70 @@ impl<'ctx> LLVMCodegen<'ctx> {
         Ok(value)
     }
 
+    /// Compile a cast operation.
+    fn compile_cast(
+        &mut self,
+        value: BasicValueEnum<'ctx>,
+        target_ty: &Ty,
+    ) -> Result<BasicValueEnum<'ctx>, CodegenError> {
+        let target_llvm_ty = self.lower_type(target_ty)?;
+
+        match (value, target_llvm_ty) {
+            // Int to Int cast
+            (BasicValueEnum::IntValue(iv), BasicTypeEnum::IntType(target_int)) => {
+                let src_width = iv.get_type().get_bit_width();
+                let dst_width = target_int.get_bit_width();
+
+                if src_width == dst_width {
+                    Ok(value)
+                } else if src_width < dst_width {
+                    // Widening: use sign-extend for signed types, zero-extend for unsigned
+                    // For simplicity, use sign-extend (signed semantics)
+                    let extended = self.builder.build_int_s_extend(iv, target_int, "sext")
+                        .map_err(|e| CodegenError { message: format!("sext failed: {:?}", e) })?;
+                    Ok(extended.into())
+                } else {
+                    // Narrowing: truncate
+                    let truncated = self.builder.build_int_truncate(iv, target_int, "trunc")
+                        .map_err(|e| CodegenError { message: format!("trunc failed: {:?}", e) })?;
+                    Ok(truncated.into())
+                }
+            }
+            // Int to Float cast
+            (BasicValueEnum::IntValue(iv), BasicTypeEnum::FloatType(target_float)) => {
+                let result = self.builder.build_signed_int_to_float(iv, target_float, "sitofp")
+                    .map_err(|e| CodegenError { message: format!("sitofp failed: {:?}", e) })?;
+                Ok(result.into())
+            }
+            // Float to Int cast
+            (BasicValueEnum::FloatValue(fv), BasicTypeEnum::IntType(target_int)) => {
+                let result = self.builder.build_float_to_signed_int(fv, target_int, "fptosi")
+                    .map_err(|e| CodegenError { message: format!("fptosi failed: {:?}", e) })?;
+                Ok(result.into())
+            }
+            // Float to Float cast
+            (BasicValueEnum::FloatValue(fv), BasicTypeEnum::FloatType(target_float)) => {
+                let src_ty = fv.get_type();
+                // Compare by checking if converting to f64 (bigger) or f32 (smaller)
+                if src_ty == target_float {
+                    Ok(value)
+                } else if target_float.get_type() == self.context.f64_type().get_type() {
+                    // Extend f32 to f64
+                    let extended = self.builder.build_float_ext(fv, target_float, "fpext")
+                        .map_err(|e| CodegenError { message: format!("fpext failed: {:?}", e) })?;
+                    Ok(extended.into())
+                } else {
+                    // Truncate f64 to f32
+                    let truncated = self.builder.build_float_trunc(fv, target_float, "fptrunc")
+                        .map_err(|e| CodegenError { message: format!("fptrunc failed: {:?}", e) })?;
+                    Ok(truncated.into())
+                }
+            }
+            // Same type or other - just return
+            _ => Ok(value),
+        }
+    }
+
     /// Compile a block terminator.
     fn compile_terminator(
         &mut self,
@@ -529,14 +597,25 @@ impl<'ctx> LLVMCodegen<'ctx> {
     /// Lower an FORMA type to an LLVM type.
     fn lower_type(&self, ty: &Ty) -> Result<BasicTypeEnum<'ctx>, CodegenError> {
         match ty {
-            Ty::Int | Ty::I64 => Ok(self.context.i64_type().into()),
-            Ty::I32 => Ok(self.context.i32_type().into()),
-            Ty::I16 => Ok(self.context.i16_type().into()),
+            // Signed integers
             Ty::I8 => Ok(self.context.i8_type().into()),
-            Ty::Bool => Ok(self.context.bool_type().into()),
-            Ty::Float | Ty::F64 => Ok(self.context.f64_type().into()),
+            Ty::I16 => Ok(self.context.i16_type().into()),
+            Ty::I32 => Ok(self.context.i32_type().into()),
+            Ty::Int | Ty::I64 | Ty::Isize => Ok(self.context.i64_type().into()),
+            Ty::I128 => Ok(self.context.i128_type().into()),
+            // Unsigned integers (LLVM doesn't distinguish signedness in types)
+            Ty::U8 => Ok(self.context.i8_type().into()),
+            Ty::U16 => Ok(self.context.i16_type().into()),
+            Ty::U32 => Ok(self.context.i32_type().into()),
+            Ty::UInt | Ty::U64 | Ty::Usize => Ok(self.context.i64_type().into()),
+            Ty::U128 => Ok(self.context.i128_type().into()),
+            // Floats
             Ty::F32 => Ok(self.context.f32_type().into()),
-            Ty::Unit => Ok(self.context.i8_type().into()), // Unit as i8
+            Ty::Float | Ty::F64 => Ok(self.context.f64_type().into()),
+            // Other
+            Ty::Bool => Ok(self.context.bool_type().into()),
+            Ty::Char => Ok(self.context.i32_type().into()),
+            Ty::Unit => Ok(self.context.i8_type().into()),
             Ty::Str => Ok(self.context.ptr_type(AddressSpace::default()).into()),
             _ => {
                 // Default to i64 for complex types

@@ -1,0 +1,105 @@
+# Test Integer Types and Cast Syntax
+# Expected output: All tests pass, final result: 1
+
+# Test T(x) cast syntax with sized integers
+f test_i8_cast() -> Bool
+    a = i8(127)
+    b = i8(-128)
+    # Compare with casted values to match types
+    a == i8(127) && b == i8(-128)
+
+f test_u8_cast() -> Bool
+    a = u8(255)
+    b = u8(0)
+    a == u8(255) && b == u8(0)
+
+f test_i32_cast() -> Bool
+    x = i32(1000000)
+    x == i32(1000000)
+
+f test_i64_cast() -> Bool
+    x = i64(9000000000)
+    x > i64(8000000000)
+
+# Test widening cast (i8 to i32)
+f test_cast_widening() -> Bool
+    a = i8(42)
+    b = i32(a)
+    b == i32(42)
+
+# Test narrowing cast with truncation (i32 to i8)
+f test_cast_truncate() -> Bool
+    a = i32(300)
+    b = i8(a)
+    # 300 mod 256 = 44
+    b == i8(44)
+
+# Test unsigned wraparound
+f test_u8_wraparound() -> Bool
+    a = -1
+    b = u8(a)
+    # -1 wraps to 255 as u8
+    b == u8(255)
+
+# Test int to float cast
+f test_cast_int_to_float() -> Bool
+    a = 42
+    b = f64(a)
+    b == f64(42)
+
+# Test float to int cast (truncation)
+f test_cast_float_to_int() -> Bool
+    a = 3.7
+    b = i32(a)
+    # Truncates toward zero
+    b == i32(3)
+
+# Test negative float to int cast
+f test_cast_negative_float_to_int() -> Bool
+    a = -2.9
+    b = i32(a)
+    # Truncates toward zero
+    b == i32(-2)
+
+# Test Int alias
+f test_int_alias() -> Bool
+    a = i32(100)
+    b = Int(a)
+    b == 100
+
+# Test Float alias
+f test_float_alias() -> Bool
+    a = 3.14
+    b = Float(a)
+    b == 3.14
+
+# Test arithmetic with casted values
+f test_cast_arithmetic() -> Bool
+    a = i8(5)
+    b = i32(10)
+    result = i32(a) + b
+    result == i32(15)
+
+f run_all_tests() -> Int
+    passed := 0
+    if test_i8_cast() then passed = passed + 1 else print("FAIL: test_i8_cast")
+    if test_u8_cast() then passed = passed + 1 else print("FAIL: test_u8_cast")
+    if test_i32_cast() then passed = passed + 1 else print("FAIL: test_i32_cast")
+    if test_i64_cast() then passed = passed + 1 else print("FAIL: test_i64_cast")
+    if test_cast_widening() then passed = passed + 1 else print("FAIL: test_cast_widening")
+    if test_cast_truncate() then passed = passed + 1 else print("FAIL: test_cast_truncate")
+    if test_u8_wraparound() then passed = passed + 1 else print("FAIL: test_u8_wraparound")
+    if test_cast_int_to_float() then passed = passed + 1 else print("FAIL: test_cast_int_to_float")
+    if test_cast_float_to_int() then passed = passed + 1 else print("FAIL: test_cast_float_to_int")
+    if test_cast_negative_float_to_int() then passed = passed + 1 else print("FAIL: test_cast_negative_float_to_int")
+    if test_int_alias() then passed = passed + 1 else print("FAIL: test_int_alias")
+    if test_float_alias() then passed = passed + 1 else print("FAIL: test_float_alias")
+    if test_cast_arithmetic() then passed = passed + 1 else print("FAIL: test_cast_arithmetic")
+
+    print("Integer type tests passed:")
+    print(passed)
+    print("of 13")
+
+    if passed == 13 then 1 else 0
+
+f main() -> Int = run_all_tests()

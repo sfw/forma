@@ -1599,7 +1599,21 @@ impl<'a> Parser<'a> {
                     }
                 }
             } else if self.check(TokenKind::LParen) {
-                // Function call
+                // Check if this is a type cast like i32(x) or f64(x)
+                if let ExprKind::Ident(ref name) = expr.kind {
+                    if let Some(target_ty) = self.type_name_to_type(&name.name, start) {
+                        // This is a cast expression
+                        self.expect(TokenKind::LParen)?;
+                        let inner = self.parse_expr()?;
+                        self.expect(TokenKind::RParen)?;
+                        expr = Expr {
+                            kind: ExprKind::Cast(Box::new(inner), target_ty),
+                            span: start.merge(self.previous_span()),
+                        };
+                        continue;
+                    }
+                }
+                // Regular function call
                 let args = self.parse_call_args()?;
                 expr = Expr {
                     kind: ExprKind::Call(Box::new(expr), args),
@@ -2998,6 +3012,39 @@ impl<'a> Parser<'a> {
         match self.current_kind() {
             Some(TokenKind::Ident(ref name)) => name == s,
             _ => false,
+        }
+    }
+
+    /// Check if a name is a castable type and return the corresponding Type AST node.
+    /// Used for T(x) cast syntax: i32(x), f64(x), Int(x), etc.
+    fn type_name_to_type(&self, name: &str, span: Span) -> Option<Type> {
+        // Check if this is a built-in numeric type that supports casting
+        let is_cast_type = matches!(
+            name,
+            "i8" | "i16" | "i32" | "i64" | "i128" |
+            "u8" | "u16" | "u32" | "u64" | "u128" |
+            "isize" | "usize" |
+            "f32" | "f64" |
+            "Int" | "Float"
+        );
+
+        if is_cast_type {
+            Some(Type {
+                kind: TypeKind::Path(TypePath {
+                    segments: vec![TypePathSegment {
+                        name: Ident {
+                            name: name.to_string(),
+                            span,
+                        },
+                        args: None,
+                        span,
+                    }],
+                    span,
+                }),
+                span,
+            })
+        } else {
+            None
         }
     }
 

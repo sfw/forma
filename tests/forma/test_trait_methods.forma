@@ -1,0 +1,65 @@
+# Test Method Resolution with Multiple Types Having Same Method
+# This tests that methods correctly resolve when multiple types have the same method name
+# Expected output: All tests pass, final result: 1
+
+# Define two structs with the same method names
+s Point { x: Int, y: Int }
+s Circle { radius: Int }
+
+i Point
+    f describe(&self) -> Str
+        "Point"
+
+    f area(&self) -> Int
+        0
+
+i Circle
+    f describe(&self) -> Str
+        "Circle"
+
+    f area(&self) -> Int
+        # Simplified: just return radius squared (without pi)
+        self.radius * self.radius
+
+# Test that method calls resolve to correct type when receiver is a struct literal
+f test_point_describe() -> Bool
+    p = Point { x: 1, y: 2 }
+    result = p.describe()
+    result == "Point"
+
+f test_circle_describe() -> Bool
+    c = Circle { radius: 5 }
+    result = c.describe()
+    result == "Circle"
+
+f test_point_area() -> Bool
+    p = Point { x: 1, y: 2 }
+    p.area() == 0
+
+f test_circle_area() -> Bool
+    c = Circle { radius: 3 }
+    c.area() == 9
+
+# Test method on newly constructed struct (inline)
+f test_inline_point_method() -> Bool
+    Point { x: 0, y: 0 }.area() == 0
+
+f test_inline_circle_method() -> Bool
+    Circle { radius: 4 }.area() == 16
+
+f run_all_tests() -> Int
+    passed := 0
+    if test_point_describe() then passed = passed + 1 else print("FAIL: test_point_describe")
+    if test_circle_describe() then passed = passed + 1 else print("FAIL: test_circle_describe")
+    if test_point_area() then passed = passed + 1 else print("FAIL: test_point_area")
+    if test_circle_area() then passed = passed + 1 else print("FAIL: test_circle_area")
+    if test_inline_point_method() then passed = passed + 1 else print("FAIL: test_inline_point_method")
+    if test_inline_circle_method() then passed = passed + 1 else print("FAIL: test_inline_circle_method")
+
+    print("Trait method resolution tests passed:")
+    print(passed)
+    print("of 6")
+
+    if passed == 6 then 1 else 0
+
+f main() -> Int = run_all_tests()
