@@ -450,6 +450,23 @@ impl Interpreter {
                 Ok(Some(Value::Unit))
             }
 
+            // str(value) -> Str - convert any value to a string
+            "str" => {
+                if args.is_empty() {
+                    return Err(InterpError { message: "str: expected 1 argument".to_string() });
+                }
+                // Special case: strings should not get extra quotes
+                let s = match &args[0] {
+                    Value::Str(s) => s.clone(),
+                    Value::Bool(b) => format!("{}", b),
+                    Value::Int(n) => format!("{}", n),
+                    Value::Float(f) => format!("{}", f),
+                    Value::Char(c) => format!("{}", c),
+                    other => format!("{}", other), // fallback to Display
+                };
+                Ok(Some(Value::Str(s)))
+            }
+
             // ===== Vec operations =====
             "vec_new" => {
                 Ok(Some(Value::Array(vec![])))

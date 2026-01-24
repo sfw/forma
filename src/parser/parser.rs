@@ -4,7 +4,7 @@
 //! handles FORMA's indentation-significant syntax.
 
 use crate::errors::{ParseError, Result};
-use crate::lexer::{Span, Token, TokenKind};
+use crate::lexer::{FStringPart, Span, Token, TokenKind};
 use crate::parser::ast::*;
 
 /// The parser for FORMA source code.
@@ -1664,6 +1664,12 @@ impl<'a> Parser<'a> {
     fn parse_primary(&mut self) -> Result<Expr> {
         let start = self.current_span();
 
+        // F-strings (interpolated strings): f"Hello {name}!"
+        if let Some(TokenKind::FString(parts)) = self.current_kind() {
+            self.advance();
+            return self.parse_fstring(parts, start);
+        }
+
         // Literals
         if let Some(lit) = self.try_parse_literal()? {
             // Check for range: literal..end or literal..=end
@@ -1937,6 +1943,104 @@ impl<'a> Parser<'a> {
         }
 
         Err(self.error("expected expression"))
+    }
+
+    /// Parse an f-string into a concatenation of string literals and str() calls.
+    /// f"Hello {name}!" becomes "Hello " + str(name) + "!"
+    fn parse_fstring(&mut self, parts: Vec<FStringPart>, span: Span) -> Result<Expr> {
+        if parts.is_empty() {
+            // Empty f-string: f"" -> ""
+            return Ok(Expr {
+                kind: ExprKind::Literal(Literal {
+                    kind: LiteralKind::String(String::new()),
+                    span,
+                }),
+                span,
+            });
+        }
+
+        // Convert parts to expressions
+        let mut exprs: Vec<Expr> = Vec::new();
+        for part in parts {
+            match part {
+                FStringPart::Text(s) => {
+                    if !s.is_empty() {
+                        exprs.push(Expr {
+                            kind: ExprKind::Literal(Literal {
+                                kind: LiteralKind::String(s),
+                                span,
+                            }),
+                            span,
+                        });
+                    }
+                }
+                FStringPart::Expr(expr_src) => {
+                    // Parse the expression from source
+                    let expr = self.parse_embedded_expr(&expr_src, span)?;
+                    // Wrap in str() call
+                    let str_call = Expr {
+                        kind: ExprKind::Call(
+                            Box::new(Expr {
+                                kind: ExprKind::Ident(Ident::new("str", span)),
+                                span,
+                            }),
+                            vec![Arg { name: None, value: expr, span }],
+                        ),
+                        span,
+                    };
+                    exprs.push(str_call);
+                }
+            }
+        }
+
+        // Handle single expression (no concatenation needed)
+        if exprs.len() == 1 {
+            return Ok(exprs.remove(0));
+        }
+
+        // Build a chain of concatenations: a + b + c + ...
+        let mut result = exprs.remove(0);
+        for expr in exprs {
+            result = Expr {
+                kind: ExprKind::Binary(Box::new(result), BinOp::Add, Box::new(expr)),
+                span,
+            };
+        }
+
+        Ok(result)
+    }
+
+    /// Parse an expression embedded in an f-string.
+    fn parse_embedded_expr(&mut self, expr_src: &str, span: Span) -> Result<Expr> {
+        // Lex and parse the expression source
+        use crate::lexer::Scanner;
+
+        let scanner = Scanner::new(expr_src);
+        let (tokens, lex_errors) = scanner.scan_all();
+
+        // Check for lexer errors
+        if !lex_errors.is_empty() {
+            return Err(ParseError::new(
+                format!("error in f-string expression: {}", lex_errors[0].message),
+                span
+            ).into());
+        }
+
+        // Filter out error tokens
+        let mut clean_tokens = Vec::new();
+        for tok in tokens {
+            if let TokenKind::Error(msg) = &tok.kind {
+                return Err(ParseError::new(
+                    format!("error in f-string expression: {}", msg),
+                    span
+                ).into());
+            }
+            clean_tokens.push(tok);
+        }
+
+        // Parse the expression
+        let mut parser = Parser::new(&clean_tokens);
+        parser.parse_expr()
     }
 
     fn parse_if_expr(&mut self, start: Span) -> Result<Expr> {

@@ -155,6 +155,13 @@ impl TypeEnv {
             TypeScheme { vars: vec![print_var], ty: Ty::Fn(vec![Ty::Var(print_var)], Box::new(Ty::Unit)) },
         );
 
+        // str: T -> Str (convert any value to string)
+        let str_var = TypeVar::fresh();
+        env.bindings.insert(
+            "str".to_string(),
+            TypeScheme { vars: vec![str_var], ty: Ty::Fn(vec![Ty::Var(str_var)], Box::new(Ty::Str)) },
+        );
+
         // Vec operations
         // vec_new: () -> [T]
         let vec_new_t = TypeVar::fresh();

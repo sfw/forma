@@ -5,6 +5,15 @@
 
 use std::fmt;
 
+/// Part of an f-string: either literal text or an expression to interpolate.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FStringPart {
+    /// Literal text between interpolations
+    Text(String),
+    /// Expression to interpolate (the source code between { and })
+    Expr(String),
+}
+
 /// A token with its location in the source file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
@@ -169,6 +178,8 @@ pub enum TokenKind {
     Float(f64),
     String(String),
     Char(char),
+    /// Interpolated string (f-string) with parts: either literal text or expressions to interpolate
+    FString(Vec<FStringPart>),
 
     // Identifiers
     Ident(String),
@@ -283,6 +294,7 @@ impl TokenKind {
                 | TokenKind::Float(_)
                 | TokenKind::String(_)
                 | TokenKind::Char(_)
+                | TokenKind::FString(_)
                 | TokenKind::True
                 | TokenKind::False
                 | TokenKind::None
@@ -372,6 +384,16 @@ impl fmt::Display for TokenKind {
             TokenKind::Float(n) => write!(f, "{}", n),
             TokenKind::String(s) => write!(f, "\"{}\"", s),
             TokenKind::Char(c) => write!(f, "'{}'", c),
+            TokenKind::FString(parts) => {
+                write!(f, "f\"")?;
+                for part in parts {
+                    match part {
+                        FStringPart::Text(s) => write!(f, "{}", s)?,
+                        FStringPart::Expr(e) => write!(f, "{{{}}}", e)?,
+                    }
+                }
+                write!(f, "\"")
+            }
             TokenKind::Ident(s) => write!(f, "{}", s),
             TokenKind::Newline => write!(f, "NEWLINE"),
             TokenKind::Indent => write!(f, "INDENT"),

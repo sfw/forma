@@ -4,7 +4,7 @@
 //! handling indentation-significant syntax.
 
 use crate::errors::LexError;
-use crate::lexer::token::{Span, Token, TokenKind};
+use crate::lexer::token::{FStringPart, Span, Token, TokenKind};
 
 /// The lexer that tokenizes FORMA source code.
 pub struct Scanner<'a> {
@@ -722,14 +722,121 @@ impl<'a> Scanner<'a> {
             self.advance();
         }
 
-        let lexeme = self.current_lexeme();
+        let lexeme = self.current_lexeme().to_string();
+
+        // Check for f-string: f"..."
+        if lexeme == "f" && self.peek() == Some('"') {
+            self.advance(); // consume the opening quote
+            return self.scan_fstring();
+        }
 
         // Check if it's a keyword
-        if let Some(kind) = TokenKind::keyword(lexeme) {
+        if let Some(kind) = TokenKind::keyword(&lexeme) {
             self.make_token(kind)
         } else {
-            self.make_token(TokenKind::Ident(lexeme.to_string()))
+            self.make_token(TokenKind::Ident(lexeme))
         }
+    }
+
+    /// Scan an f-string (format string) after the opening f" has been consumed.
+    fn scan_fstring(&mut self) -> Token {
+        let mut parts = Vec::new();
+        let mut current_text = String::new();
+
+        loop {
+            match self.peek() {
+                None | Some('\n') => {
+                    return self.error_token("unterminated f-string");
+                }
+                Some('"') => {
+                    // End of f-string
+                    if !current_text.is_empty() {
+                        parts.push(FStringPart::Text(current_text));
+                    }
+                    self.advance();
+                    break;
+                }
+                Some('\\') => {
+                    // Handle escape sequences
+                    self.advance();
+                    match self.advance() {
+                        Some('n') => current_text.push('\n'),
+                        Some('r') => current_text.push('\r'),
+                        Some('t') => current_text.push('\t'),
+                        Some('\\') => current_text.push('\\'),
+                        Some('"') => current_text.push('"'),
+                        Some('{') => current_text.push('{'),
+                        Some('}') => current_text.push('}'),
+                        Some(c) => {
+                            return self.error_token(format!("invalid escape in f-string: \\{}", c));
+                        }
+                        None => {
+                            return self.error_token("unterminated f-string");
+                        }
+                    }
+                }
+                Some('{') => {
+                    self.advance();
+                    // Check for escaped brace {{
+                    if self.peek() == Some('{') {
+                        self.advance();
+                        current_text.push('{');
+                        continue;
+                    }
+
+                    // Save current text as a part
+                    if !current_text.is_empty() {
+                        parts.push(FStringPart::Text(current_text));
+                        current_text = String::new();
+                    }
+
+                    // Parse expression until }
+                    let mut expr = String::new();
+                    let mut brace_depth = 1;
+
+                    loop {
+                        match self.peek() {
+                            None | Some('\n') => {
+                                return self.error_token("unterminated expression in f-string");
+                            }
+                            Some('}') => {
+                                brace_depth -= 1;
+                                if brace_depth == 0 {
+                                    self.advance();
+                                    break;
+                                }
+                                expr.push(self.advance().unwrap());
+                            }
+                            Some('{') => {
+                                brace_depth += 1;
+                                expr.push(self.advance().unwrap());
+                            }
+                            Some(_) => {
+                                expr.push(self.advance().unwrap());
+                            }
+                        }
+                    }
+
+                    parts.push(FStringPart::Expr(expr.trim().to_string()));
+                }
+                Some('}') => {
+                    self.advance();
+                    // Check for escaped brace }}
+                    if self.peek() == Some('}') {
+                        self.advance();
+                        current_text.push('}');
+                        continue;
+                    }
+                    return self.error_token("single '}' in f-string (use '}}' to escape)");
+                }
+                Some(c) => {
+                    current_text.push(c);
+                    self.advance();
+                }
+            }
+        }
+
+        self.make_token(TokenKind::FString(parts))
     }
 
     // Helper methods
