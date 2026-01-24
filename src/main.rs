@@ -1021,26 +1021,116 @@ fn build(file: &PathBuf, output: Option<&PathBuf>, opt_level: u8, error_format: 
         file.with_extension("")
     });
 
-    // For now, output a placeholder message
-    // TODO: Implement actual LLVM codegen
-    match error_format {
-        ErrorFormat::Human => {
-            println!("LLVM compilation not yet implemented.");
-            println!("Would compile {} -> {} (opt level {})",
-                     file.display(), output_path.display(), opt_level);
-            println!("Use 'aria run' to interpret the program instead.");
+    // Lower to MIR
+    let program = match Lowerer::new().lower(&ast) {
+        Ok(prog) => prog,
+        Err(errors) => {
+            for e in &errors {
+                match error_format {
+                    ErrorFormat::Human => ctx.error(e.span, &e.message),
+                    ErrorFormat::Json => json_errors.push(span_to_json_error(
+                        &filename,
+                        e.span,
+                        "LOWER",
+                        &e.message,
+                        None,
+                    )),
+                }
+            }
+            if matches!(error_format, ErrorFormat::Json) {
+                output_json_errors(json_errors, None);
+            }
+            return Err(format!("{} lowering error(s)", errors.len()));
         }
-        ErrorFormat::Json => {
-            let result = serde_json::json!({
-                "status": "not_implemented",
-                "input": file.to_string_lossy(),
-                "output": output_path.to_string_lossy(),
-                "opt_level": opt_level,
-                "message": "LLVM compilation not yet implemented"
-            });
-            println!("{}", serde_json::to_string_pretty(&result).unwrap());
+    };
+
+    // LLVM codegen
+    #[cfg(feature = "llvm")]
+    {
+        use aria::codegen::LLVMCodegen;
+        use inkwell::context::Context;
+
+        let context = Context::create();
+        let mut codegen = LLVMCodegen::new(&context, &filename);
+        codegen.set_opt_level(opt_level);
+
+        if let Err(e) = codegen.compile(&program) {
+            match error_format {
+                ErrorFormat::Human => {
+                    eprintln!("error[CODEGEN]: {}", e);
+                }
+                ErrorFormat::Json => {
+                    json_errors.push(JsonError {
+                        file: filename.clone(),
+                        line: 1,
+                        column: 1,
+                        end_line: 1,
+                        end_column: 1,
+                        severity: "error".to_string(),
+                        code: "CODEGEN".to_string(),
+                        message: e.to_string(),
+                        help: None,
+                    });
+                    output_json_errors(json_errors, None);
+                }
+            }
+            return Err(format!("Codegen error: {}", e));
+        }
+
+        // Write object file
+        let obj_path = output_path.with_extension("o");
+        if let Err(e) = codegen.write_object_file(&obj_path) {
+            return Err(format!("Failed to write object file: {}", e));
+        }
+
+        // Link to executable
+        let status = std::process::Command::new("cc")
+            .arg(&obj_path)
+            .arg("-o")
+            .arg(&output_path)
+            .status()
+            .map_err(|e| format!("Failed to run linker: {}", e))?;
+
+        if !status.success() {
+            return Err("Linking failed".into());
+        }
+
+        // Clean up object file
+        let _ = std::fs::remove_file(&obj_path);
+
+        match error_format {
+            ErrorFormat::Human => {
+                println!("Compiled {} -> {}", file.display(), output_path.display());
+            }
+            ErrorFormat::Json => {
+                let result = serde_json::json!({
+                    "status": "success",
+                    "input": file.to_string_lossy(),
+                    "output": output_path.to_string_lossy(),
+                    "opt_level": opt_level
+                });
+                println!("{}", serde_json::to_string_pretty(&result).unwrap());
+            }
         }
     }
+
+    #[cfg(not(feature = "llvm"))]
+    {
+        match error_format {
+            ErrorFormat::Human => {
+                eprintln!("LLVM support not enabled. Rebuild with --features llvm");
+            }
+            ErrorFormat::Json => {
+                let result = serde_json::json!({
+                    "status": "not_available",
+                    "message": "LLVM support not enabled. Rebuild with --features llvm"
+                });
+                println!("{}", serde_json::to_string_pretty(&result).unwrap());
+            }
+        }
+        return Err("LLVM not available".into());
+    }
+
     Ok(())
 }
 

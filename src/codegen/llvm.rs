@@ -25,14 +25,19 @@ use inkwell::module::Module;
 use inkwell::targets::{
     CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine,
 };
-use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
+use inkwell::types::{BasicMetadataTypeEnum, BasicTypeEnum};
+use inkwell::values::BasicMetadataValueEnum;
 use inkwell::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue};
 use inkwell::OptimizationLevel;
 use inkwell::{AddressSpace, IntPredicate};
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::mir::{BinOp, Block, Function, Operand, Program, Rvalue, Statement, Terminator, Ty};
+use crate::mir::{
+    BasicBlock, BinOp, Constant, Function, Operand, Program, Rvalue,
+    Statement, StatementKind, Terminator, UnOp,
+};
+use crate::types::Ty;
 
 /// Error during LLVM code generation.
 #[derive(Debug)]
@@ -57,8 +62,12 @@ pub struct LLVMCodegen<'ctx> {
     functions: HashMap<String, FunctionValue<'ctx>>,
     /// Map from local variable indices to stack allocations
     locals: HashMap<usize, PointerValue<'ctx>>,
+    /// Map from local variable indices to their LLVM types
+    local_types: HashMap<usize, BasicTypeEnum<'ctx>>,
     /// Current function being compiled
     current_function: Option<FunctionValue<'ctx>>,
+    /// Optimization level
+    opt_level: OptimizationLevel,
 }
 
 impl<'ctx> LLVMCodegen<'ctx> {
@@ -73,19 +82,31 @@ impl<'ctx> LLVMCodegen<'ctx> {
             builder,
             functions: HashMap::new(),
             locals: HashMap::new(),
+            local_types: HashMap::new(),
             current_function: None,
+            opt_level: OptimizationLevel::Default,
         }
+    }
+
+    /// Set the optimization level.
+    pub fn set_opt_level(&mut self, level: u8) {
+        self.opt_level = match level {
+            0 => OptimizationLevel::None,
+            1 => OptimizationLevel::Less,
+            2 => OptimizationLevel::Default,
+            _ => OptimizationLevel::Aggressive,
+        };
     }
 
     /// Compile a MIR program to LLVM IR.
     pub fn compile(&mut self, program: &Program) -> Result<(), CodegenError> {
         // First pass: declare all functions
-        for func in &program.functions {
+        for (_name, func) in &program.functions {
             self.declare_function(func)?;
         }
 
         // Second pass: compile function bodies
-        for func in &program.functions {
+        for (_name, func) in &program.functions {
             self.compile_function(func)?;
         }
 
@@ -98,7 +119,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
         let param_types: Vec<BasicMetadataTypeEnum> = func
             .params
             .iter()
-            .map(|p| self.lower_type(&p.ty).map(|t| t.into()))
+            .map(|(_, ty)| self.lower_type(ty).map(|t| t.into()))
             .collect::<Result<Vec<_>, _>>()?;
 
         let fn_type = match return_type {
@@ -129,6 +150,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
 
         self.current_function = Some(fn_value);
         self.locals.clear();
+        self.local_types.clear();
 
         // Create entry block
         let entry = self.context.append_basic_block(fn_value, "entry");
@@ -140,6 +162,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
             let alloca = self.builder.build_alloca(ty, &format!("local_{}", i))
                 .map_err(|e| CodegenError { message: format!("alloca failed: {:?}", e) })?;
             self.locals.insert(i, alloca);
+            self.local_types.insert(i, ty);
         }
 
         // Store function parameters into their locals
@@ -180,31 +203,40 @@ impl<'ctx> LLVMCodegen<'ctx> {
     /// Compile a basic block.
     fn compile_block(
         &mut self,
-        block: &Block,
+        block: &BasicBlock,
         blocks: &HashMap<usize, inkwell::basic_block::BasicBlock>,
     ) -> Result<(), CodegenError> {
         // Compile statements
-        for stmt in &block.statements {
+        for stmt in &block.stmts {
             self.compile_statement(stmt)?;
         }
 
         // Compile terminator
-        self.compile_terminator(&block.terminator, blocks)?;
+        if let Some(ref term) = block.terminator {
+            self.compile_terminator(term, blocks)?;
+        }
 
         Ok(())
     }
 
     /// Compile a statement.
     fn compile_statement(&mut self, stmt: &Statement) -> Result<(), CodegenError> {
-        match stmt {
-            Statement::Assign(place, rvalue) => {
+        match &stmt.kind {
+            StatementKind::Assign(local, rvalue) => {
                 let value = self.compile_rvalue(rvalue)?;
-                if let Some(alloca) = self.locals.get(&place.local) {
-                    self.builder.build_store(*alloca, value)
+                let idx = local.0 as usize;
+                // Get alloca and type before mutable borrow
+                let alloca = self.locals.get(&idx).copied();
+                let target_ty = self.local_types.get(&idx).copied();
+
+                if let Some(alloca) = alloca {
+                    // Coerce value if needed (e.g., i1 to i64 for comparison results)
+                    let coerced_value = self.coerce_value(value, target_ty)?;
+                    self.builder.build_store(alloca, coerced_value)
                         .map_err(|e| CodegenError { message: format!("store failed: {:?}", e) })?;
                 }
             }
-            Statement::Nop => {}
+            StatementKind::Nop => {}
         }
         Ok(())
     }
@@ -222,31 +254,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
                 let val = self.compile_operand(operand)?;
                 self.compile_unaryop(*op, val)
             }
-            Rvalue::Call(func_name, args) => {
-                let fn_value = self
-                    .functions
-                    .get(func_name)
-                    .copied()
-                    .ok_or_else(|| CodegenError {
-                        message: format!("Unknown function: {}", func_name),
-                    })?;
-
-                let compiled_args: Vec<BasicMetadataTypeEnum> = args
-                    .iter()
-                    .map(|a| self.compile_operand(a).map(|v| v.into()))
-                    .collect::<Result<Vec<_>, _>>()?;
-
-                let call = self
-                    .builder
-                    .build_call(fn_value, &compiled_args, "call")
-                    .map_err(|e| CodegenError { message: format!("call failed: {:?}", e) })?;
-
-                call.try_as_basic_value()
-                    .left()
-                    .ok_or_else(|| CodegenError {
-                        message: "Function returned void".into(),
-                    })
-            }
+            // Note: function calls are handled in Terminator::Call, not in Rvalue
             _ => Err(CodegenError {
                 message: format!("Unsupported rvalue: {:?}", rvalue),
             }),
@@ -256,21 +264,51 @@ impl<'ctx> LLVMCodegen<'ctx> {
     /// Compile an operand.
     fn compile_operand(&mut self, operand: &Operand) -> Result<BasicValueEnum<'ctx>, CodegenError> {
         match operand {
-            Operand::Copy(place) | Operand::Move(place) => {
-                if let Some(alloca) = self.locals.get(&place.local) {
-                    let ty = self.context.i64_type();
+            Operand::Local(local) | Operand::Copy(local) | Operand::Move(local) => {
+                let idx = local.0 as usize;
+                if let Some(alloca) = self.locals.get(&idx) {
+                    let ty = self.local_types.get(&idx)
+                        .copied()
+                        .unwrap_or_else(|| self.context.i64_type().into());
                     self.builder.build_load(ty, *alloca, "load")
                         .map_err(|e| CodegenError { message: format!("load failed: {:?}", e) })
                 } else {
                     Err(CodegenError {
-                        message: format!("Unknown local: {}", place.local),
+                        message: format!("Unknown local: {}", local.0),
                     })
                 }
             }
             Operand::Constant(constant) => {
-                // For now, assume all constants are i64
-                let val = self.context.i64_type().const_int(*constant as u64, true);
-                Ok(val.into())
+                match constant {
+                    Constant::Int(n) => {
+                        let val = self.context.i64_type().const_int(*n as u64, true);
+                        Ok(val.into())
+                    }
+                    Constant::Bool(b) => {
+                        let val = self.context.bool_type().const_int(if *b { 1 } else { 0 }, false);
+                        Ok(val.into())
+                    }
+                    Constant::Float(f) => {
+                        let val = self.context.f64_type().const_float(*f);
+                        Ok(val.into())
+                    }
+                    Constant::Char(c) => {
+                        let val = self.context.i32_type().const_int(*c as u64, false);
+                        Ok(val.into())
+                    }
+                    Constant::Str(s) => {
+                        // Create a global string constant
+                        let str_val = self.context.const_string(s.as_bytes(), true);
+                        let global = self.module.add_global(str_val.get_type(), None, "str");
+                        global.set_constant(true);
+                        global.set_initializer(&str_val);
+                        Ok(global.as_pointer_value().into())
+                    }
+                    Constant::Unit => {
+                        // Unit type as i8 zero
+                        Ok(self.context.i8_type().const_zero().into())
+                    }
+                }
             }
         }
     }
@@ -294,8 +332,8 @@ impl<'ctx> LLVMCodegen<'ctx> {
                 .map_err(|e| CodegenError { message: format!("mul failed: {:?}", e) })?,
             BinOp::Div => self.builder.build_int_signed_div(lhs_int, rhs_int, "div")
                 .map_err(|e| CodegenError { message: format!("div failed: {:?}", e) })?,
-            BinOp::Mod => self.builder.build_int_signed_rem(lhs_int, rhs_int, "mod")
-                .map_err(|e| CodegenError { message: format!("mod failed: {:?}", e) })?,
+            BinOp::Rem => self.builder.build_int_signed_rem(lhs_int, rhs_int, "rem")
+                .map_err(|e| CodegenError { message: format!("rem failed: {:?}", e) })?,
             BinOp::Eq => self.builder.build_int_compare(IntPredicate::EQ, lhs_int, rhs_int, "eq")
                 .map_err(|e| CodegenError { message: format!("eq failed: {:?}", e) })?,
             BinOp::Ne => self.builder.build_int_compare(IntPredicate::NE, lhs_int, rhs_int, "ne")
@@ -325,21 +363,52 @@ impl<'ctx> LLVMCodegen<'ctx> {
     /// Compile a unary operation.
     fn compile_unaryop(
         &mut self,
-        op: crate::mir::UnaryOp,
+        op: UnOp,
         val: BasicValueEnum<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>, CodegenError> {
         let int_val = val.into_int_value();
         let result = match op {
-            crate::mir::UnaryOp::Neg => {
+            UnOp::Neg => {
                 self.builder.build_int_neg(int_val, "neg")
                     .map_err(|e| CodegenError { message: format!("neg failed: {:?}", e) })?
             }
-            crate::mir::UnaryOp::Not => {
+            UnOp::Not | UnOp::BitNot => {
                 self.builder.build_not(int_val, "not")
                     .map_err(|e| CodegenError { message: format!("not failed: {:?}", e) })?
             }
         };
         Ok(result.into())
+    }
+
+    /// Coerce a value to match a target type (e.g., i1 to i64 for comparisons stored in Int).
+    fn coerce_value(
+        &mut self,
+        value: BasicValueEnum<'ctx>,
+        target_ty: Option<BasicTypeEnum<'ctx>>,
+    ) -> Result<BasicValueEnum<'ctx>, CodegenError> {
+        let Some(target) = target_ty else {
+            return Ok(value);
+        };
+
+        // Handle integer type mismatches
+        if let (BasicValueEnum::IntValue(iv), BasicTypeEnum::IntType(target_int)) = (value, target) {
+            let src_width = iv.get_type().get_bit_width();
+            let dst_width = target_int.get_bit_width();
+
+            if src_width < dst_width {
+                // Zero-extend smaller integers (e.g., i1 comparison result to i64)
+                let extended = self.builder.build_int_z_extend(iv, target_int, "zext")
+                    .map_err(|e| CodegenError { message: format!("zext failed: {:?}", e) })?;
+                return Ok(extended.into());
+            } else if src_width > dst_width {
+                // Truncate larger integers
+                let truncated = self.builder.build_int_truncate(iv, target_int, "trunc")
+                    .map_err(|e| CodegenError { message: format!("trunc failed: {:?}", e) })?;
+                return Ok(truncated.into());
+            }
+        }
+
+        Ok(value)
     }
 
     /// Compile a block terminator.
@@ -360,41 +429,93 @@ impl<'ctx> LLVMCodegen<'ctx> {
                 }
             }
             Terminator::Goto(target) => {
-                if let Some(&bb) = blocks.get(target) {
+                if let Some(&bb) = blocks.get(&(target.0 as usize)) {
                     self.builder.build_unconditional_branch(bb)
                         .map_err(|e| CodegenError { message: format!("branch failed: {:?}", e) })?;
                 }
             }
-            Terminator::SwitchInt {
-                discriminant,
-                targets,
-                otherwise,
-            } => {
-                let val = self.compile_operand(discriminant)?.into_int_value();
-                let else_bb = blocks.get(otherwise).copied().ok_or_else(|| CodegenError {
-                    message: "Missing otherwise block".into(),
+            Terminator::If { cond, then_block, else_block } => {
+                let cond_val = self.compile_operand(cond)?.into_int_value();
+                let then_bb = blocks.get(&(then_block.0 as usize)).copied().ok_or_else(|| CodegenError {
+                    message: "Missing then block".into(),
+                })?;
+                let else_bb = blocks.get(&(else_block.0 as usize)).copied().ok_or_else(|| CodegenError {
+                    message: "Missing else block".into(),
                 })?;
 
-                // For now, handle simple if/else (2 targets)
-                if targets.len() == 1 {
-                    let (_, then_target) = &targets[0];
-                    let then_bb = blocks.get(then_target).copied().ok_or_else(|| CodegenError {
-                        message: "Missing then block".into(),
-                    })?;
-                    let zero = self.context.i64_type().const_int(0, false);
-                    let cond = self.builder.build_int_compare(IntPredicate::NE, val, zero, "cond")
-                        .map_err(|e| CodegenError { message: format!("cmp failed: {:?}", e) })?;
-                    self.builder.build_conditional_branch(cond, then_bb, else_bb)
-                        .map_err(|e| CodegenError { message: format!("branch failed: {:?}", e) })?;
+                // Convert to bool if needed (compare != 0 for non-bool types)
+                let cond_bool = if cond_val.get_type().get_bit_width() == 1 {
+                    cond_val
                 } else {
-                    // Use switch instruction for multiple targets
-                    let switch = self.builder.build_switch(val, else_bb, targets.len() as u32);
-                    for (value, target) in targets {
-                        if let Some(&bb) = blocks.get(target) {
+                    let zero = cond_val.get_type().const_zero();
+                    self.builder.build_int_compare(IntPredicate::NE, cond_val, zero, "tobool")
+                        .map_err(|e| CodegenError { message: format!("cmp failed: {:?}", e) })?
+                };
+
+                self.builder.build_conditional_branch(cond_bool, then_bb, else_bb)
+                    .map_err(|e| CodegenError { message: format!("branch failed: {:?}", e) })?;
+            }
+            Terminator::Switch { operand, targets, default } => {
+                let val = self.compile_operand(operand)?.into_int_value();
+                let default_bb = blocks.get(&(default.0 as usize)).copied().ok_or_else(|| CodegenError {
+                    message: "Missing default block".into(),
+                })?;
+
+                // Build switch cases
+                let cases: Vec<(IntValue, inkwell::basic_block::BasicBlock)> = targets
+                    .iter()
+                    .filter_map(|(value, target)| {
+                        blocks.get(&(target.0 as usize)).map(|&bb| {
                             let const_val = self.context.i64_type().const_int(*value as u64, false);
-                            switch.add_case(const_val, bb);
+                            (const_val, bb)
+                        })
+                    })
+                    .collect();
+
+                self.builder.build_switch(val, default_bb, &cases)
+                    .map_err(|e| CodegenError { message: format!("switch failed: {:?}", e) })?;
+            }
+            Terminator::Call { func, args, dest, next } => {
+                let fn_value = self
+                    .functions
+                    .get(func)
+                    .copied()
+                    .ok_or_else(|| CodegenError {
+                        message: format!("Unknown function: {}", func),
+                    })?;
+
+                let compiled_args: Vec<BasicMetadataValueEnum> = args
+                    .iter()
+                    .map(|a| self.compile_operand(a).map(|v| v.into()))
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                let call = self
+                    .builder
+                    .build_call(fn_value, &compiled_args, "call")
+                    .map_err(|e| CodegenError { message: format!("call failed: {:?}", e) })?;
+
+                // Store result if there's a destination
+                if let Some(local) = dest {
+                    if let Some(result) = call.try_as_basic_value().left() {
+                        if let Some(alloca) = self.locals.get(&(local.0 as usize)) {
+                            self.builder.build_store(*alloca, result)
+                                .map_err(|e| CodegenError { message: format!("store failed: {:?}", e) })?;
                         }
                     }
+                }
+
+                // Jump to next block
+                if let Some(&bb) = blocks.get(&(next.0 as usize)) {
+                    self.builder.build_unconditional_branch(bb)
+                        .map_err(|e| CodegenError { message: format!("branch failed: {:?}", e) })?;
+                }
+            }
+            Terminator::CallIndirect { callee: _, args: _, dest: _, next } => {
+                // TODO: Implement indirect calls for closures
+                // For now, just jump to the next block
+                if let Some(&bb) = blocks.get(&(next.0 as usize)) {
+                    self.builder.build_unconditional_branch(bb)
+                        .map_err(|e| CodegenError { message: format!("branch failed: {:?}", e) })?;
                 }
             }
             Terminator::Unreachable => {
@@ -440,7 +561,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
                 &triple,
                 "generic",
                 "",
-                OptimizationLevel::Default,
+                self.opt_level,
                 RelocMode::Default,
                 CodeModel::Default,
             )
