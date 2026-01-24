@@ -1,0 +1,208 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "FORMA",
+    "scopeName": "source.forma",
+    "patterns": [
+        { "include": "#comments" },
+        { "include": "#strings" },
+        { "include": "#fstrings" },
+        { "include": "#numbers" },
+        { "include": "#keywords" },
+        { "include": "#types" },
+        { "include": "#constants" },
+        { "include": "#operators" },
+        { "include": "#functions" },
+        { "include": "#identifiers" }
+    ],
+    "repository": {
+        "comments": {
+            "patterns": [
+                {
+                    "name": "comment.line.number-sign.forma",
+                    "match": "#.*$"
+                }
+            ]
+        },
+        "strings": {
+            "patterns": [
+                {
+                    "name": "string.quoted.double.forma",
+                    "begin": "\"",
+                    "end": "\"",
+                    "patterns": [
+                        {
+                            "name": "constant.character.escape.forma",
+                            "match": "\\\\(?:[nrt\\\\\"'0]|x[0-9a-fA-F]{2}|u\\{[0-9a-fA-F]+\\})"
+                        }
+                    ]
+                },
+                {
+                    "name": "string.quoted.single.forma",
+                    "begin": "'",
+                    "end": "'",
+                    "patterns": [
+                        {
+                            "name": "constant.character.escape.forma",
+                            "match": "\\\\(?:[nrt\\\\\"'0]|x[0-9a-fA-F]{2}|u\\{[0-9a-fA-F]+\\})"
+                        }
+                    ]
+                }
+            ]
+        },
+        "fstrings": {
+            "patterns": [
+                {
+                    "name": "string.interpolated.forma",
+                    "begin": "f\"",
+                    "end": "\"",
+                    "patterns": [
+                        {
+                            "name": "constant.character.escape.forma",
+                            "match": "\\\\(?:[nrt\\\\\"'{}0]|x[0-9a-fA-F]{2}|u\\{[0-9a-fA-F]+\\})"
+                        },
+                        {
+                            "name": "meta.embedded.line.forma",
+                            "begin": "\\{",
+                            "end": "\\}",
+                            "patterns": [
+                                { "include": "$self" }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
+        "numbers": {
+            "patterns": [
+                {
+                    "name": "constant.numeric.float.forma",
+                    "match": "\\b\\d+\\.\\d+(?:[eE][+-]?\\d+)?(?:f32|f64)?\\b"
+                },
+                {
+                    "name": "constant.numeric.hex.forma",
+                    "match": "\\b0x[0-9a-fA-F_]+(?:i8|i16|i32|i64|u8|u16|u32|u64|isize|usize)?\\b"
+                },
+                {
+                    "name": "constant.numeric.binary.forma",
+                    "match": "\\b0b[01_]+(?:i8|i16|i32|i64|u8|u16|u32|u64|isize|usize)?\\b"
+                },
+                {
+                    "name": "constant.numeric.octal.forma",
+                    "match": "\\b0o[0-7_]+(?:i8|i16|i32|i64|u8|u16|u32|u64|isize|usize)?\\b"
+                },
+                {
+                    "name": "constant.numeric.integer.forma",
+                    "match": "\\b\\d[\\d_]*(?:i8|i16|i32|i64|u8|u16|u32|u64|isize|usize)?\\b"
+                }
+            ]
+        },
+        "keywords": {
+            "patterns": [
+                {
+                    "name": "keyword.control.forma",
+                    "match": "\\b(if|then|else|for|in|wh|lp|br|ct|ret|m)\\b"
+                },
+                {
+                    "name": "keyword.declaration.forma",
+                    "match": "\\b(f|s|e|t|i|us|md|pub|type|impl)\\b"
+                },
+                {
+                    "name": "keyword.other.forma",
+                    "match": "\\b(as|aw|mut|mv|un|where)\\b"
+                }
+            ]
+        },
+        "types": {
+            "patterns": [
+                {
+                    "name": "storage.type.primitive.forma",
+                    "match": "\\b(Int|Float|Bool|Str|Char|Unit|Never)\\b"
+                },
+                {
+                    "name": "storage.type.integer.forma",
+                    "match": "\\b(i8|i16|i32|i64|u8|u16|u32|u64|isize|usize|f32|f64)\\b"
+                },
+                {
+                    "name": "storage.type.builtin.forma",
+                    "match": "\\b(Option|Result|Vec|Map|Self)\\b"
+                },
+                {
+                    "name": "entity.name.type.forma",
+                    "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+                }
+            ]
+        },
+        "constants": {
+            "patterns": [
+                {
+                    "name": "constant.language.boolean.forma",
+                    "match": "\\b(true|false|T|F)\\b"
+                },
+                {
+                    "name": "constant.language.none.forma",
+                    "match": "\\b(none|N)\\b"
+                },
+                {
+                    "name": "support.function.builtin.forma",
+                    "match": "\\b(Some|Ok|Err|ok|err)\\b"
+                }
+            ]
+        },
+        "operators": {
+            "patterns": [
+                {
+                    "name": "keyword.operator.arithmetic.forma",
+                    "match": "[+\\-*/%]"
+                },
+                {
+                    "name": "keyword.operator.comparison.forma",
+                    "match": "==|!=|<=|>=|<|>"
+                },
+                {
+                    "name": "keyword.operator.logical.forma",
+                    "match": "&&|\\|\\||!"
+                },
+                {
+                    "name": "keyword.operator.bitwise.forma",
+                    "match": "&|\\||\\^|<<|>>"
+                },
+                {
+                    "name": "keyword.operator.assignment.forma",
+                    "match": ":=|=|\\+=|-=|\\*=|/="
+                },
+                {
+                    "name": "keyword.operator.range.forma",
+                    "match": "\\.\\.\\.?=?"
+                },
+                {
+                    "name": "keyword.operator.arrow.forma",
+                    "match": "->|=>"
+                },
+                {
+                    "name": "keyword.operator.try.forma",
+                    "match": "\\?\\??"
+                },
+                {
+                    "name": "keyword.operator.path.forma",
+                    "match": "::"
+                }
+            ]
+        },
+        "functions": {
+            "patterns": [
+                {
+                    "name": "entity.name.function.forma",
+                    "match": "\\b([a-z_][a-zA-Z0-9_]*)\\s*(?=\\()"
+                }
+            ]
+        },
+        "identifiers": {
+            "patterns": [
+                {
+                    "name": "variable.other.forma",
+                    "match": "\\b[a-z_][a-zA-Z0-9_]*\\b"
+                }
+            ]
+        }
+    }
+}

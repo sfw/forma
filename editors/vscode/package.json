@@ -1,0 +1,39 @@
+{
+    "name": "forma-language",
+    "displayName": "FORMA Language",
+    "description": "Syntax highlighting for the FORMA programming language",
+    "version": "0.1.0",
+    "publisher": "forma-lang",
+    "engines": {
+        "vscode": "^1.60.0"
+    },
+    "categories": [
+        "Programming Languages"
+    ],
+    "contributes": {
+        "languages": [
+            {
+                "id": "forma",
+                "aliases": ["FORMA", "forma"],
+                "extensions": [".forma"],
+                "configuration": "./language-configuration.json"
+            }
+        ],
+        "grammars": [
+            {
+                "language": "forma",
+                "scopeName": "source.forma",
+                "path": "./syntaxes/forma.tmLanguage.json"
+            }
+        ]
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/forma-lang/forma"
+    },
+    "keywords": [
+        "forma",
+        "programming language",
+        "syntax highlighting"
+    ]
+}
