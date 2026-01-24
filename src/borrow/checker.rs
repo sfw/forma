@@ -134,9 +134,11 @@ struct VarInfo {
     state: VarState,
     /// Is the variable mutable?
     mutable: bool,
-    /// Is this a reference type?
+    /// Is this a reference type? (TODO: use for reference tracking)
+    #[allow(dead_code)]
     is_ref: bool,
-    /// Where was it defined?
+    /// Where was it defined? (TODO: use for better error messages)
+    #[allow(dead_code)]
     def_span: Span,
     /// Is this a parameter?
     is_param: bool,

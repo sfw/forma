@@ -18,6 +18,8 @@ pub struct TypeChecker {
     /// Collected errors
     errors: Vec<TypeError>,
     /// Inferred types for expressions (by span)
+    /// TODO: expose via API for IDE features (hover types, etc.)
+    #[allow(dead_code)]
     expr_types: HashMap<Span, Ty>,
 }
 

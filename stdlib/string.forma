@@ -53,8 +53,8 @@ f str_replace_first(s: Str, pattern: Str, replacement: Str) -> Str
         found_idx := 0 - 1
         idx := 0
         wh idx <= s_len - p_len && found_idx < 0
-            substr := str_slice(s, i, i + p_len)
-            if substr == pattern then found_idx = i else found_idx = found_idx
+            substr := str_slice(s, idx, idx + p_len)
+            if substr == pattern then found_idx = idx else found_idx = found_idx
             idx = idx + 1
 
         if found_idx < 0 then s
@@ -75,7 +75,7 @@ f str_join(parts: [Str], sep: Str) -> Str
         result := parts[0]
         idx := 1
         wh idx < len
-            result = str_concat(str_concat(result, sep), parts[i])
+            result = str_concat(str_concat(result, sep), parts[idx])
             idx = idx + 1
         result
 
@@ -120,19 +120,18 @@ f sb_append_int(builder: [Str], n: Int) -> [Str]
 # Character utilities
 # ============================================================
 
-# Get character at index as string (single char)
-f str_char_at_str(s: Str, idx: Int) -> Option[Str]
-    m str_char_at(s, idx)
-        Some(c) -> Some(str_from_char(c))
-        None -> None
+# TODO: These functions require char_to_str builtin which is not yet implemented
+# Uncomment when char-to-string conversion is available
 
-# Convert char to single-character string
-f str_from_char(c: Char) -> Str
-    # Use slice with the character code approach
-    # For now, we'll use a workaround since we don't have direct char->str
-    # This is a limitation - ideally we'd have a char_to_str builtin
-    # For the stdlib, we assume this exists as a builtin
-    char_to_str(c)
+# # Get character at index as string (single char)
+# f str_char_at_str(s: Str, idx: Int) -> Option[Str]
+#     m str_char_at(s, idx)
+#         Some(c) -> Some(str_from_char(c))
+#         None -> None
+#
+# # Convert char to single-character string
+# f str_from_char(c: Char) -> Str
+#     char_to_str(c)
 
 # Check if character is a digit
 f is_digit(c: Char) -> Bool
@@ -184,9 +183,9 @@ f str_compare(a: Str, b: Str) -> Int
     idx := 0
     result := 0
     wh idx < min_len && result == 0
-        m str_char_at(a, i)
+        m str_char_at(a, idx)
             Some(ca) ->
-                m str_char_at(b, i)
+                m str_char_at(b, idx)
                     Some(cb) ->
                         code_a := char_to_int(ca)
                         code_b := char_to_int(cb)
@@ -213,7 +212,7 @@ f str_index_of(haystack: Str, needle: Str) -> Int
         result := 0 - 1
         idx := 0
         wh idx <= h_len - n_len && result < 0
-            substr := str_slice(haystack, i, i + n_len)
-            if substr == needle then result = i else result = result
+            substr := str_slice(haystack, idx, idx + n_len)
+            if substr == needle then result = idx else result = result
             idx = idx + 1
         result

@@ -44,9 +44,11 @@ f process_list(items: [Int]) -> Int
     total = 0
     total
 
-as f fetch_data(url: Str) -> Str!
-    data = aw get_url(url)?
-    data
+# TODO: Async functions are not yet fully implemented
+# The following async example requires get_url which doesn't exist yet
+# as f fetch_data(url: Str) -> Str!
+#     data = aw get_url(url)?
+#     data
 
 f main
     x = 42
@@ -59,7 +61,10 @@ f main
 
     result = add(x, 10)
 
-    m x
+    # Match expression example
+    description = m x
         0 -> "zero"
         n if n < 0 -> "negative"
         _ -> "positive"
+
+    print(description)

@@ -175,6 +175,8 @@ impl std::error::Error for InterpError {}
 /// Stack frame for function calls.
 #[derive(Debug)]
 struct Frame {
+    /// Function name (useful for stack traces in debugging)
+    #[allow(dead_code)]
     function: String,
     locals: HashMap<Local, Value>,
     current_block: BlockId,

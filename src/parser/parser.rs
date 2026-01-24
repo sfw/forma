@@ -3083,14 +3083,6 @@ impl<'a> Parser<'a> {
             )
     }
 
-    fn at_newline_boundary(&self) -> bool {
-        if self.pos > 0 {
-            matches!(self.tokens.get(self.pos - 1), Some(t) if t.kind == TokenKind::Newline)
-        } else {
-            false
-        }
-    }
-
     // Token helpers
     fn current(&self) -> Option<&Token> {
         self.tokens.get(self.pos)
