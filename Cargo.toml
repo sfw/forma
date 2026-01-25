@@ -21,6 +21,11 @@ regex = "1.10"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 rustyline = "14"
 tokio = { version = "1", features = ["full"] }
+# HTTP server
+hyper = { version = "1", features = ["full"] }
+hyper-util = { version = "0.1", features = ["full"] }
+http-body-util = "0.1"
+bytes = "1"
 
 # LLVM backend (optional, requires LLVM installed)
 inkwell = { version = "0.5", features = ["llvm18-0"], optional = true }

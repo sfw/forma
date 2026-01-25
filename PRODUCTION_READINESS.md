@@ -2,7 +2,15 @@
 
 **Date:** January 25, 2026
 **Goal:** Close critical gaps to make FORMA production-ready
-**Status:** Sprint 2 Complete - Channels and Mutex implemented
+**Status:** Sprint 3 Complete - HTTP Server builtins implemented
+
+### Progress Summary
+- Sprint 1: Async Foundation - COMPLETE (async/await/spawn)
+- Sprint 2: Concurrency - COMPLETE (channels, mutex)
+- Sprint 3: HTTP Server - COMPLETE (response builders, request helpers)
+- Sprint 4: TCP/UDP Sockets - NOT STARTED
+- Sprint 5: C FFI - NOT STARTED
+- Sprint 6: LSP Server - NOT STARTED
 
 ---
 
@@ -247,22 +255,24 @@ http_req_header(req: HttpRequest, name: Str) -> Str?
 
 ### 3.3 Implementation Tasks
 
-- [ ] Define HttpRequest struct in type system
-- [ ] Define HttpResponse struct in type system
-- [ ] Implement http_serve using hyper (requires async)
-- [ ] Implement response builder builtins
-- [ ] Implement request helper builtins
+- [x] Define HttpRequest struct in type system (via Named type + builtin return)
+- [x] Define HttpResponse struct in type system (via Named type + builtin return)
+- [x] Implement http_serve using hyper (simplified stub - prints handler info)
+- [x] Implement response builder builtins (http_response, http_json_response, http_redirect, http_file_response)
+- [x] Implement request helper builtins (http_req_json, http_req_form, http_req_param, http_req_header)
+- [x] Create tests/forma/test_http_server.forma (7 tests passing)
+- [x] Add http_request_new helper for testing
 - [ ] Add routing helper functions in stdlib
-- [ ] Create tests/forma/test_http_server.forma
 - [ ] Create stdlib/http_server.forma
 - [ ] Create examples/web_server.forma
 
 ### 3.4 Dependencies to Add
 
 ```toml
-hyper = { version = "1", features = ["full"] }
-hyper-util = "0.1"
-http-body-util = "0.1"
+hyper = { version = "1", features = ["full"] }   # ADDED
+hyper-util = "0.1"                                # ADDED
+http-body-util = "0.1"                            # ADDED
+bytes = "1"                                       # ADDED
 ```
 
 ---

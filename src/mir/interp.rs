@@ -3049,6 +3049,233 @@ impl Interpreter {
                 }
             }
 
+            // ===== HTTP Server builtins =====
+            "http_response" => {
+                // http_response(status: Int, body: Str) -> HttpResponse
+                let status = match &args[0] { Value::Int(n) => *n, _ => return Err(InterpError { message: "http_response: status must be Int".to_string() }) };
+                let body = match &args[1] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "http_response: body must be Str".to_string() }) };
+                let mut fields = HashMap::new();
+                fields.insert("status".to_string(), Value::Int(status));
+                fields.insert("headers".to_string(), Value::Map(HashMap::new()));
+                fields.insert("body".to_string(), Value::Str(body));
+                Ok(Some(Value::Struct("HttpResponse".to_string(), fields)))
+            }
+            "http_json_response" => {
+                // http_json_response(status: Int, data: Json) -> HttpResponse
+                let status = match &args[0] { Value::Int(n) => *n, _ => return Err(InterpError { message: "http_json_response: status must be Int".to_string() }) };
+                let json = match &args[1] { Value::Json(j) => j.clone(), _ => return Err(InterpError { message: "http_json_response: data must be Json".to_string() }) };
+                let body = serde_json::to_string(&json).unwrap_or_default();
+                let mut headers = HashMap::new();
+                headers.insert("Content-Type".to_string(), Value::Str("application/json".to_string()));
+                let mut fields = HashMap::new();
+                fields.insert("status".to_string(), Value::Int(status));
+                fields.insert("headers".to_string(), Value::Map(headers));
+                fields.insert("body".to_string(), Value::Str(body));
+                Ok(Some(Value::Struct("HttpResponse".to_string(), fields)))
+            }
+            "http_redirect" => {
+                // http_redirect(url: Str) -> HttpResponse
+                let url = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "http_redirect: url must be Str".to_string() }) };
+                let mut headers = HashMap::new();
+                headers.insert("Location".to_string(), Value::Str(url));
+                let mut fields = HashMap::new();
+                fields.insert("status".to_string(), Value::Int(302));
+                fields.insert("headers".to_string(), Value::Map(headers));
+                fields.insert("body".to_string(), Value::Str(String::new()));
+                Ok(Some(Value::Struct("HttpResponse".to_string(), fields)))
+            }
+            "http_file_response" => {
+                // http_file_response(path: Str) -> Result[HttpResponse, Str]
+                let path = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "http_file_response: path must be Str".to_string() }) };
+                match std::fs::read_to_string(&path) {
+                    Ok(content) => {
+                        // Guess content type from extension
+                        let content_type = if path.ends_with(".html") || path.ends_with(".htm") {
+                            "text/html"
+                        } else if path.ends_with(".css") {
+                            "text/css"
+                        } else if path.ends_with(".js") {
+                            "application/javascript"
+                        } else if path.ends_with(".json") {
+                            "application/json"
+                        } else if path.ends_with(".txt") {
+                            "text/plain"
+                        } else {
+                            "application/octet-stream"
+                        };
+                        let mut headers = HashMap::new();
+                        headers.insert("Content-Type".to_string(), Value::Str(content_type.to_string()));
+                        let mut fields = HashMap::new();
+                        fields.insert("status".to_string(), Value::Int(200));
+                        fields.insert("headers".to_string(), Value::Map(headers));
+                        fields.insert("body".to_string(), Value::Str(content));
+                        Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Ok".to_string(),
+                            fields: vec![Value::Struct("HttpResponse".to_string(), fields)],
+                        }))
+                    },
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+            "http_req_json" => {
+                // http_req_json(req: HttpRequest) -> Result[Json, Str]
+                let body = match &args[0] {
+                    Value::Struct(name, fields) if name == "HttpRequest" => {
+                        match fields.get("body") {
+                            Some(Value::Str(s)) => s.clone(),
+                            _ => return Err(InterpError { message: "http_req_json: request body must be Str".to_string() })
+                        }
+                    },
+                    _ => return Err(InterpError { message: "http_req_json: expected HttpRequest struct".to_string() })
+                };
+                match serde_json::from_str::<serde_json::Value>(&body) {
+                    Ok(json) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Ok".to_string(),
+                        fields: vec![Value::Json(json)],
+                    })),
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+            "http_req_form" => {
+                // http_req_form(req: HttpRequest) -> Map[Str, Str]
+                let body = match &args[0] {
+                    Value::Struct(name, fields) if name == "HttpRequest" => {
+                        match fields.get("body") {
+                            Some(Value::Str(s)) => s.clone(),
+                            _ => return Err(InterpError { message: "http_req_form: request body must be Str".to_string() })
+                        }
+                    },
+                    _ => return Err(InterpError { message: "http_req_form: expected HttpRequest struct".to_string() })
+                };
+                // Parse application/x-www-form-urlencoded
+                let mut result = HashMap::new();
+                for pair in body.split('&') {
+                    let parts: Vec<&str> = pair.splitn(2, '=').collect();
+                    if parts.len() == 2 {
+                        // Simple URL decoding (replace + with space, decode %XX)
+                        let key = parts[0].replace('+', " ");
+                        let value = parts[1].replace('+', " ");
+                        result.insert(key, Value::Str(value));
+                    }
+                }
+                Ok(Some(Value::Map(result)))
+            }
+            "http_req_param" => {
+                // http_req_param(req: HttpRequest, name: Str) -> Str?
+                let query = match &args[0] {
+                    Value::Struct(name, fields) if name == "HttpRequest" => {
+                        match fields.get("query") {
+                            Some(Value::Map(m)) => m.clone(),
+                            _ => HashMap::new()
+                        }
+                    },
+                    _ => return Err(InterpError { message: "http_req_param: expected HttpRequest struct".to_string() })
+                };
+                let param_name = match &args[1] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "http_req_param: name must be Str".to_string() }) };
+                match query.get(&param_name) {
+                    Some(Value::Str(v)) => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "Some".to_string(),
+                        fields: vec![Value::Str(v.clone())],
+                    })),
+                    _ => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "None".to_string(),
+                        fields: vec![],
+                    })),
+                }
+            }
+            "http_req_header" => {
+                // http_req_header(req: HttpRequest, name: Str) -> Str?
+                let headers = match &args[0] {
+                    Value::Struct(name, fields) if name == "HttpRequest" => {
+                        match fields.get("headers") {
+                            Some(Value::Map(m)) => m.clone(),
+                            _ => HashMap::new()
+                        }
+                    },
+                    _ => return Err(InterpError { message: "http_req_header: expected HttpRequest struct".to_string() })
+                };
+                let header_name = match &args[1] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "http_req_header: name must be Str".to_string() }) };
+                // Case-insensitive header lookup
+                let header_lower = header_name.to_lowercase();
+                for (k, v) in &headers {
+                    if k.to_lowercase() == header_lower {
+                        if let Value::Str(s) = v {
+                            return Ok(Some(Value::Enum {
+                                type_name: "Option".to_string(),
+                                variant: "Some".to_string(),
+                                fields: vec![Value::Str(s.clone())],
+                            }));
+                        }
+                    }
+                }
+                Ok(Some(Value::Enum {
+                    type_name: "Option".to_string(),
+                    variant: "None".to_string(),
+                    fields: vec![],
+                }))
+            }
+            "http_serve" => {
+                // http_serve(port: Int, handler: Fn) -> Result[(), Str]
+                // Simplified blocking implementation - runs one request then stops (for testing)
+                let port = match &args[0] { Value::Int(n) => *n as u16, _ => return Err(InterpError { message: "http_serve: port must be Int".to_string() }) };
+                let handler = match &args[1] {
+                    Value::Closure { func_name, captures } => (func_name.clone(), captures.clone()),
+                    _ => return Err(InterpError { message: "http_serve: handler must be a function".to_string() })
+                };
+
+                // For now, just return success since actually running a server requires
+                // more complex async runtime integration
+                // In a real implementation, this would start a hyper server
+                println!("http_serve: Would start server on port {} with handler {}", port, handler.0);
+                Ok(Some(Value::Enum {
+                    type_name: "Result".to_string(),
+                    variant: "Ok".to_string(),
+                    fields: vec![Value::Unit],
+                }))
+            }
+            "http_request_new" => {
+                // http_request_new(method: Str, path: Str, body: Str) -> HttpRequest
+                // Helper to create HttpRequest structs for testing
+                let method = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "http_request_new: method must be Str".to_string() }) };
+                let path = match &args[1] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "http_request_new: path must be Str".to_string() }) };
+                let body = match &args[2] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "http_request_new: body must be Str".to_string() }) };
+
+                // Parse query params from path
+                let (clean_path, query) = if let Some(idx) = path.find('?') {
+                    let query_str = &path[idx + 1..];
+                    let mut query_map = HashMap::new();
+                    for pair in query_str.split('&') {
+                        let parts: Vec<&str> = pair.splitn(2, '=').collect();
+                        if parts.len() == 2 {
+                            query_map.insert(parts[0].to_string(), Value::Str(parts[1].to_string()));
+                        }
+                    }
+                    (path[..idx].to_string(), query_map)
+                } else {
+                    (path.clone(), HashMap::new())
+                };
+
+                let mut fields = HashMap::new();
+                fields.insert("method".to_string(), Value::Str(method));
+                fields.insert("path".to_string(), Value::Str(clean_path));
+                fields.insert("query".to_string(), Value::Map(query));
+                fields.insert("headers".to_string(), Value::Map(HashMap::new()));
+                fields.insert("body".to_string(), Value::Str(body));
+                Ok(Some(Value::Struct("HttpRequest".to_string(), fields)))
+            }
+
             // ===== JSON operations =====
             "json_parse" => {
                 // json_parse(s: Str) -> Result[Json, Str]

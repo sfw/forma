@@ -1752,6 +1752,179 @@ impl TypeEnv {
             TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Tuple(vec![Ty::Int, Ty::Str, Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str))])), Box::new(Ty::Str)))) },
         );
 
+        // ===== HTTP Server functions =====
+        // HttpRequest type: Named struct { method: Str, path: Str, query: {Str: Str}, headers: {Str: Str}, body: Str }
+        // HttpResponse type: Named struct { status: Int, headers: {Str: Str}, body: Str }
+
+        // http_response: (Int, Str) -> HttpResponse
+        env.bindings.insert(
+            "http_response".to_string(),
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Int, Ty::Str],
+                    Box::new(Ty::Named(
+                        crate::types::TypeId { name: "HttpResponse".to_string(), module: None },
+                        vec![]
+                    ))
+                )
+            },
+        );
+
+        // http_json_response: (Int, Json) -> HttpResponse
+        env.bindings.insert(
+            "http_json_response".to_string(),
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Int, Ty::Json],
+                    Box::new(Ty::Named(
+                        crate::types::TypeId { name: "HttpResponse".to_string(), module: None },
+                        vec![]
+                    ))
+                )
+            },
+        );
+
+        // http_redirect: Str -> HttpResponse
+        env.bindings.insert(
+            "http_redirect".to_string(),
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str],
+                    Box::new(Ty::Named(
+                        crate::types::TypeId { name: "HttpResponse".to_string(), module: None },
+                        vec![]
+                    ))
+                )
+            },
+        );
+
+        // http_file_response: Str -> Result[HttpResponse, Str]
+        env.bindings.insert(
+            "http_file_response".to_string(),
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str],
+                    Box::new(Ty::Result(
+                        Box::new(Ty::Named(
+                            crate::types::TypeId { name: "HttpResponse".to_string(), module: None },
+                            vec![]
+                        )),
+                        Box::new(Ty::Str)
+                    ))
+                )
+            },
+        );
+
+        // http_req_json: HttpRequest -> Result[Json, Str]
+        env.bindings.insert(
+            "http_req_json".to_string(),
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Named(
+                        crate::types::TypeId { name: "HttpRequest".to_string(), module: None },
+                        vec![]
+                    )],
+                    Box::new(Ty::Result(Box::new(Ty::Json), Box::new(Ty::Str)))
+                )
+            },
+        );
+
+        // http_req_form: HttpRequest -> {Str: Str}
+        env.bindings.insert(
+            "http_req_form".to_string(),
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Named(
+                        crate::types::TypeId { name: "HttpRequest".to_string(), module: None },
+                        vec![]
+                    )],
+                    Box::new(Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str)))
+                )
+            },
+        );
+
+        // http_req_param: (HttpRequest, Str) -> Str?
+        env.bindings.insert(
+            "http_req_param".to_string(),
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![
+                        Ty::Named(
+                            crate::types::TypeId { name: "HttpRequest".to_string(), module: None },
+                            vec![]
+                        ),
+                        Ty::Str
+                    ],
+                    Box::new(Ty::Option(Box::new(Ty::Str)))
+                )
+            },
+        );
+
+        // http_req_header: (HttpRequest, Str) -> Str?
+        env.bindings.insert(
+            "http_req_header".to_string(),
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![
+                        Ty::Named(
+                            crate::types::TypeId { name: "HttpRequest".to_string(), module: None },
+                            vec![]
+                        ),
+                        Ty::Str
+                    ],
+                    Box::new(Ty::Option(Box::new(Ty::Str)))
+                )
+            },
+        );
+
+        // http_serve: (Int, Fn(HttpRequest) -> HttpResponse) -> Result[(), Str]
+        let handler_t = TypeVar::fresh();
+        env.bindings.insert(
+            "http_serve".to_string(),
+            TypeScheme {
+                vars: vec![handler_t],
+                ty: Ty::Fn(
+                    vec![
+                        Ty::Int,
+                        Ty::Fn(
+                            vec![Ty::Named(
+                                crate::types::TypeId { name: "HttpRequest".to_string(), module: None },
+                                vec![]
+                            )],
+                            Box::new(Ty::Named(
+                                crate::types::TypeId { name: "HttpResponse".to_string(), module: None },
+                                vec![]
+                            ))
+                        )
+                    ],
+                    Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str)))
+                )
+            },
+        );
+
+        // http_request_new: (Str, Str, Str) -> HttpRequest (for testing)
+        env.bindings.insert(
+            "http_request_new".to_string(),
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str, Ty::Str, Ty::Str],
+                    Box::new(Ty::Named(
+                        crate::types::TypeId { name: "HttpRequest".to_string(), module: None },
+                        vec![]
+                    ))
+                )
+            },
+        );
+
         env
     }
 

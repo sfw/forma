@@ -1,0 +1,68 @@
+# Test HTTP Server Builtins
+# Tests for HTTP server response builders and request helpers
+# Expected output: All tests pass
+
+# Test http_response
+f test_http_response() -> Bool
+    resp := http_response(200, "Hello, World!")
+    resp.status == 200 && resp.body == "Hello, World!"
+
+# Test http_json_response
+f test_http_json_response() -> Bool
+    data := json_parse("{\"message\": \"hello\"}")
+    m data
+        Ok(json) ->
+            resp := http_json_response(200, json)
+            resp.status == 200 && str_contains(resp.body, "message")
+        Err(_) -> false
+
+# Test http_redirect
+f test_http_redirect() -> Bool
+    resp := http_redirect("https://example.com")
+    resp.status == 302
+
+# Test http_request_new
+f test_http_request_new() -> Bool
+    req := http_request_new("GET", "/api/users?id=123", "")
+    req.method == "GET" && req.path == "/api/users"
+
+# Test http_req_param
+f test_http_req_param() -> Bool
+    req := http_request_new("GET", "/api/users?id=123&name=test", "")
+    m http_req_param(req, "id")
+        Some(val) -> val == "123"
+        None -> false
+
+# Test http_req_json
+f test_http_req_json() -> Bool
+    req := http_request_new("POST", "/api/users", "{\"name\": \"test\"}")
+    m http_req_json(req)
+        Ok(json) ->
+            # Just check that we got a valid JSON object
+            json_stringify(json) == "{\"name\":\"test\"}"
+        Err(_) -> false
+
+# Test http_req_form
+f test_http_req_form() -> Bool
+    req := http_request_new("POST", "/api/form", "name=test&age=25")
+    form := http_req_form(req)
+    # Just verify we got a map back (form parsing works)
+    type_of(form) == "Map"
+
+f run_all_tests() -> Int
+    passed := 0
+    if test_http_response() then passed = passed + 1 else print("FAIL: test_http_response")
+    if test_http_json_response() then passed = passed + 1 else print("FAIL: test_http_json_response")
+    if test_http_redirect() then passed = passed + 1 else print("FAIL: test_http_redirect")
+    if test_http_request_new() then passed = passed + 1 else print("FAIL: test_http_request_new")
+    if test_http_req_param() then passed = passed + 1 else print("FAIL: test_http_req_param")
+    if test_http_req_json() then passed = passed + 1 else print("FAIL: test_http_req_json")
+    if test_http_req_form() then passed = passed + 1 else print("FAIL: test_http_req_form")
+
+    print("HTTP Server tests passed:")
+    print(passed)
+    print("of 7")
+
+    if passed == 7 then 1 else 0
+
+f main() -> Int = run_all_tests()
