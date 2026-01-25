@@ -1,0 +1,183 @@
+# Advanced Math Tests
+# Tests for mathematical functions and edge cases
+
+# Helper functions (not builtins)
+f abs(n: Int) -> Int
+    if n < 0 then 0 - n else n
+
+f min(a: Int, b: Int) -> Int
+    if a < b then a else b
+
+f max(a: Int, b: Int) -> Int
+    if a > b then a else b
+
+f clamp(value: Int, min_val: Int, max_val: Int) -> Int
+    if value < min_val then min_val else if value > max_val then max_val else value
+
+f sign(n: Int) -> Int
+    if n > 0 then 1 else if n < 0 then 0 - 1 else 0
+
+# Test absolute value
+f test_abs_positive() -> Bool
+    abs(42) == 42
+
+f test_abs_negative() -> Bool
+    abs(0 - 42) == 42
+
+f test_abs_zero() -> Bool
+    abs(0) == 0
+
+# Test min/max
+f test_min_basic() -> Bool
+    min(3, 7) == 3 && min(0 - 5, 2) == 0 - 5
+
+f test_max_basic() -> Bool
+    max(3, 7) == 7 && max(0 - 5, 2) == 2
+
+f test_min_max_equal() -> Bool
+    min(5, 5) == 5 && max(5, 5) == 5
+
+# Test clamp
+f test_clamp_in_range() -> Bool
+    clamp(5, 0, 10) == 5
+
+f test_clamp_below() -> Bool
+    clamp(0 - 5, 0, 10) == 0
+
+f test_clamp_above() -> Bool
+    clamp(15, 0, 10) == 10
+
+# Test sqrt
+f test_sqrt_perfect() -> Bool
+    sqrt(16.0) == 4.0
+
+f test_sqrt_approx() -> Bool
+    result := sqrt(2.0)
+    result > 1.41 && result < 1.42
+
+# Test floor/ceil (floor/ceil/round return Int)
+f test_floor_positive() -> Bool
+    floor(3.7) == 3
+
+f test_floor_negative() -> Bool
+    floor(0.0 - 3.7) == 0 - 4
+
+f test_ceil_positive() -> Bool
+    ceil(3.2) == 4
+
+f test_ceil_negative() -> Bool
+    ceil(0.0 - 3.2) == 0 - 3
+
+# Test round
+f test_round_up() -> Bool
+    round(3.7) == 4
+
+f test_round_down() -> Bool
+    round(3.2) == 3
+
+f test_round_half() -> Bool
+    round(3.5) == 4
+
+# Test trigonometry
+f test_sin_zero() -> Bool
+    result := sin(0.0)
+    result > 0.0 - 0.01 && result < 0.01
+
+f test_cos_zero() -> Bool
+    result := cos(0.0)
+    result > 0.99 && result < 1.01
+
+# Test log
+f test_log_e() -> Bool
+    result := log(2.718281828)
+    result > 0.99 && result < 1.01
+
+# Test exp
+f test_exp_zero() -> Bool
+    result := exp(0.0)
+    result > 0.99 && result < 1.01
+
+f test_exp_one() -> Bool
+    result := exp(1.0)
+    result > 2.71 && result < 2.72
+
+# Test modulo
+f test_mod_positive() -> Bool
+    17 % 5 == 2
+
+# Test integer division
+f test_int_div() -> Bool
+    17 / 5 == 3
+
+# Test float division
+f test_float_div() -> Bool
+    result := 17.0 / 5.0
+    result > 3.39 && result < 3.41
+
+# Test sign
+f test_sign_positive() -> Bool
+    sign(42) == 1
+
+f test_sign_negative() -> Bool
+    sign(0 - 42) == 0 - 1
+
+f test_sign_zero() -> Bool
+    sign(0) == 0
+
+# Test arithmetic operators
+f test_add() -> Bool
+    3 + 4 == 7
+
+f test_sub() -> Bool
+    10 - 3 == 7
+
+f test_mul() -> Bool
+    6 * 7 == 42
+
+# Test comparison operators
+f test_comparisons() -> Bool
+    (3 < 5) && (5 > 3) && (3 <= 3) && (5 >= 5) && (3 != 5)
+
+f run_all_tests() -> Int
+    passed := 0
+    if test_abs_positive() then passed = passed + 1 else print("FAIL: test_abs_positive")
+    if test_abs_negative() then passed = passed + 1 else print("FAIL: test_abs_negative")
+    if test_abs_zero() then passed = passed + 1 else print("FAIL: test_abs_zero")
+    if test_min_basic() then passed = passed + 1 else print("FAIL: test_min_basic")
+    if test_max_basic() then passed = passed + 1 else print("FAIL: test_max_basic")
+    if test_min_max_equal() then passed = passed + 1 else print("FAIL: test_min_max_equal")
+    if test_clamp_in_range() then passed = passed + 1 else print("FAIL: test_clamp_in_range")
+    if test_clamp_below() then passed = passed + 1 else print("FAIL: test_clamp_below")
+    if test_clamp_above() then passed = passed + 1 else print("FAIL: test_clamp_above")
+    if test_sqrt_perfect() then passed = passed + 1 else print("FAIL: test_sqrt_perfect")
+    if test_sqrt_approx() then passed = passed + 1 else print("FAIL: test_sqrt_approx")
+    if test_floor_positive() then passed = passed + 1 else print("FAIL: test_floor_positive")
+    if test_floor_negative() then passed = passed + 1 else print("FAIL: test_floor_negative")
+    if test_ceil_positive() then passed = passed + 1 else print("FAIL: test_ceil_positive")
+    if test_ceil_negative() then passed = passed + 1 else print("FAIL: test_ceil_negative")
+    if test_round_up() then passed = passed + 1 else print("FAIL: test_round_up")
+    if test_round_down() then passed = passed + 1 else print("FAIL: test_round_down")
+    if test_round_half() then passed = passed + 1 else print("FAIL: test_round_half")
+    if test_sin_zero() then passed = passed + 1 else print("FAIL: test_sin_zero")
+    if test_cos_zero() then passed = passed + 1 else print("FAIL: test_cos_zero")
+    if test_log_e() then passed = passed + 1 else print("FAIL: test_log_e")
+    if test_exp_zero() then passed = passed + 1 else print("FAIL: test_exp_zero")
+    if test_exp_one() then passed = passed + 1 else print("FAIL: test_exp_one")
+    if test_mod_positive() then passed = passed + 1 else print("FAIL: test_mod_positive")
+    if test_int_div() then passed = passed + 1 else print("FAIL: test_int_div")
+    if test_float_div() then passed = passed + 1 else print("FAIL: test_float_div")
+    if test_sign_positive() then passed = passed + 1 else print("FAIL: test_sign_positive")
+    if test_sign_negative() then passed = passed + 1 else print("FAIL: test_sign_negative")
+    if test_sign_zero() then passed = passed + 1 else print("FAIL: test_sign_zero")
+    if test_add() then passed = passed + 1 else print("FAIL: test_add")
+    if test_sub() then passed = passed + 1 else print("FAIL: test_sub")
+    if test_mul() then passed = passed + 1 else print("FAIL: test_mul")
+    if test_comparisons() then passed = passed + 1 else print("FAIL: test_comparisons")
+
+    print("Advanced math tests passed:")
+    print(passed)
+    print("of 33")
+
+    if passed == 33 then 1 else 0
+
+f main() -> Int = run_all_tests()

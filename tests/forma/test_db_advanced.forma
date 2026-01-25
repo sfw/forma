@@ -1,0 +1,246 @@
+# Advanced Database Tests
+# Tests for transactions, multiple tables, and edge cases
+
+# Test basic transaction commit
+f test_transaction_commit() -> Bool
+    m db_open_memory()
+        Ok(db) ->
+            db_execute(db, "CREATE TABLE accounts (id INTEGER PRIMARY KEY, balance INTEGER)")
+            db_execute(db, "INSERT INTO accounts (balance) VALUES (100)")
+            db_execute(db, "BEGIN TRANSACTION")
+            db_execute(db, "UPDATE accounts SET balance = balance - 50 WHERE id = 1")
+            db_execute(db, "COMMIT")
+            m db_query_one(db, "SELECT balance FROM accounts WHERE id = 1")
+                Ok(maybe_row) ->
+                    m maybe_row
+                        Some(row) ->
+                            balance := row_get_int(row, 0)
+                            db_close(db)
+                            balance == 50
+                        None ->
+                            db_close(db)
+                            false
+                Err(_) ->
+                    db_close(db)
+                    false
+        Err(_) -> false
+
+# Test transaction rollback
+f test_transaction_rollback() -> Bool
+    m db_open_memory()
+        Ok(db) ->
+            db_execute(db, "CREATE TABLE accounts (id INTEGER PRIMARY KEY, balance INTEGER)")
+            db_execute(db, "INSERT INTO accounts (balance) VALUES (100)")
+            db_execute(db, "BEGIN TRANSACTION")
+            db_execute(db, "UPDATE accounts SET balance = balance - 50 WHERE id = 1")
+            db_execute(db, "ROLLBACK")
+            m db_query_one(db, "SELECT balance FROM accounts WHERE id = 1")
+                Ok(maybe_row) ->
+                    m maybe_row
+                        Some(row) ->
+                            balance := row_get_int(row, 0)
+                            db_close(db)
+                            balance == 100
+                        None ->
+                            db_close(db)
+                            false
+                Err(_) ->
+                    db_close(db)
+                    false
+        Err(_) -> false
+
+# Test join query
+f test_join_query() -> Bool
+    m db_open_memory()
+        Ok(db) ->
+            db_execute(db, "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
+            db_execute(db, "CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER, amount INTEGER)")
+            db_execute(db, "INSERT INTO users (name) VALUES ('Alice')")
+            db_execute(db, "INSERT INTO users (name) VALUES ('Bob')")
+            db_execute(db, "INSERT INTO orders (user_id, amount) VALUES (1, 100)")
+            db_execute(db, "INSERT INTO orders (user_id, amount) VALUES (1, 200)")
+            db_execute(db, "INSERT INTO orders (user_id, amount) VALUES (2, 50)")
+            m db_query(db, "SELECT u.name, SUM(o.amount) FROM users u JOIN orders o ON u.id = o.user_id GROUP BY u.id")
+                Ok(rows) ->
+                    result := vec_len(rows) == 2
+                    db_close(db)
+                    result
+                Err(_) ->
+                    db_close(db)
+                    false
+        Err(_) -> false
+
+# Test empty result set
+f test_empty_result() -> Bool
+    m db_open_memory()
+        Ok(db) ->
+            db_execute(db, "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)")
+            m db_query(db, "SELECT * FROM items WHERE 1=0")
+                Ok(rows) ->
+                    result := vec_len(rows) == 0
+                    db_close(db)
+                    result
+                Err(_) ->
+                    db_close(db)
+                    false
+        Err(_) -> false
+
+# Test bulk insert
+f test_bulk_insert() -> Bool
+    m db_open_memory()
+        Ok(db) ->
+            db_execute(db, "CREATE TABLE numbers (n INTEGER)")
+            i := 0
+            wh i < 100
+                db_execute(db, "INSERT INTO numbers (n) VALUES (" + int_to_str(i) + ")")
+                i = i + 1
+            m db_query_one(db, "SELECT COUNT(*) FROM numbers")
+                Ok(maybe_row) ->
+                    m maybe_row
+                        Some(row) ->
+                            count := row_get_int(row, 0)
+                            db_close(db)
+                            count == 100
+                        None ->
+                            db_close(db)
+                            false
+                Err(_) ->
+                    db_close(db)
+                    false
+        Err(_) -> false
+
+# Test aggregate functions
+f test_aggregates() -> Bool
+    m db_open_memory()
+        Ok(db) ->
+            db_execute(db, "CREATE TABLE scores (value INTEGER)")
+            db_execute(db, "INSERT INTO scores VALUES (10)")
+            db_execute(db, "INSERT INTO scores VALUES (20)")
+            db_execute(db, "INSERT INTO scores VALUES (30)")
+            db_execute(db, "INSERT INTO scores VALUES (40)")
+            db_execute(db, "INSERT INTO scores VALUES (50)")
+            m db_query_one(db, "SELECT MIN(value), MAX(value), SUM(value) FROM scores")
+                Ok(maybe_row) ->
+                    m maybe_row
+                        Some(row) ->
+                            min_val := row_get_int(row, 0)
+                            max_val := row_get_int(row, 1)
+                            sum_val := row_get_int(row, 2)
+                            db_close(db)
+                            min_val == 10 && max_val == 50 && sum_val == 150
+                        None ->
+                            db_close(db)
+                            false
+                Err(_) ->
+                    db_close(db)
+                    false
+        Err(_) -> false
+
+# Test ORDER BY and LIMIT
+f test_order_limit() -> Bool
+    m db_open_memory()
+        Ok(db) ->
+            db_execute(db, "CREATE TABLE items (id INTEGER PRIMARY KEY, priority INTEGER)")
+            db_execute(db, "INSERT INTO items (priority) VALUES (3)")
+            db_execute(db, "INSERT INTO items (priority) VALUES (1)")
+            db_execute(db, "INSERT INTO items (priority) VALUES (2)")
+            m db_query(db, "SELECT priority FROM items ORDER BY priority ASC LIMIT 2")
+                Ok(rows) ->
+                    m vec_first(rows)
+                        Some(row) ->
+                            first_priority := row_get_int(row, 0)
+                            db_close(db)
+                            vec_len(rows) == 2 && first_priority == 1
+                        None ->
+                            db_close(db)
+                            false
+                Err(_) ->
+                    db_close(db)
+                    false
+        Err(_) -> false
+
+# Test UPDATE with WHERE
+f test_update_where() -> Bool
+    m db_open_memory()
+        Ok(db) ->
+            db_execute(db, "CREATE TABLE users (id INTEGER PRIMARY KEY, active INTEGER)")
+            db_execute(db, "INSERT INTO users (active) VALUES (0)")
+            db_execute(db, "INSERT INTO users (active) VALUES (0)")
+            db_execute(db, "INSERT INTO users (active) VALUES (1)")
+            m db_execute(db, "UPDATE users SET active = 1 WHERE active = 0")
+                Ok(affected) ->
+                    db_close(db)
+                    affected == 2
+                Err(_) ->
+                    db_close(db)
+                    false
+        Err(_) -> false
+
+# Test DELETE with WHERE
+f test_delete_where() -> Bool
+    m db_open_memory()
+        Ok(db) ->
+            db_execute(db, "CREATE TABLE logs (id INTEGER PRIMARY KEY, level TEXT)")
+            db_execute(db, "INSERT INTO logs (level) VALUES ('INFO')")
+            db_execute(db, "INSERT INTO logs (level) VALUES ('DEBUG')")
+            db_execute(db, "INSERT INTO logs (level) VALUES ('ERROR')")
+            db_execute(db, "INSERT INTO logs (level) VALUES ('DEBUG')")
+            m db_execute(db, "DELETE FROM logs WHERE level = 'DEBUG'")
+                Ok(affected) ->
+                    m db_query_one(db, "SELECT COUNT(*) FROM logs")
+                        Ok(maybe_row) ->
+                            m maybe_row
+                                Some(row) ->
+                                    count := row_get_int(row, 0)
+                                    db_close(db)
+                                    affected == 2 && count == 2
+                                None ->
+                                    db_close(db)
+                                    false
+                        Err(_) ->
+                            db_close(db)
+                            false
+                Err(_) ->
+                    db_close(db)
+                    false
+        Err(_) -> false
+
+# Test LIKE pattern matching
+f test_like_pattern() -> Bool
+    m db_open_memory()
+        Ok(db) ->
+            db_execute(db, "CREATE TABLE files (name TEXT)")
+            db_execute(db, "INSERT INTO files VALUES ('test.txt')")
+            db_execute(db, "INSERT INTO files VALUES ('data.csv')")
+            db_execute(db, "INSERT INTO files VALUES ('notes.txt')")
+            db_execute(db, "INSERT INTO files VALUES ('report.pdf')")
+            m db_query(db, "SELECT name FROM files WHERE name LIKE '%.txt'")
+                Ok(rows) ->
+                    result := vec_len(rows) == 2
+                    db_close(db)
+                    result
+                Err(_) ->
+                    db_close(db)
+                    false
+        Err(_) -> false
+
+f run_all_tests() -> Int
+    passed := 0
+    if test_transaction_commit() then passed = passed + 1 else print("FAIL: test_transaction_commit")
+    if test_transaction_rollback() then passed = passed + 1 else print("FAIL: test_transaction_rollback")
+    if test_join_query() then passed = passed + 1 else print("FAIL: test_join_query")
+    if test_empty_result() then passed = passed + 1 else print("FAIL: test_empty_result")
+    if test_bulk_insert() then passed = passed + 1 else print("FAIL: test_bulk_insert")
+    if test_aggregates() then passed = passed + 1 else print("FAIL: test_aggregates")
+    if test_order_limit() then passed = passed + 1 else print("FAIL: test_order_limit")
+    if test_update_where() then passed = passed + 1 else print("FAIL: test_update_where")
+    if test_delete_where() then passed = passed + 1 else print("FAIL: test_delete_where")
+    if test_like_pattern() then passed = passed + 1 else print("FAIL: test_like_pattern")
+
+    print("Advanced database tests passed:")
+    print(passed)
+    print("of 10")
+
+    if passed == 10 then 1 else 0
+
+f main() -> Int = run_all_tests()

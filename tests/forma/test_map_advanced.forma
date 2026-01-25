@@ -1,0 +1,137 @@
+# Advanced Map Tests
+# Tests for map operations and edge cases
+
+# Test map creation
+f test_map_new() -> Bool
+    mp := map_new()
+    map_len(mp) == 0
+
+# Test map insert and get
+f test_map_insert_get() -> Bool
+    mp := map_new()
+    mp = map_insert(mp, "key", 42)
+    m map_get(mp, "key")
+        Some(v) -> v == 42
+        None -> false
+
+# Test map get missing key
+f test_map_get_missing() -> Bool
+    mp := map_new()
+    m map_get(mp, "nonexistent")
+        Some(_) -> false
+        None -> true
+
+# Test map overwrite
+f test_map_overwrite() -> Bool
+    mp := map_new()
+    mp = map_insert(mp, "key", 1)
+    mp = map_insert(mp, "key", 2)
+    m map_get(mp, "key")
+        Some(v) -> v == 2
+        None -> false
+
+# Test map remove
+f test_map_remove() -> Bool
+    mp := map_new()
+    mp = map_insert(mp, "a", 1)
+    mp = map_insert(mp, "b", 2)
+    (mp, _) := map_remove(mp, "a")
+    map_len(mp) == 1
+
+# Test map contains
+f test_map_contains() -> Bool
+    mp := map_new()
+    mp = map_insert(mp, "exists", 1)
+    map_contains(mp, "exists") && !map_contains(mp, "missing")
+
+# Test map len
+f test_map_len() -> Bool
+    mp := map_new()
+    mp = map_insert(mp, "a", 1)
+    mp = map_insert(mp, "b", 2)
+    mp = map_insert(mp, "c", 3)
+    map_len(mp) == 3
+
+# Test map keys
+f test_map_keys() -> Bool
+    mp := map_new()
+    mp = map_insert(mp, "one", 1)
+    mp = map_insert(mp, "two", 2)
+    mp = map_insert(mp, "three", 3)
+    keys := map_keys(mp)
+    vec_len(keys) == 3
+
+# Test map values
+f test_map_values() -> Bool
+    mp := map_new()
+    mp = map_insert(mp, "a", 10)
+    mp = map_insert(mp, "b", 20)
+    values := map_values(mp)
+    vec_len(values) == 2
+
+# Test map with string values
+f test_map_string_values() -> Bool
+    mp := map_new()
+    mp = map_insert(mp, "greeting", "hello")
+    mp = map_insert(mp, "farewell", "goodbye")
+    m map_get(mp, "greeting")
+        Some(v) -> v == "hello"
+        None -> false
+
+# Test map iteration over keys
+f test_map_iterate_keys() -> Bool
+    mp := map_new()
+    mp = map_insert(mp, "a", 1)
+    mp = map_insert(mp, "b", 2)
+    mp = map_insert(mp, "c", 3)
+    count := 0
+    for _ in map_keys(mp)
+        count = count + 1
+    count == 3
+
+# Test map iteration sum values
+f test_map_iterate_values() -> Bool
+    mp := map_new()
+    mp = map_insert(mp, "a", 10)
+    mp = map_insert(mp, "b", 20)
+    mp = map_insert(mp, "c", 30)
+    sum := 0
+    for v in map_values(mp)
+        sum = sum + v
+    sum == 60
+
+# Test map get with default pattern
+f test_map_get_default() -> Bool
+    mp := map_new()
+    mp = map_insert(mp, "exists", 100)
+    v1 := m map_get(mp, "exists")
+        Some(v) -> v
+        None -> 0
+    v2 := m map_get(mp, "missing")
+        Some(v) -> v
+        None -> 42
+    v1 == 100 && v2 == 42
+
+f run_all_tests() -> Int
+    passed := 0
+    if test_map_new() then passed = passed + 1 else print("FAIL: test_map_new")
+    if test_map_insert_get() then passed = passed + 1 else print("FAIL: test_map_insert_get")
+    if test_map_get_missing() then passed = passed + 1 else print("FAIL: test_map_get_missing")
+    if test_map_overwrite() then passed = passed + 1 else print("FAIL: test_map_overwrite")
+    if test_map_remove() then passed = passed + 1 else print("FAIL: test_map_remove")
+    if test_map_contains() then passed = passed + 1 else print("FAIL: test_map_contains")
+    if test_map_len() then passed = passed + 1 else print("FAIL: test_map_len")
+    if test_map_keys() then passed = passed + 1 else print("FAIL: test_map_keys")
+    if test_map_values() then passed = passed + 1 else print("FAIL: test_map_values")
+    if test_map_string_values() then passed = passed + 1 else print("FAIL: test_map_string_values")
+    if test_map_iterate_keys() then passed = passed + 1 else print("FAIL: test_map_iterate_keys")
+    if test_map_iterate_values() then passed = passed + 1 else print("FAIL: test_map_iterate_values")
+    if test_map_get_default() then passed = passed + 1 else print("FAIL: test_map_get_default")
+
+    print("Advanced map tests passed:")
+    print(passed)
+    print("of 13")
+
+    if passed == 13 then 1 else 0
+
+f main() -> Int = run_all_tests()

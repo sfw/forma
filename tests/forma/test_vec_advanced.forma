@@ -1,0 +1,224 @@
+# Advanced Vector Tests
+# Tests for vector operations and edge cases
+
+# Helper functions
+f vec_sum(arr: [Int]) -> Int
+    result := 0
+    for x in arr
+        result = result + x
+    result
+
+f vec_is_empty(arr: [Int]) -> Bool
+    vec_len(arr) == 0
+
+f vec_has(arr: [Int], target: Int) -> Bool
+    found := false
+    for x in arr
+        if x == target then found = true else found = found
+    found
+
+# Test vec creation and length
+f test_vec_new_empty() -> Bool
+    v := vec_new()
+    vec_len(v) == 0
+
+# Test vec with initial elements
+f test_vec_literal() -> Bool
+    v := [1, 2, 3]
+    vec_len(v) == 3
+
+# Test vec push and pop
+f test_vec_push_pop() -> Bool
+    v := vec_new()
+    v = vec_push(v, 1)
+    v = vec_push(v, 2)
+    v = vec_push(v, 3)
+    (new_v, popped) := vec_pop(v)
+    m popped
+        Some(x) -> x == 3 && vec_len(new_v) == 2
+        None -> false
+
+# Test vec pop empty
+f test_vec_pop_empty() -> Bool
+    v := vec_new()
+    (_, popped) := vec_pop(v)
+    m popped
+        Some(_) -> false
+        None -> true
+
+# Test vec first
+f test_vec_first() -> Bool
+    v := [10, 20, 30]
+    m vec_first(v)
+        Some(x) -> x == 10
+        None -> false
+
+# Test vec first empty
+f test_vec_first_empty() -> Bool
+    v := vec_new()
+    m vec_first(v)
+        Some(_) -> false
+        None -> true
+
+# Test vec last
+f test_vec_last() -> Bool
+    v := [10, 20, 30]
+    m vec_last(v)
+        Some(x) -> x == 30
+        None -> false
+
+# Test vec last empty
+f test_vec_last_empty() -> Bool
+    v := vec_new()
+    m vec_last(v)
+        Some(_) -> false
+        None -> true
+
+# Test vec get
+f test_vec_get() -> Bool
+    v := [10, 20, 30]
+    m vec_get(v, 1)
+        Some(x) -> x == 20
+        None -> false
+
+# Test vec get out of bounds
+f test_vec_get_bounds() -> Bool
+    v := [1, 2, 3]
+    m vec_get(v, 10)
+        Some(_) -> false
+        None -> true
+
+# Test vec set
+f test_vec_set() -> Bool
+    v := [1, 2, 3]
+    v = vec_set(v, 1, 99)
+    m vec_get(v, 1)
+        Some(x) -> x == 99
+        None -> false
+
+# Test vec is_empty helper
+f test_vec_is_empty() -> Bool
+    empty := vec_new()
+    nonempty := [1]
+    vec_is_empty(empty) && !vec_is_empty(nonempty)
+
+# Test vec reverse
+f test_vec_reverse() -> Bool
+    v := [1, 2, 3]
+    reversed := vec_reverse(v)
+    m vec_first(reversed)
+        Some(x) -> x == 3
+        None -> false
+
+# Test vec has helper
+f test_vec_has() -> Bool
+    v := [1, 2, 3, 4, 5]
+    vec_has(v, 3) && !vec_has(v, 99)
+
+# Test vec sum helper
+f test_vec_sum() -> Bool
+    v := [1, 2, 3, 4, 5]
+    vec_sum(v) == 15
+
+# Test vec sum empty
+f test_vec_sum_empty() -> Bool
+    v := vec_new()
+    vec_sum(v) == 0
+
+# Test vec filter (via iteration)
+f test_vec_filter_manual() -> Bool
+    v := [1, 2, 3, 4, 5, 6]
+    evens := vec_new()
+    for x in v
+        if x % 2 == 0
+            evens = vec_push(evens, x)
+        else
+            evens = evens
+    vec_len(evens) == 3
+
+# Test vec map (via iteration)
+f test_vec_map_manual() -> Bool
+    v := [1, 2, 3]
+    doubled := vec_new()
+    for x in v
+        doubled = vec_push(doubled, x * 2)
+    vec_sum(doubled) == 12
+
+# Test nested vectors
+f test_vec_nested() -> Bool
+    outer := vec_new()
+    inner1 := [1, 2]
+    inner2 := [3, 4]
+    outer = vec_push(outer, inner1)
+    outer = vec_push(outer, inner2)
+    vec_len(outer) == 2
+
+# Test vec with loop
+f test_vec_loop_build() -> Bool
+    v := vec_new()
+    i := 0
+    wh i < 5
+        v = vec_push(v, i * 10)
+        i = i + 1
+    vec_len(v) == 5
+
+# Test vec iteration
+f test_vec_for_loop() -> Bool
+    v := [1, 2, 3, 4, 5]
+    count := 0
+    for _ in v
+        count := count + 1
+    count == 5
+
+# Test vec index access
+f test_vec_index_access() -> Bool
+    v := [10, 20, 30]
+    v[0] == 10 && v[1] == 20 && v[2] == 30
+
+# Test vec concat
+f test_vec_concat() -> Bool
+    v1 := [1, 2]
+    v2 := [3, 4]
+    combined := vec_concat(v1, v2)
+    vec_len(combined) == 4
+
+# Test vec slice
+f test_vec_slice() -> Bool
+    v := [0, 1, 2, 3, 4, 5]
+    sliced := vec_slice(v, 2, 4)
+    vec_len(sliced) == 2
+
+f run_all_tests() -> Int
+    passed := 0
+    if test_vec_new_empty() then passed = passed + 1 else print("FAIL: test_vec_new_empty")
+    if test_vec_literal() then passed = passed + 1 else print("FAIL: test_vec_literal")
+    if test_vec_push_pop() then passed = passed + 1 else print("FAIL: test_vec_push_pop")
+    if test_vec_pop_empty() then passed = passed + 1 else print("FAIL: test_vec_pop_empty")
+    if test_vec_first() then passed = passed + 1 else print("FAIL: test_vec_first")
+    if test_vec_first_empty() then passed = passed + 1 else print("FAIL: test_vec_first_empty")
+    if test_vec_last() then passed = passed + 1 else print("FAIL: test_vec_last")
+    if test_vec_last_empty() then passed = passed + 1 else print("FAIL: test_vec_last_empty")
+    if test_vec_get() then passed = passed + 1 else print("FAIL: test_vec_get")
+    if test_vec_get_bounds() then passed = passed + 1 else print("FAIL: test_vec_get_bounds")
+    if test_vec_set() then passed = passed + 1 else print("FAIL: test_vec_set")
+    if test_vec_is_empty() then passed = passed + 1 else print("FAIL: test_vec_is_empty")
+    if test_vec_reverse() then passed = passed + 1 else print("FAIL: test_vec_reverse")
+    if test_vec_has() then passed = passed + 1 else print("FAIL: test_vec_has")
+    if test_vec_sum() then passed = passed + 1 else print("FAIL: test_vec_sum")
+    if test_vec_sum_empty() then passed = passed + 1 else print("FAIL: test_vec_sum_empty")
+    if test_vec_filter_manual() then passed = passed + 1 else print("FAIL: test_vec_filter_manual")
+    if test_vec_map_manual() then passed = passed + 1 else print("FAIL: test_vec_map_manual")
+    if test_vec_nested() then passed = passed + 1 else print("FAIL: test_vec_nested")
+    if test_vec_loop_build() then passed = passed + 1 else print("FAIL: test_vec_loop_build")
+    if test_vec_for_loop() then passed = passed + 1 else print("FAIL: test_vec_for_loop")
+    if test_vec_index_access() then passed = passed + 1 else print("FAIL: test_vec_index_access")
+    if test_vec_concat() then passed = passed + 1 else print("FAIL: test_vec_concat")
+    if test_vec_slice() then passed = passed + 1 else print("FAIL: test_vec_slice")
+
+    print("Advanced vector tests passed:")
+    print(passed)
+    print("of 24")
+
+    if passed == 24 then 1 else 0
+
+f main() -> Int = run_all_tests()

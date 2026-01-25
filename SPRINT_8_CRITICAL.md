@@ -482,9 +482,9 @@ f async main() {
 - test_ffi_type_conversions.forma
 
 ### Acceptance Criteria
-- [ ] At least 50 new tests added
-- [ ] All tests pass
-- [ ] Test coverage improved
+- [x] At least 50 new tests added (103 new tests: 23 string, 33 math, 24 vec, 13 map, 10 db)
+- [x] All tests pass (345 total test functions)
+- [x] Test coverage improved
 
 ---
 
@@ -499,7 +499,7 @@ f async main() {
 
 ### Should Complete
 - [x] async_downloader.forma example
-- [ ] 50+ new tests
+- [x] 50+ new tests (103 new tests added, 345 total)
 - [x] All existing tests still pass
 
 ### Definition of Done

@@ -1,0 +1,142 @@
+# Advanced String Tests
+# Tests for string manipulation, searching, and edge cases
+
+# Test string replace
+f test_str_replace_basic() -> Bool
+    result := str_replace_all("hello world", "world", "FORMA")
+    result == "hello FORMA"
+
+# Test string replace multiple
+f test_str_replace_all() -> Bool
+    result := str_replace_all("a-b-c-d", "-", "_")
+    result == "a_b_c_d"
+
+# Test string replace no match
+f test_str_replace_no_match() -> Bool
+    result := str_replace_all("hello", "xyz", "abc")
+    result == "hello"
+
+# Test string trim whitespace
+f test_str_trim_spaces() -> Bool
+    str_trim("  hello  ") == "hello"
+
+# Test string split basic
+f test_str_split_basic() -> Bool
+    parts := str_split("a,b,c", ",")
+    vec_len(parts) == 3
+
+# Test string split with empty parts
+f test_str_split_empty() -> Bool
+    parts := str_split("a,,b", ",")
+    vec_len(parts) == 3
+
+# Test string starts_with
+f test_str_starts_with() -> Bool
+    str_starts_with("hello world", "hello") && !str_starts_with("hello world", "world")
+
+# Test string ends_with
+f test_str_ends_with() -> Bool
+    str_ends_with("hello world", "world") && !str_ends_with("hello world", "hello")
+
+# Test string contains
+f test_str_contains() -> Bool
+    str_contains("hello world", "lo wo") && !str_contains("hello", "xyz")
+
+# Test string char_at
+f test_str_char_at() -> Bool
+    m str_char_at("hello", 1)
+        Some(c) -> c == 'e'
+        None -> false
+
+# Test string char_at out of bounds
+f test_str_char_at_bounds() -> Bool
+    m str_char_at("hi", 10)
+        Some(_) -> false
+        None -> true
+
+# Test empty string operations
+f test_empty_string() -> Bool
+    str_len("") == 0
+
+# Test string concat
+f test_str_concat() -> Bool
+    str_concat("hello", " world") == "hello world"
+
+# Test string length
+f test_str_len() -> Bool
+    str_len("hello") == 5 && str_len("") == 0
+
+# Test string slice
+f test_str_slice() -> Bool
+    str_slice("hello world", 0, 5) == "hello"
+
+# Test string slice middle
+f test_str_slice_middle() -> Bool
+    str_slice("hello world", 6, 11) == "world"
+
+# Test string slice empty
+f test_str_slice_empty() -> Bool
+    str_slice("hello", 2, 2) == ""
+
+# Test string to int
+f test_str_to_int() -> Bool
+    m str_to_int("42")
+        Some(n) -> n == 42
+        None -> false
+
+# Test string to int invalid
+f test_str_to_int_invalid() -> Bool
+    m str_to_int("abc")
+        Some(_) -> false
+        None -> true
+
+# Test int to string
+f test_int_to_str() -> Bool
+    int_to_str(42) == "42"
+
+# Test int to string negative
+f test_int_to_str_negative() -> Bool
+    int_to_str(0 - 123) == "-123"
+
+# Test string concatenation with +
+f test_str_plus() -> Bool
+    s := "Hello" + ", " + "World!"
+    s == "Hello, World!"
+
+# Test string comparison
+f test_str_comparison() -> Bool
+    "abc" == "abc" && "abc" != "xyz"
+
+f run_all_tests() -> Int
+    passed := 0
+    if test_str_replace_basic() then passed = passed + 1 else print("FAIL: test_str_replace_basic")
+    if test_str_replace_all() then passed = passed + 1 else print("FAIL: test_str_replace_all")
+    if test_str_replace_no_match() then passed = passed + 1 else print("FAIL: test_str_replace_no_match")
+    if test_str_trim_spaces() then passed = passed + 1 else print("FAIL: test_str_trim_spaces")
+    if test_str_split_basic() then passed = passed + 1 else print("FAIL: test_str_split_basic")
+    if test_str_split_empty() then passed = passed + 1 else print("FAIL: test_str_split_empty")
+    if test_str_starts_with() then passed = passed + 1 else print("FAIL: test_str_starts_with")
+    if test_str_ends_with() then passed = passed + 1 else print("FAIL: test_str_ends_with")
+    if test_str_contains() then passed = passed + 1 else print("FAIL: test_str_contains")
+    if test_str_char_at() then passed = passed + 1 else print("FAIL: test_str_char_at")
+    if test_str_char_at_bounds() then passed = passed + 1 else print("FAIL: test_str_char_at_bounds")
+    if test_empty_string() then passed = passed + 1 else print("FAIL: test_empty_string")
+    if test_str_concat() then passed = passed + 1 else print("FAIL: test_str_concat")
+    if test_str_len() then passed = passed + 1 else print("FAIL: test_str_len")
+    if test_str_slice() then passed = passed + 1 else print("FAIL: test_str_slice")
+    if test_str_slice_middle() then passed = passed + 1 else print("FAIL: test_str_slice_middle")
+    if test_str_slice_empty() then passed = passed + 1 else print("FAIL: test_str_slice_empty")
+    if test_str_to_int() then passed = passed + 1 else print("FAIL: test_str_to_int")
+    if test_str_to_int_invalid() then passed = passed + 1 else print("FAIL: test_str_to_int_invalid")
+    if test_int_to_str() then passed = passed + 1 else print("FAIL: test_int_to_str")
+    if test_int_to_str_negative() then passed = passed + 1 else print("FAIL: test_int_to_str_negative")
+    if test_str_plus() then passed = passed + 1 else print("FAIL: test_str_plus")
+    if test_str_comparison() then passed = passed + 1 else print("FAIL: test_str_comparison")
+
+    print("Advanced string tests passed:")
+    print(passed)
+    print("of 23")
+
+    if passed == 23 then 1 else 0
+
+f main() -> Int = run_all_tests()
