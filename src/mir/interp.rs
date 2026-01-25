@@ -68,6 +68,18 @@ pub enum Value {
     Task(Box<Value>),
     /// Future - result of an async block (simplified sync implementation)
     Future(Box<Value>),
+    /// Channel - bounded channel with sender/receiver pair
+    /// In this simplified implementation, uses a channel ID to reference shared state
+    Channel(u64),
+    /// Sender half of a channel
+    Sender(u64),
+    /// Receiver half of a channel
+    Receiver(u64),
+    /// Mutex - synchronization primitive
+    /// In this simplified implementation, just wraps a value
+    Mutex(u64),
+    /// MutexGuard - holds a lock on a mutex
+    MutexGuard(u64),
 }
 
 impl Value {
@@ -170,6 +182,11 @@ impl std::fmt::Display for Value {
             Value::Json(json) => write!(f, "{}", json),
             Value::Task(inner) => write!(f, "Task({})", inner),
             Value::Future(inner) => write!(f, "Future({})", inner),
+            Value::Channel(id) => write!(f, "Channel({})", id),
+            Value::Sender(id) => write!(f, "Sender({})", id),
+            Value::Receiver(id) => write!(f, "Receiver({})", id),
+            Value::Mutex(id) => write!(f, "Mutex({})", id),
+            Value::MutexGuard(id) => write!(f, "MutexGuard({})", id),
         }
     }
 }
@@ -213,6 +230,14 @@ pub struct Interpreter {
     program: Program,
     call_stack: Vec<Frame>,
     max_steps: usize,
+    /// Channel state: maps channel ID to (queue, capacity, closed)
+    channels: std::collections::HashMap<u64, (Vec<Value>, usize, bool)>,
+    /// Next channel ID
+    next_channel_id: u64,
+    /// Mutex state: maps mutex ID to (value, locked)
+    mutexes: std::collections::HashMap<u64, (Value, bool)>,
+    /// Next mutex ID
+    next_mutex_id: u64,
 }
 
 impl Interpreter {
@@ -221,6 +246,10 @@ impl Interpreter {
             program,
             call_stack: Vec::new(),
             max_steps: 1_000_000,
+            channels: std::collections::HashMap::new(),
+            next_channel_id: 0,
+            mutexes: std::collections::HashMap::new(),
+            next_mutex_id: 0,
         }
     }
 
@@ -1334,6 +1363,11 @@ impl Interpreter {
                     Value::Json(_) => "Json",
                     Value::Task(_) => "Task",
                     Value::Future(_) => "Future",
+                    Value::Channel(_) => "Channel",
+                    Value::Sender(_) => "Sender",
+                    Value::Receiver(_) => "Receiver",
+                    Value::Mutex(_) => "Mutex",
+                    Value::MutexGuard(_) => "MutexGuard",
                 };
                 Ok(Some(Value::Str(type_name.to_string())))
             }
@@ -1837,6 +1871,257 @@ impl Interpreter {
                     other => other.clone(),
                 };
                 Ok(Some(result))
+            }
+
+            // ===== Channel operations =====
+            "channel_new" => {
+                // channel_new(capacity: Int) -> (Sender[T], Receiver[T])
+                let capacity = match &args[0] {
+                    Value::Int(n) => *n as usize,
+                    _ => return Err(InterpError { message: "channel_new: expected Int capacity".to_string() })
+                };
+                let id = self.next_channel_id;
+                self.next_channel_id += 1;
+                self.channels.insert(id, (Vec::new(), capacity, false));
+                Ok(Some(Value::Tuple(vec![Value::Sender(id), Value::Receiver(id)])))
+            }
+
+            "channel_send" => {
+                // channel_send(sender: Sender[T], value: T) -> Result[(), Str]
+                let id = match &args[0] {
+                    Value::Sender(id) => *id,
+                    _ => return Err(InterpError { message: "channel_send: expected Sender".to_string() })
+                };
+                let value = args[1].clone();
+
+                if let Some((queue, capacity, closed)) = self.channels.get_mut(&id) {
+                    if *closed {
+                        return Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Err".to_string(),
+                            fields: vec![Value::Str("channel closed".to_string())],
+                        }));
+                    }
+                    if queue.len() >= *capacity && *capacity > 0 {
+                        return Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Err".to_string(),
+                            fields: vec![Value::Str("channel full".to_string())],
+                        }));
+                    }
+                    queue.push(value);
+                    Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Ok".to_string(),
+                        fields: vec![Value::Unit],
+                    }))
+                } else {
+                    Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str("invalid channel".to_string())],
+                    }))
+                }
+            }
+
+            "channel_recv" => {
+                // channel_recv(receiver: Receiver[T]) -> Result[T, Str]
+                let id = match &args[0] {
+                    Value::Receiver(id) => *id,
+                    _ => return Err(InterpError { message: "channel_recv: expected Receiver".to_string() })
+                };
+
+                if let Some((queue, _, closed)) = self.channels.get_mut(&id) {
+                    if queue.is_empty() {
+                        if *closed {
+                            return Ok(Some(Value::Enum {
+                                type_name: "Result".to_string(),
+                                variant: "Err".to_string(),
+                                fields: vec![Value::Str("channel closed".to_string())],
+                            }));
+                        }
+                        return Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Err".to_string(),
+                            fields: vec![Value::Str("channel empty".to_string())],
+                        }));
+                    }
+                    let value = queue.remove(0);
+                    Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Ok".to_string(),
+                        fields: vec![value],
+                    }))
+                } else {
+                    Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str("invalid channel".to_string())],
+                    }))
+                }
+            }
+
+            "channel_try_send" => {
+                // channel_try_send(sender: Sender[T], value: T) -> Bool
+                let id = match &args[0] {
+                    Value::Sender(id) => *id,
+                    _ => return Err(InterpError { message: "channel_try_send: expected Sender".to_string() })
+                };
+                let value = args[1].clone();
+
+                if let Some((queue, capacity, closed)) = self.channels.get_mut(&id) {
+                    if *closed || (queue.len() >= *capacity && *capacity > 0) {
+                        return Ok(Some(Value::Bool(false)));
+                    }
+                    queue.push(value);
+                    Ok(Some(Value::Bool(true)))
+                } else {
+                    Ok(Some(Value::Bool(false)))
+                }
+            }
+
+            "channel_try_recv" => {
+                // channel_try_recv(receiver: Receiver[T]) -> T?
+                let id = match &args[0] {
+                    Value::Receiver(id) => *id,
+                    _ => return Err(InterpError { message: "channel_try_recv: expected Receiver".to_string() })
+                };
+
+                if let Some((queue, _, _)) = self.channels.get_mut(&id) {
+                    if queue.is_empty() {
+                        return Ok(Some(Value::Enum {
+                            type_name: "Option".to_string(),
+                            variant: "None".to_string(),
+                            fields: vec![],
+                        }));
+                    }
+                    let value = queue.remove(0);
+                    Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "Some".to_string(),
+                        fields: vec![value],
+                    }))
+                } else {
+                    Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "None".to_string(),
+                        fields: vec![],
+                    }))
+                }
+            }
+
+            "channel_close" => {
+                // channel_close(sender: Sender[T]) -> ()
+                let id = match &args[0] {
+                    Value::Sender(id) => *id,
+                    _ => return Err(InterpError { message: "channel_close: expected Sender".to_string() })
+                };
+
+                if let Some((_, _, closed)) = self.channels.get_mut(&id) {
+                    *closed = true;
+                }
+                Ok(Some(Value::Unit))
+            }
+
+            // ===== Mutex operations =====
+            "mutex_new" => {
+                // mutex_new(value: T) -> Mutex[T]
+                let value = args[0].clone();
+                let id = self.next_mutex_id;
+                self.next_mutex_id += 1;
+                self.mutexes.insert(id, (value, false));
+                Ok(Some(Value::Mutex(id)))
+            }
+
+            "mutex_lock" => {
+                // mutex_lock(m: Mutex[T]) -> MutexGuard[T]
+                let id = match &args[0] {
+                    Value::Mutex(id) => *id,
+                    _ => return Err(InterpError { message: "mutex_lock: expected Mutex".to_string() })
+                };
+
+                if let Some((_, locked)) = self.mutexes.get_mut(&id) {
+                    if *locked {
+                        return Err(InterpError { message: "mutex_lock: mutex already locked (deadlock in sync mode)".to_string() });
+                    }
+                    *locked = true;
+                    Ok(Some(Value::MutexGuard(id)))
+                } else {
+                    Err(InterpError { message: "mutex_lock: invalid mutex".to_string() })
+                }
+            }
+
+            "mutex_try_lock" => {
+                // mutex_try_lock(m: Mutex[T]) -> MutexGuard[T]?
+                let id = match &args[0] {
+                    Value::Mutex(id) => *id,
+                    _ => return Err(InterpError { message: "mutex_try_lock: expected Mutex".to_string() })
+                };
+
+                if let Some((_, locked)) = self.mutexes.get_mut(&id) {
+                    if *locked {
+                        return Ok(Some(Value::Enum {
+                            type_name: "Option".to_string(),
+                            variant: "None".to_string(),
+                            fields: vec![],
+                        }));
+                    }
+                    *locked = true;
+                    Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "Some".to_string(),
+                        fields: vec![Value::MutexGuard(id)],
+                    }))
+                } else {
+                    Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "None".to_string(),
+                        fields: vec![],
+                    }))
+                }
+            }
+
+            "mutex_unlock" => {
+                // mutex_unlock(guard: MutexGuard[T]) -> ()
+                let id = match &args[0] {
+                    Value::MutexGuard(id) => *id,
+                    _ => return Err(InterpError { message: "mutex_unlock: expected MutexGuard".to_string() })
+                };
+
+                if let Some((_, locked)) = self.mutexes.get_mut(&id) {
+                    *locked = false;
+                }
+                Ok(Some(Value::Unit))
+            }
+
+            "mutex_get" => {
+                // mutex_get(guard: MutexGuard[T]) -> T
+                let id = match &args[0] {
+                    Value::MutexGuard(id) => *id,
+                    _ => return Err(InterpError { message: "mutex_get: expected MutexGuard".to_string() })
+                };
+
+                if let Some((value, _)) = self.mutexes.get(&id) {
+                    Ok(Some(value.clone()))
+                } else {
+                    Err(InterpError { message: "mutex_get: invalid mutex".to_string() })
+                }
+            }
+
+            "mutex_set" => {
+                // mutex_set(guard: MutexGuard[T], value: T) -> ()
+                let id = match &args[0] {
+                    Value::MutexGuard(id) => *id,
+                    _ => return Err(InterpError { message: "mutex_set: expected MutexGuard".to_string() })
+                };
+                let new_value = args[1].clone();
+
+                if let Some((value, _)) = self.mutexes.get_mut(&id) {
+                    *value = new_value;
+                    Ok(Some(Value::Unit))
+                } else {
+                    Err(InterpError { message: "mutex_set: invalid mutex".to_string() })
+                }
             }
 
             // ===== DateTime operations (chrono-based) =====

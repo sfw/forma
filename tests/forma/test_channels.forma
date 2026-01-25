@@ -1,0 +1,57 @@
+# Test Channels and Mutex
+# Tests for concurrency primitives
+# Expected output: All tests pass
+
+# Test channel creation
+f test_channel_new() -> Bool
+    ch := channel_new(10)
+    # Returns a tuple of (Sender, Receiver)
+    type_of(ch) == "Tuple"
+
+# Test mutex creation
+f test_mutex_new() -> Bool
+    mtx := mutex_new(0)
+    type_of(mtx) == "Mutex"
+
+# Test mutex lock and get
+f test_mutex_lock_get() -> Bool
+    mtx := mutex_new(42)
+    guard := mutex_lock(mtx)
+    val := mutex_get(guard)
+    mutex_unlock(guard)
+    val == 42
+
+# Test mutex set
+f test_mutex_set() -> Bool
+    mtx := mutex_new(0)
+    guard := mutex_lock(mtx)
+    mutex_set(guard, 100)
+    val := mutex_get(guard)
+    mutex_unlock(guard)
+    val == 100
+
+# Test mutex try_lock
+f test_mutex_try_lock() -> Bool
+    mtx := mutex_new(5)
+    m mutex_try_lock(mtx)
+        Some(guard) ->
+            val := mutex_get(guard)
+            mutex_unlock(guard)
+            val == 5
+        None -> false
+
+f run_all_tests() -> Int
+    passed := 0
+    if test_channel_new() then passed = passed + 1 else print("FAIL: test_channel_new")
+    if test_mutex_new() then passed = passed + 1 else print("FAIL: test_mutex_new")
+    if test_mutex_lock_get() then passed = passed + 1 else print("FAIL: test_mutex_lock_get")
+    if test_mutex_set() then passed = passed + 1 else print("FAIL: test_mutex_set")
+    if test_mutex_try_lock() then passed = passed + 1 else print("FAIL: test_mutex_try_lock")
+
+    print("Channel/Mutex tests passed:")
+    print(passed)
+    print("of 5")
+
+    if passed == 5 then 1 else 0
+
+f main() -> Int = run_all_tests()

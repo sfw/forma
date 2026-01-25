@@ -882,6 +882,167 @@ impl TypeEnv {
             },
         );
 
+        // ===== Channel functions =====
+        // channel_new(Int) -> (Sender[T], Receiver[T])
+        let t = TypeVar::fresh();
+        env.bindings.insert(
+            "channel_new".to_string(),
+            TypeScheme {
+                vars: vec![t],
+                ty: Ty::Fn(
+                    vec![Ty::Int],
+                    Box::new(Ty::Tuple(vec![
+                        Ty::Sender(Box::new(Ty::Var(t))),
+                        Ty::Receiver(Box::new(Ty::Var(t)))
+                    ]))
+                )
+            },
+        );
+
+        // channel_send(Sender[T], T) -> Result[(), Str]
+        let t = TypeVar::fresh();
+        env.bindings.insert(
+            "channel_send".to_string(),
+            TypeScheme {
+                vars: vec![t],
+                ty: Ty::Fn(
+                    vec![Ty::Sender(Box::new(Ty::Var(t))), Ty::Var(t)],
+                    Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str)))
+                )
+            },
+        );
+
+        // channel_recv(Receiver[T]) -> Result[T, Str]
+        let t = TypeVar::fresh();
+        env.bindings.insert(
+            "channel_recv".to_string(),
+            TypeScheme {
+                vars: vec![t],
+                ty: Ty::Fn(
+                    vec![Ty::Receiver(Box::new(Ty::Var(t)))],
+                    Box::new(Ty::Result(Box::new(Ty::Var(t)), Box::new(Ty::Str)))
+                )
+            },
+        );
+
+        // channel_try_send(Sender[T], T) -> Bool
+        let t = TypeVar::fresh();
+        env.bindings.insert(
+            "channel_try_send".to_string(),
+            TypeScheme {
+                vars: vec![t],
+                ty: Ty::Fn(
+                    vec![Ty::Sender(Box::new(Ty::Var(t))), Ty::Var(t)],
+                    Box::new(Ty::Bool)
+                )
+            },
+        );
+
+        // channel_try_recv(Receiver[T]) -> T?
+        let t = TypeVar::fresh();
+        env.bindings.insert(
+            "channel_try_recv".to_string(),
+            TypeScheme {
+                vars: vec![t],
+                ty: Ty::Fn(
+                    vec![Ty::Receiver(Box::new(Ty::Var(t)))],
+                    Box::new(Ty::Option(Box::new(Ty::Var(t))))
+                )
+            },
+        );
+
+        // channel_close(Sender[T]) -> ()
+        let t = TypeVar::fresh();
+        env.bindings.insert(
+            "channel_close".to_string(),
+            TypeScheme {
+                vars: vec![t],
+                ty: Ty::Fn(
+                    vec![Ty::Sender(Box::new(Ty::Var(t)))],
+                    Box::new(Ty::Unit)
+                )
+            },
+        );
+
+        // ===== Mutex functions =====
+        // mutex_new(T) -> Mutex[T]
+        let t = TypeVar::fresh();
+        env.bindings.insert(
+            "mutex_new".to_string(),
+            TypeScheme {
+                vars: vec![t],
+                ty: Ty::Fn(
+                    vec![Ty::Var(t)],
+                    Box::new(Ty::Mutex(Box::new(Ty::Var(t))))
+                )
+            },
+        );
+
+        // mutex_lock(Mutex[T]) -> MutexGuard[T]
+        let t = TypeVar::fresh();
+        env.bindings.insert(
+            "mutex_lock".to_string(),
+            TypeScheme {
+                vars: vec![t],
+                ty: Ty::Fn(
+                    vec![Ty::Mutex(Box::new(Ty::Var(t)))],
+                    Box::new(Ty::MutexGuard(Box::new(Ty::Var(t))))
+                )
+            },
+        );
+
+        // mutex_try_lock(Mutex[T]) -> MutexGuard[T]?
+        let t = TypeVar::fresh();
+        env.bindings.insert(
+            "mutex_try_lock".to_string(),
+            TypeScheme {
+                vars: vec![t],
+                ty: Ty::Fn(
+                    vec![Ty::Mutex(Box::new(Ty::Var(t)))],
+                    Box::new(Ty::Option(Box::new(Ty::MutexGuard(Box::new(Ty::Var(t))))))
+                )
+            },
+        );
+
+        // mutex_unlock(MutexGuard[T]) -> ()
+        let t = TypeVar::fresh();
+        env.bindings.insert(
+            "mutex_unlock".to_string(),
+            TypeScheme {
+                vars: vec![t],
+                ty: Ty::Fn(
+                    vec![Ty::MutexGuard(Box::new(Ty::Var(t)))],
+                    Box::new(Ty::Unit)
+                )
+            },
+        );
+
+        // mutex_get(MutexGuard[T]) -> T
+        let t = TypeVar::fresh();
+        env.bindings.insert(
+            "mutex_get".to_string(),
+            TypeScheme {
+                vars: vec![t],
+                ty: Ty::Fn(
+                    vec![Ty::MutexGuard(Box::new(Ty::Var(t)))],
+                    Box::new(Ty::Var(t))
+                )
+            },
+        );
+
+        // mutex_set(MutexGuard[T], T) -> ()
+        let t = TypeVar::fresh();
+        env.bindings.insert(
+            "mutex_set".to_string(),
+            TypeScheme {
+                vars: vec![t],
+                ty: Ty::Fn(
+                    vec![Ty::MutexGuard(Box::new(Ty::Var(t))), Ty::Var(t)],
+                    Box::new(Ty::Unit)
+                )
+            },
+        );
+
         // ===== JSON functions =====
         // json_parse: Str -> Result[Json, Str]
         env.bindings.insert(
@@ -1768,6 +1929,24 @@ impl Unifier {
 
             // Set unification
             (Ty::Set(e1), Ty::Set(e2)) => self.unify(e1, e2, span),
+
+            // Task unification
+            (Ty::Task(t1), Ty::Task(t2)) => self.unify(t1, t2, span),
+
+            // Future unification
+            (Ty::Future(t1), Ty::Future(t2)) => self.unify(t1, t2, span),
+
+            // Sender unification
+            (Ty::Sender(t1), Ty::Sender(t2)) => self.unify(t1, t2, span),
+
+            // Receiver unification
+            (Ty::Receiver(t1), Ty::Receiver(t2)) => self.unify(t1, t2, span),
+
+            // Mutex unification
+            (Ty::Mutex(t1), Ty::Mutex(t2)) => self.unify(t1, t2, span),
+
+            // MutexGuard unification
+            (Ty::MutexGuard(t1), Ty::MutexGuard(t2)) => self.unify(t1, t2, span),
 
             // Option unification
             (Ty::Option(t1), Ty::Option(t2)) => self.unify(t1, t2, span),

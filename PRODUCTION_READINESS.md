@@ -1,8 +1,8 @@
 # FORMA Production Readiness Plan
 
-**Date:** January 24, 2026
+**Date:** January 25, 2026
 **Goal:** Close critical gaps to make FORMA production-ready
-**Status:** Sprint 1 Complete - Async Foundation implemented
+**Status:** Sprint 2 Complete - Channels and Mutex implemented
 
 ---
 
@@ -85,12 +85,12 @@ sleep_async(ms: Int) -> ()
 - [x] Parse spawn expressions (added)
 - [x] Add `Task[T]` type to type system
 - [x] Add `Future[T]` type to type system
-- [ ] Add `Sender[T]`, `Receiver[T]` types (Sprint 2)
-- [ ] Add `Mutex[T]`, `MutexGuard[T]` types (Sprint 2)
+- [x] Add `Sender[T]`, `Receiver[T]` types
+- [x] Add `Mutex[T]`, `MutexGuard[T]` types
 - [x] Implement async transformation in MIR (Spawn/Await terminators)
 - [x] Implement tokio-based runtime in interpreter (simplified sync for now)
-- [ ] Add channel builtins (Sprint 2)
-- [ ] Add mutex builtins (Sprint 2)
+- [x] Add channel builtins (channel_new, channel_send, channel_recv, etc.)
+- [x] Add mutex builtins (mutex_new, mutex_lock, mutex_unlock, etc.)
 - [x] Add timeout/sleep_async builtins
 - [x] Add await_all/await_any builtins
 - [x] Create tests/forma/test_async.forma
@@ -443,12 +443,12 @@ row_get_null(row: Row, col: Int) -> Bool
 7. ✅ Test basic async/await (tests/forma/test_async.forma)
 8. ✅ Add sleep_async, timeout, await_all, await_any builtins
 
-### Sprint 2: Concurrency Features (Week 3)
-1. Implement channels (Sender/Receiver)
-2. Implement mutex
-3. Implement timeout/sleep_async
-4. Implement await_all/await_any
-5. Create async tests and examples
+### Sprint 2: Concurrency Features (Week 3) ✅ COMPLETED
+1. ✅ Implement channels (Sender/Receiver) - channel_new, channel_send, channel_recv, etc.
+2. ✅ Implement mutex - mutex_new, mutex_lock, mutex_unlock, mutex_get, mutex_set
+3. ✅ Implement timeout/sleep_async (done in Sprint 1)
+4. ✅ Implement await_all/await_any (done in Sprint 1)
+5. ✅ Create async tests and examples (tests/forma/test_channels.forma)
 
 ### Sprint 3: HTTP Server (Week 4)
 1. Define HttpRequest/HttpResponse types

@@ -58,6 +58,18 @@ pub enum Ty {
     /// Future type for async function returns
     Future(Box<Ty>),
 
+    /// Channel sender type
+    Sender(Box<Ty>),
+
+    /// Channel receiver type
+    Receiver(Box<Ty>),
+
+    /// Mutex type for synchronization
+    Mutex(Box<Ty>),
+
+    /// Mutex guard type (holds lock)
+    MutexGuard(Box<Ty>),
+
     /// Unit type ()
     Unit,
 
@@ -168,6 +180,10 @@ impl Ty {
             Ty::Set(ty) => ty.has_vars(),
             Ty::Task(ty) => ty.has_vars(),
             Ty::Future(ty) => ty.has_vars(),
+            Ty::Sender(ty) => ty.has_vars(),
+            Ty::Receiver(ty) => ty.has_vars(),
+            Ty::Mutex(ty) => ty.has_vars(),
+            Ty::MutexGuard(ty) => ty.has_vars(),
             Ty::Option(ty) => ty.has_vars(),
             Ty::Result(ok, err) => ok.has_vars() || err.has_vars(),
             Ty::Fn(params, ret) => params.iter().any(|t| t.has_vars()) || ret.has_vars(),
@@ -208,6 +224,10 @@ impl Ty {
             Ty::Set(ty) => ty.collect_vars(vars),
             Ty::Task(ty) => ty.collect_vars(vars),
             Ty::Future(ty) => ty.collect_vars(vars),
+            Ty::Sender(ty) => ty.collect_vars(vars),
+            Ty::Receiver(ty) => ty.collect_vars(vars),
+            Ty::Mutex(ty) => ty.collect_vars(vars),
+            Ty::MutexGuard(ty) => ty.collect_vars(vars),
             Ty::Option(ty) => ty.collect_vars(vars),
             Ty::Result(ok, err) => {
                 ok.collect_vars(vars);
@@ -247,6 +267,10 @@ impl Ty {
             Ty::Set(ty) => Ty::Set(Box::new(ty.apply(subst))),
             Ty::Task(ty) => Ty::Task(Box::new(ty.apply(subst))),
             Ty::Future(ty) => Ty::Future(Box::new(ty.apply(subst))),
+            Ty::Sender(ty) => Ty::Sender(Box::new(ty.apply(subst))),
+            Ty::Receiver(ty) => Ty::Receiver(Box::new(ty.apply(subst))),
+            Ty::Mutex(ty) => Ty::Mutex(Box::new(ty.apply(subst))),
+            Ty::MutexGuard(ty) => Ty::MutexGuard(Box::new(ty.apply(subst))),
             Ty::Option(ty) => Ty::Option(Box::new(ty.apply(subst))),
             Ty::Result(ok, err) => {
                 Ty::Result(Box::new(ok.apply(subst)), Box::new(err.apply(subst)))
@@ -395,6 +419,10 @@ impl fmt::Display for Ty {
             Ty::Set(ty) => write!(f, "{{{}}}", ty),
             Ty::Task(ty) => write!(f, "Task[{}]", ty),
             Ty::Future(ty) => write!(f, "Future[{}]", ty),
+            Ty::Sender(ty) => write!(f, "Sender[{}]", ty),
+            Ty::Receiver(ty) => write!(f, "Receiver[{}]", ty),
+            Ty::Mutex(ty) => write!(f, "Mutex[{}]", ty),
+            Ty::MutexGuard(ty) => write!(f, "MutexGuard[{}]", ty),
             Ty::Option(ty) => write!(f, "{}?", ty),
             Ty::Result(ok, err) => write!(f, "{}!{}", ok, err),
             Ty::Fn(params, ret) => {
