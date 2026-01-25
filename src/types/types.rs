@@ -49,6 +49,8 @@ pub enum Ty {
     Bool,
     Char,
     Str,
+    /// JSON value type (dynamic)
+    Json,
 
     /// Unit type ()
     Unit,
@@ -424,6 +426,7 @@ impl fmt::Display for Ty {
                 Ok(())
             }
             Ty::Associated(ty, name) => write!(f, "{}.{}", ty, name),
+            Ty::Json => write!(f, "Json"),
             Ty::Error => write!(f, "<error>"),
         }
     }

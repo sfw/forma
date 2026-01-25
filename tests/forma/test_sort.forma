@@ -1,0 +1,122 @@
+# Test Sorting Module
+# Tests for sorting, shuffling, and array utilities
+# Expected output: All tests pass
+
+# Test sorting integers ascending
+f test_sort_ints() -> Bool
+    arr := [5, 2, 8, 1, 9, 3]
+    sorted := sort_ints(arr)
+    m vec_first(sorted)
+        Some(first) -> first == 1
+        None -> false
+
+# Test sorting integers descending
+f test_sort_ints_desc() -> Bool
+    arr := [5, 2, 8, 1, 9, 3]
+    sorted := sort_ints_desc(arr)
+    m vec_first(sorted)
+        Some(first) -> first == 9
+        None -> false
+
+# Test sorting floats
+f test_sort_floats() -> Bool
+    arr := [3.14, 1.41, 2.71, 1.0]
+    sorted := sort_floats(arr)
+    m vec_first(sorted)
+        Some(first) -> first == 1.0
+        None -> false
+
+# Test sorting strings
+f test_sort_strings() -> Bool
+    arr := ["banana", "apple", "cherry"]
+    sorted := sort_strings(arr)
+    m vec_first(sorted)
+        Some(first) -> first == "apple"
+        None -> false
+
+# Test sorting strings descending
+f test_sort_strings_desc() -> Bool
+    arr := ["banana", "apple", "cherry"]
+    sorted := sort_strings_desc(arr)
+    m vec_first(sorted)
+        Some(first) -> first == "cherry"
+        None -> false
+
+# Test reverse
+f test_reverse() -> Bool
+    arr := [1, 2, 3, 4, 5]
+    rev := reverse(arr)
+    m vec_first(rev)
+        Some(first) -> first == 5
+        None -> false
+
+# Test min_of
+f test_min_of() -> Bool
+    arr := [5, 2, 8, 1, 9]
+    m min_of(arr)
+        Some(min) -> min == 1
+        None -> false
+
+# Test min_of empty
+f test_min_of_empty() -> Bool
+    arr := []
+    m min_of(arr)
+        Some(_) -> false
+        None -> true
+
+# Test max_of
+f test_max_of() -> Bool
+    arr := [5, 2, 8, 1, 9]
+    m max_of(arr)
+        Some(max) -> max == 9
+        None -> false
+
+# Test sum_of
+f test_sum_of() -> Bool
+    arr := [1, 2, 3, 4, 5]
+    s := sum_of(arr)
+    s == 15
+
+# Test binary_search found
+f test_binary_search_found() -> Bool
+    arr := [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    m binary_search(arr, 5)
+        Some(idx) -> idx == 4
+        None -> false
+
+# Test binary_search not found
+f test_binary_search_not_found() -> Bool
+    arr := [1, 2, 3, 4, 5]
+    m binary_search(arr, 10)
+        Some(_) -> false
+        None -> true
+
+# Test shuffle (just verify it returns array of same length)
+f test_shuffle() -> Bool
+    arr := [1, 2, 3, 4, 5]
+    shuffled := shuffle(arr)
+    vec_len(shuffled) == 5
+
+f run_all_tests() -> Int
+    passed := 0
+    if test_sort_ints() then passed = passed + 1 else print("FAIL: test_sort_ints")
+    if test_sort_ints_desc() then passed = passed + 1 else print("FAIL: test_sort_ints_desc")
+    if test_sort_floats() then passed = passed + 1 else print("FAIL: test_sort_floats")
+    if test_sort_strings() then passed = passed + 1 else print("FAIL: test_sort_strings")
+    if test_sort_strings_desc() then passed = passed + 1 else print("FAIL: test_sort_strings_desc")
+    if test_reverse() then passed = passed + 1 else print("FAIL: test_reverse")
+    if test_min_of() then passed = passed + 1 else print("FAIL: test_min_of")
+    if test_min_of_empty() then passed = passed + 1 else print("FAIL: test_min_of_empty")
+    if test_max_of() then passed = passed + 1 else print("FAIL: test_max_of")
+    if test_sum_of() then passed = passed + 1 else print("FAIL: test_sum_of")
+    if test_binary_search_found() then passed = passed + 1 else print("FAIL: test_binary_search_found")
+    if test_binary_search_not_found() then passed = passed + 1 else print("FAIL: test_binary_search_not_found")
+    if test_shuffle() then passed = passed + 1 else print("FAIL: test_shuffle")
+
+    print("Sort tests passed:")
+    print(passed)
+    print("of 13")
+
+    if passed == 13 then 1 else 0
+
+f main() -> Int = run_all_tests()

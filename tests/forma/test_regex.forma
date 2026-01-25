@@ -1,0 +1,109 @@
+# Test Regex Module
+# Tests for regex matching, finding, replacing, and splitting
+# Expected output: All tests pass
+
+# Test regex match basic
+f test_regex_match_basic() -> Bool
+    regex_match("hello", "hello world")
+
+# Test regex match pattern
+f test_regex_match_pattern() -> Bool
+    regex_match("[0-9]+", "abc 123 def")
+
+# Test regex match fail
+f test_regex_match_fail() -> Bool
+    regex_match("[0-9]+", "no numbers here") == false
+
+# Test regex find
+f test_regex_find() -> Bool
+    m regex_find("[0-9]+", "abc 123 def")
+        Some(found) -> found == "123"
+        None -> false
+
+# Test regex find none
+f test_regex_find_none() -> Bool
+    m regex_find("[0-9]+", "no numbers")
+        Some(_) -> false
+        None -> true
+
+# Test regex find all
+f test_regex_find_all() -> Bool
+    matches := regex_find_all("[0-9]+", "a1 b2 c3")
+    vec_len(matches) == 3
+
+# Test regex find all with content
+f test_regex_find_all_content() -> Bool
+    matches := regex_find_all("[a-z]+", "abc 123 def")
+    if vec_len(matches) != 2 then false
+    else m vec_get(matches, 0)
+        Some(s) -> s == "abc"
+        None -> false
+
+# Test regex replace
+f test_regex_replace() -> Bool
+    result := regex_replace("[0-9]+", "abc 123 def 456", "X")
+    result == "abc X def 456"
+
+# Test regex replace all
+f test_regex_replace_all() -> Bool
+    result := regex_replace_all("[0-9]+", "abc 123 def 456", "X")
+    result == "abc X def X"
+
+# Test regex split
+f test_regex_split() -> Bool
+    parts := regex_split("[,;]+", "a,b;c,,d")
+    vec_len(parts) == 4
+
+# Test regex split with whitespace
+f test_regex_split_whitespace() -> Bool
+    parts := regex_split("\\s+", "hello   world  test")
+    if vec_len(parts) != 3 then false
+    else m vec_get(parts, 0)
+        Some(s) -> s == "hello"
+        None -> false
+
+# Test regex captures
+f test_regex_captures() -> Bool
+    m regex_captures("([a-z]+)@([a-z]+)\\.([a-z]+)", "test@example.com")
+        Some(caps) -> vec_len(caps) == 4
+        None -> false
+
+# Test regex captures none
+f test_regex_captures_none() -> Bool
+    m regex_captures("([a-z]+)@([a-z]+)", "no email here")
+        Some(_) -> false
+        None -> true
+
+# Test regex is valid
+f test_regex_is_valid() -> Bool
+    regex_is_valid("[a-z]+")
+
+# Test regex is valid invalid
+f test_regex_is_valid_invalid() -> Bool
+    regex_is_valid("[invalid(") == false
+
+f run_all_tests() -> Int
+    passed := 0
+    if test_regex_match_basic() then passed = passed + 1 else print("FAIL: test_regex_match_basic")
+    if test_regex_match_pattern() then passed = passed + 1 else print("FAIL: test_regex_match_pattern")
+    if test_regex_match_fail() then passed = passed + 1 else print("FAIL: test_regex_match_fail")
+    if test_regex_find() then passed = passed + 1 else print("FAIL: test_regex_find")
+    if test_regex_find_none() then passed = passed + 1 else print("FAIL: test_regex_find_none")
+    if test_regex_find_all() then passed = passed + 1 else print("FAIL: test_regex_find_all")
+    if test_regex_find_all_content() then passed = passed + 1 else print("FAIL: test_regex_find_all_content")
+    if test_regex_replace() then passed = passed + 1 else print("FAIL: test_regex_replace")
+    if test_regex_replace_all() then passed = passed + 1 else print("FAIL: test_regex_replace_all")
+    if test_regex_split() then passed = passed + 1 else print("FAIL: test_regex_split")
+    if test_regex_split_whitespace() then passed = passed + 1 else print("FAIL: test_regex_split_whitespace")
+    if test_regex_captures() then passed = passed + 1 else print("FAIL: test_regex_captures")
+    if test_regex_captures_none() then passed = passed + 1 else print("FAIL: test_regex_captures_none")
+    if test_regex_is_valid() then passed = passed + 1 else print("FAIL: test_regex_is_valid")
+    if test_regex_is_valid_invalid() then passed = passed + 1 else print("FAIL: test_regex_is_valid_invalid")
+
+    print("Regex tests passed:")
+    print(passed)
+    print("of 15")
+
+    if passed == 15 then 1 else 0
+
+f main() -> Int = run_all_tests()

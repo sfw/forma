@@ -1,0 +1,97 @@
+# Test Process and Path Module
+# Tests for process execution, environment, and path manipulation
+# Expected output: All tests pass
+
+# Test exec command - just test that it returns Ok
+f test_exec() -> Bool
+    m exec("echo hello")
+        Ok(_) -> true
+        Err(_) -> false
+
+# Test pid returns positive number
+f test_pid() -> Bool
+    p := pid()
+    p > 0
+
+# Test cwd returns non-empty string
+f test_cwd() -> Bool
+    c := cwd()
+    str_len(c) > 0
+
+# Test home_dir returns some value
+f test_home_dir() -> Bool
+    m home_dir()
+        Some(h) -> str_len(h) > 0
+        None -> false
+
+# Test temp_dir returns non-empty string
+f test_temp_dir() -> Bool
+    t := temp_dir()
+    str_len(t) > 0
+
+# Test path_join
+f test_path_join() -> Bool
+    path := path_join(["usr", "local", "bin"])
+    str_contains(path, "usr") && str_contains(path, "bin")
+
+# Test path_parent
+f test_path_parent() -> Bool
+    m path_parent("/usr/local/bin")
+        Some(parent) -> str_contains(parent, "local")
+        None -> false
+
+# Test path_filename
+f test_path_filename() -> Bool
+    m path_filename("/usr/local/bin/test.txt")
+        Some(name) -> name == "test.txt"
+        None -> false
+
+# Test path_stem
+f test_path_stem() -> Bool
+    m path_stem("/path/to/file.txt")
+        Some(stem) -> stem == "file"
+        None -> false
+
+# Test path_extension
+f test_path_extension() -> Bool
+    m path_extension("/path/to/file.txt")
+        Some(ext) -> ext == "txt"
+        None -> false
+
+# Test path_is_absolute
+f test_path_is_absolute() -> Bool
+    (path_is_absolute("/usr/bin")) && (path_is_relative("local/bin"))
+
+# Test file_is_file
+f test_file_is_file() -> Bool
+    # Test with Cargo.toml which should exist
+    file_is_file("Cargo.toml")
+
+# Test file_is_dir
+f test_file_is_dir() -> Bool
+    # Test with src which should be a directory
+    file_is_dir("src")
+
+f run_all_tests() -> Int
+    passed := 0
+    if test_exec() then passed = passed + 1 else print("FAIL: test_exec")
+    if test_pid() then passed = passed + 1 else print("FAIL: test_pid")
+    if test_cwd() then passed = passed + 1 else print("FAIL: test_cwd")
+    if test_home_dir() then passed = passed + 1 else print("FAIL: test_home_dir")
+    if test_temp_dir() then passed = passed + 1 else print("FAIL: test_temp_dir")
+    if test_path_join() then passed = passed + 1 else print("FAIL: test_path_join")
+    if test_path_parent() then passed = passed + 1 else print("FAIL: test_path_parent")
+    if test_path_filename() then passed = passed + 1 else print("FAIL: test_path_filename")
+    if test_path_stem() then passed = passed + 1 else print("FAIL: test_path_stem")
+    if test_path_extension() then passed = passed + 1 else print("FAIL: test_path_extension")
+    if test_path_is_absolute() then passed = passed + 1 else print("FAIL: test_path_is_absolute")
+    if test_file_is_file() then passed = passed + 1 else print("FAIL: test_file_is_file")
+    if test_file_is_dir() then passed = passed + 1 else print("FAIL: test_file_is_dir")
+
+    print("Process/Path tests passed:")
+    print(passed)
+    print("of 13")
+
+    if passed == 13 then 1 else 0
+
+f main() -> Int = run_all_tests()

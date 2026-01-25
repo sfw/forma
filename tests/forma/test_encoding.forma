@@ -1,0 +1,121 @@
+# Test Encoding Module
+# Tests for base64, hex encoding/decoding, hashing, and UUID
+# Expected output: All tests pass
+
+# Test base64 encode
+f test_base64_encode() -> Bool
+    encoded := base64_encode("Hello, World!")
+    encoded == "SGVsbG8sIFdvcmxkIQ=="
+
+# Test base64 decode
+f test_base64_decode() -> Bool
+    m base64_decode("SGVsbG8sIFdvcmxkIQ==")
+        Ok(decoded) -> decoded == "Hello, World!"
+        Err(_) -> false
+
+# Test base64 roundtrip
+f test_base64_roundtrip() -> Bool
+    original := "Testing 123!"
+    encoded := base64_encode(original)
+    m base64_decode(encoded)
+        Ok(decoded) -> decoded == original
+        Err(_) -> false
+
+# Test base64 decode invalid
+f test_base64_decode_invalid() -> Bool
+    m base64_decode("not valid base64!!!")
+        Ok(_) -> false
+        Err(_) -> true
+
+# Test hex encode
+f test_hex_encode() -> Bool
+    encoded := hex_encode("ABC")
+    encoded == "414243"
+
+# Test hex decode
+f test_hex_decode() -> Bool
+    m hex_decode("414243")
+        Ok(decoded) -> decoded == "ABC"
+        Err(_) -> false
+
+# Test hex roundtrip
+f test_hex_roundtrip() -> Bool
+    original := "Test"
+    encoded := hex_encode(original)
+    m hex_decode(encoded)
+        Ok(decoded) -> decoded == original
+        Err(_) -> false
+
+# Test hex decode invalid
+f test_hex_decode_invalid() -> Bool
+    m hex_decode("ZZZZ")
+        Ok(_) -> false
+        Err(_) -> true
+
+# Test SHA256 hash
+f test_sha256() -> Bool
+    # SHA256 of "hello" is well-known
+    hash := sha256("hello")
+    hash == "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+
+# Test SHA256 empty string
+f test_sha256_empty() -> Bool
+    # SHA256 of "" is well-known
+    hash := sha256("")
+    hash == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+# Test hash_string produces consistent results
+f test_hash_string() -> Bool
+    h1 := hash_string("test")
+    h2 := hash_string("test")
+    h1 == h2
+
+# Test hash_string different strings produce different hashes
+f test_hash_string_different() -> Bool
+    h1 := hash_string("abc")
+    h2 := hash_string("def")
+    h1 != h2
+
+# Test UUID generation (just check format)
+f test_uuid_v4() -> Bool
+    uuid := uuid_v4()
+    # UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (36 chars)
+    str_len(uuid) == 36
+
+# Test UUID parse valid
+f test_uuid_parse_valid() -> Bool
+    m uuid_parse("550e8400-e29b-41d4-a716-446655440000")
+        Ok(_) -> true
+        Err(_) -> false
+
+# Test UUID parse invalid
+f test_uuid_parse_invalid() -> Bool
+    m uuid_parse("not-a-uuid")
+        Ok(_) -> false
+        Err(_) -> true
+
+f run_all_tests() -> Int
+    passed := 0
+    if test_base64_encode() then passed = passed + 1 else print("FAIL: test_base64_encode")
+    if test_base64_decode() then passed = passed + 1 else print("FAIL: test_base64_decode")
+    if test_base64_roundtrip() then passed = passed + 1 else print("FAIL: test_base64_roundtrip")
+    if test_base64_decode_invalid() then passed = passed + 1 else print("FAIL: test_base64_decode_invalid")
+    if test_hex_encode() then passed = passed + 1 else print("FAIL: test_hex_encode")
+    if test_hex_decode() then passed = passed + 1 else print("FAIL: test_hex_decode")
+    if test_hex_roundtrip() then passed = passed + 1 else print("FAIL: test_hex_roundtrip")
+    if test_hex_decode_invalid() then passed = passed + 1 else print("FAIL: test_hex_decode_invalid")
+    if test_sha256() then passed = passed + 1 else print("FAIL: test_sha256")
+    if test_sha256_empty() then passed = passed + 1 else print("FAIL: test_sha256_empty")
+    if test_hash_string() then passed = passed + 1 else print("FAIL: test_hash_string")
+    if test_hash_string_different() then passed = passed + 1 else print("FAIL: test_hash_string_different")
+    if test_uuid_v4() then passed = passed + 1 else print("FAIL: test_uuid_v4")
+    if test_uuid_parse_valid() then passed = passed + 1 else print("FAIL: test_uuid_parse_valid")
+    if test_uuid_parse_invalid() then passed = passed + 1 else print("FAIL: test_uuid_parse_invalid")
+
+    print("Encoding tests passed:")
+    print(passed)
+    print("of 15")
+
+    if passed == 15 then 1 else 0
+
+f main() -> Int = run_all_tests()

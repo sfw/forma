@@ -1,0 +1,133 @@
+# Test JSON Module
+# Tests for JSON parsing, manipulation, and generation
+# Expected output: All tests pass
+
+# Test parsing valid JSON
+f test_json_parse_object() -> Bool
+    m json_parse("{\"name\": \"Alice\", \"age\": 30}")
+        Ok(json) -> json_has(json, "name") && json_has(json, "age")
+        Err(_) -> false
+
+f test_json_parse_array() -> Bool
+    m json_parse("[1, 2, 3, 4, 5]")
+        Ok(json) -> json_is_array(json) && json_array_len(json) == 5
+        Err(_) -> false
+
+f test_json_parse_invalid() -> Bool
+    m json_parse("{invalid json}")
+        Ok(_) -> false
+        Err(_) -> true
+
+# Test getting values
+f test_json_get_str() -> Bool
+    m json_parse("{\"name\": \"Bob\"}")
+        Ok(json) ->
+            m json_get_str(json, "name")
+                Some(name) -> name == "Bob"
+                None -> false
+        Err(_) -> false
+
+f test_json_get_int() -> Bool
+    m json_parse("{\"age\": 25}")
+        Ok(json) ->
+            m json_get_int(json, "age")
+                Some(age) -> age == 25
+                None -> false
+        Err(_) -> false
+
+f test_json_get_float() -> Bool
+    m json_parse("{\"score\": 95.5}")
+        Ok(json) ->
+            m json_get_float(json, "score")
+                Some(score) -> score == 95.5
+                None -> false
+        Err(_) -> false
+
+f test_json_get_bool() -> Bool
+    m json_parse("{\"active\": true}")
+        Ok(json) ->
+            m json_get_bool(json, "active")
+                Some(active) -> active == true
+                None -> false
+        Err(_) -> false
+
+# Test array access
+f test_json_array_get() -> Bool
+    m json_parse("[10, 20, 30]")
+        Ok(json) ->
+            m json_array_get(json, 1)
+                Some(val) -> json_is_number(val)
+                None -> false
+        Err(_) -> false
+
+# Test type checking
+f test_json_type() -> Bool
+    str_json := json_from_str("hello")
+    int_json := json_from_int(42)
+    bool_json := json_from_bool(true)
+    null_json := json_null()
+
+    (json_type(str_json) == "string") && (json_type(int_json) == "number") && (json_type(bool_json) == "bool") && (json_type(null_json) == "null")
+
+# Test JSON creation
+f test_json_create() -> Bool
+    obj := json_object()
+    obj2 := json_set(obj, "name", json_from_str("Test"))
+    obj3 := json_set(obj2, "count", json_from_int(5))
+
+    json_has(obj3, "name") && json_has(obj3, "count")
+
+# Test stringify
+f test_json_stringify() -> Bool
+    obj := json_object()
+    obj2 := json_set(obj, "x", json_from_int(1))
+    s := json_stringify(obj2)
+    str_contains(s, "\"x\"") && str_contains(s, "1")
+
+# Test keys and values
+f test_json_keys() -> Bool
+    m json_parse("{\"a\": 1, \"b\": 2}")
+        Ok(json) ->
+            keys := json_keys(json)
+            vec_len(keys) == 2
+        Err(_) -> false
+
+f test_json_values() -> Bool
+    m json_parse("{\"a\": 1, \"b\": 2}")
+        Ok(json) ->
+            vals := json_values(json)
+            vec_len(vals) == 2
+        Err(_) -> false
+
+# Test json_to_value conversion
+f test_json_to_value() -> Bool
+    m json_parse("{\"count\": 42}")
+        Ok(json) ->
+            val := json_to_value(json)
+            type_of(val) == "Map"
+        Err(_) -> false
+
+f run_all_tests() -> Int
+    passed := 0
+    if test_json_parse_object() then passed = passed + 1 else print("FAIL: test_json_parse_object")
+    if test_json_parse_array() then passed = passed + 1 else print("FAIL: test_json_parse_array")
+    if test_json_parse_invalid() then passed = passed + 1 else print("FAIL: test_json_parse_invalid")
+    if test_json_get_str() then passed = passed + 1 else print("FAIL: test_json_get_str")
+    if test_json_get_int() then passed = passed + 1 else print("FAIL: test_json_get_int")
+    if test_json_get_float() then passed = passed + 1 else print("FAIL: test_json_get_float")
+    if test_json_get_bool() then passed = passed + 1 else print("FAIL: test_json_get_bool")
+    if test_json_array_get() then passed = passed + 1 else print("FAIL: test_json_array_get")
+    if test_json_type() then passed = passed + 1 else print("FAIL: test_json_type")
+    if test_json_create() then passed = passed + 1 else print("FAIL: test_json_create")
+    if test_json_stringify() then passed = passed + 1 else print("FAIL: test_json_stringify")
+    if test_json_keys() then passed = passed + 1 else print("FAIL: test_json_keys")
+    if test_json_values() then passed = passed + 1 else print("FAIL: test_json_values")
+    if test_json_to_value() then passed = passed + 1 else print("FAIL: test_json_to_value")
+
+    print("JSON tests passed:")
+    print(passed)
+    print("of 14")
+
+    if passed == 14 then 1 else 0
+
+f main() -> Int = run_all_tests()

@@ -836,6 +836,715 @@ impl TypeEnv {
             TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Unit)) },
         );
 
+        // ===== JSON functions =====
+        // json_parse: Str -> Result[Json, Str]
+        env.bindings.insert(
+            "json_parse".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Json), Box::new(Ty::Str)))) },
+        );
+
+        // json_stringify: Json -> Str
+        env.bindings.insert(
+            "json_stringify".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Str)) },
+        );
+
+        // json_stringify_pretty: Json -> Str
+        env.bindings.insert(
+            "json_stringify_pretty".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Str)) },
+        );
+
+        // json_get: (Json, Str) -> Json?
+        env.bindings.insert(
+            "json_get".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json, Ty::Str], Box::new(Ty::Option(Box::new(Ty::Json)))) },
+        );
+
+        // json_get_str: (Json, Str) -> Str?
+        env.bindings.insert(
+            "json_get_str".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json, Ty::Str], Box::new(Ty::Option(Box::new(Ty::Str)))) },
+        );
+
+        // json_get_int: (Json, Str) -> Int?
+        env.bindings.insert(
+            "json_get_int".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json, Ty::Str], Box::new(Ty::Option(Box::new(Ty::Int)))) },
+        );
+
+        // json_get_float: (Json, Str) -> Float?
+        env.bindings.insert(
+            "json_get_float".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json, Ty::Str], Box::new(Ty::Option(Box::new(Ty::Float)))) },
+        );
+
+        // json_get_bool: (Json, Str) -> Bool?
+        env.bindings.insert(
+            "json_get_bool".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json, Ty::Str], Box::new(Ty::Option(Box::new(Ty::Bool)))) },
+        );
+
+        // json_get_array: (Json, Str) -> [Json]?
+        env.bindings.insert(
+            "json_get_array".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json, Ty::Str], Box::new(Ty::Option(Box::new(Ty::List(Box::new(Ty::Json)))))) },
+        );
+
+        // json_array_get: (Json, Int) -> Json?
+        env.bindings.insert(
+            "json_array_get".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json, Ty::Int], Box::new(Ty::Option(Box::new(Ty::Json)))) },
+        );
+
+        // json_array_len: Json -> Int
+        env.bindings.insert(
+            "json_array_len".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Int)) },
+        );
+
+        // json_keys: Json -> [Str]
+        env.bindings.insert(
+            "json_keys".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::List(Box::new(Ty::Str)))) },
+        );
+
+        // json_values: Json -> [Json]
+        env.bindings.insert(
+            "json_values".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::List(Box::new(Ty::Json)))) },
+        );
+
+        // json_has: (Json, Str) -> Bool
+        env.bindings.insert(
+            "json_has".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json, Ty::Str], Box::new(Ty::Bool)) },
+        );
+
+        // json_set: (Json, Str, Json) -> Json
+        env.bindings.insert(
+            "json_set".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json, Ty::Str, Ty::Json], Box::new(Ty::Json)) },
+        );
+
+        // json_type: Json -> Str
+        env.bindings.insert(
+            "json_type".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Str)) },
+        );
+
+        // json_is_null: Json -> Bool
+        env.bindings.insert(
+            "json_is_null".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Bool)) },
+        );
+
+        // json_is_bool: Json -> Bool
+        env.bindings.insert(
+            "json_is_bool".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Bool)) },
+        );
+
+        // json_is_number: Json -> Bool
+        env.bindings.insert(
+            "json_is_number".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Bool)) },
+        );
+
+        // json_is_string: Json -> Bool
+        env.bindings.insert(
+            "json_is_string".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Bool)) },
+        );
+
+        // json_is_array: Json -> Bool
+        env.bindings.insert(
+            "json_is_array".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Bool)) },
+        );
+
+        // json_is_object: Json -> Bool
+        env.bindings.insert(
+            "json_is_object".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Bool)) },
+        );
+
+        // json_from_str: Str -> Json
+        env.bindings.insert(
+            "json_from_str".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Json)) },
+        );
+
+        // json_from_int: Int -> Json
+        env.bindings.insert(
+            "json_from_int".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Json)) },
+        );
+
+        // json_from_float: Float -> Json
+        env.bindings.insert(
+            "json_from_float".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Json)) },
+        );
+
+        // json_from_bool: Bool -> Json
+        env.bindings.insert(
+            "json_from_bool".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Bool], Box::new(Ty::Json)) },
+        );
+
+        // json_null: () -> Json
+        env.bindings.insert(
+            "json_null".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![], Box::new(Ty::Json)) },
+        );
+
+        // json_object: () -> Json
+        env.bindings.insert(
+            "json_object".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![], Box::new(Ty::Json)) },
+        );
+
+        // json_array: () -> Json
+        env.bindings.insert(
+            "json_array".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![], Box::new(Ty::Json)) },
+        );
+
+        // json_to_value: Json -> T (returns dynamic value)
+        let json_to_value_t = TypeVar::fresh();
+        env.bindings.insert(
+            "json_to_value".to_string(),
+            TypeScheme { vars: vec![json_to_value_t], ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Var(json_to_value_t))) },
+        );
+
+        // ===== Sorting functions =====
+        // sort_ints: [Int] -> [Int]
+        env.bindings.insert(
+            "sort_ints".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Int))], Box::new(Ty::List(Box::new(Ty::Int)))) },
+        );
+
+        // sort_ints_desc: [Int] -> [Int]
+        env.bindings.insert(
+            "sort_ints_desc".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Int))], Box::new(Ty::List(Box::new(Ty::Int)))) },
+        );
+
+        // sort_floats: [Float] -> [Float]
+        env.bindings.insert(
+            "sort_floats".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Float))], Box::new(Ty::List(Box::new(Ty::Float)))) },
+        );
+
+        // sort_floats_desc: [Float] -> [Float]
+        env.bindings.insert(
+            "sort_floats_desc".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Float))], Box::new(Ty::List(Box::new(Ty::Float)))) },
+        );
+
+        // sort_strings: [Str] -> [Str]
+        env.bindings.insert(
+            "sort_strings".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Str))], Box::new(Ty::List(Box::new(Ty::Str)))) },
+        );
+
+        // sort_strings_desc: [Str] -> [Str]
+        env.bindings.insert(
+            "sort_strings_desc".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Str))], Box::new(Ty::List(Box::new(Ty::Str)))) },
+        );
+
+        // reverse: [T] -> [T]
+        let reverse_t = TypeVar::fresh();
+        env.bindings.insert(
+            "reverse".to_string(),
+            TypeScheme { vars: vec![reverse_t], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Var(reverse_t)))], Box::new(Ty::List(Box::new(Ty::Var(reverse_t))))) },
+        );
+
+        // shuffle: [T] -> [T]
+        let shuffle_t = TypeVar::fresh();
+        env.bindings.insert(
+            "shuffle".to_string(),
+            TypeScheme { vars: vec![shuffle_t], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Var(shuffle_t)))], Box::new(Ty::List(Box::new(Ty::Var(shuffle_t))))) },
+        );
+
+        // min_of: [Int] -> Int?
+        env.bindings.insert(
+            "min_of".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Int))], Box::new(Ty::Option(Box::new(Ty::Int)))) },
+        );
+
+        // max_of: [Int] -> Int?
+        env.bindings.insert(
+            "max_of".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Int))], Box::new(Ty::Option(Box::new(Ty::Int)))) },
+        );
+
+        // sum_of: [Int] -> Int
+        env.bindings.insert(
+            "sum_of".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Int))], Box::new(Ty::Int)) },
+        );
+
+        // binary_search: ([Int], Int) -> Int?
+        env.bindings.insert(
+            "binary_search".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Int)), Ty::Int], Box::new(Ty::Option(Box::new(Ty::Int)))) },
+        );
+
+        // ===== DateTime functions =====
+        // time_from_parts: (Int, Int, Int, Int, Int, Int) -> Int
+        env.bindings.insert(
+            "time_from_parts".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int, Ty::Int, Ty::Int, Ty::Int, Ty::Int, Ty::Int], Box::new(Ty::Int)) },
+        );
+
+        // time_format: (Int, Str) -> Str
+        env.bindings.insert(
+            "time_format".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int, Ty::Str], Box::new(Ty::Str)) },
+        );
+
+        // time_format_iso: Int -> Str
+        env.bindings.insert(
+            "time_format_iso".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Str)) },
+        );
+
+        // time_format_rfc2822: Int -> Str
+        env.bindings.insert(
+            "time_format_rfc2822".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Str)) },
+        );
+
+        // time_parse: (Str, Str) -> Result[Int, Str]
+        env.bindings.insert(
+            "time_parse".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Result(Box::new(Ty::Int), Box::new(Ty::Str)))) },
+        );
+
+        // time_parse_iso: Str -> Result[Int, Str]
+        env.bindings.insert(
+            "time_parse_iso".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Int), Box::new(Ty::Str)))) },
+        );
+
+        // time_year: Int -> Int
+        env.bindings.insert(
+            "time_year".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+        );
+
+        // time_month: Int -> Int
+        env.bindings.insert(
+            "time_month".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+        );
+
+        // time_day: Int -> Int
+        env.bindings.insert(
+            "time_day".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+        );
+
+        // time_hour: Int -> Int
+        env.bindings.insert(
+            "time_hour".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+        );
+
+        // time_minute: Int -> Int
+        env.bindings.insert(
+            "time_minute".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+        );
+
+        // time_second: Int -> Int
+        env.bindings.insert(
+            "time_second".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+        );
+
+        // time_weekday: Int -> Int
+        env.bindings.insert(
+            "time_weekday".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+        );
+
+        // duration_seconds: Int -> Int
+        env.bindings.insert(
+            "duration_seconds".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+        );
+
+        // duration_minutes: Int -> Int
+        env.bindings.insert(
+            "duration_minutes".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+        );
+
+        // duration_hours: Int -> Int
+        env.bindings.insert(
+            "duration_hours".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+        );
+
+        // duration_days: Int -> Int
+        env.bindings.insert(
+            "duration_days".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+        );
+
+        // time_add: (Int, Int) -> Int
+        env.bindings.insert(
+            "time_add".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int, Ty::Int], Box::new(Ty::Int)) },
+        );
+
+        // time_sub: (Int, Int) -> Int
+        env.bindings.insert(
+            "time_sub".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int, Ty::Int], Box::new(Ty::Int)) },
+        );
+
+        // time_diff: (Int, Int) -> Int
+        env.bindings.insert(
+            "time_diff".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int, Ty::Int], Box::new(Ty::Int)) },
+        );
+
+        // ===== Encoding functions =====
+        // base64_encode: Str -> Str
+        env.bindings.insert(
+            "base64_encode".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Str)) },
+        );
+
+        // base64_decode: Str -> Result[Str, Str]
+        env.bindings.insert(
+            "base64_decode".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str)))) },
+        );
+
+        // base64_encode_bytes: [Int] -> Str
+        env.bindings.insert(
+            "base64_encode_bytes".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Int))], Box::new(Ty::Str)) },
+        );
+
+        // base64_decode_bytes: Str -> Result[[Int], Str]
+        env.bindings.insert(
+            "base64_decode_bytes".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::List(Box::new(Ty::Int))), Box::new(Ty::Str)))) },
+        );
+
+        // hex_encode: Str -> Str
+        env.bindings.insert(
+            "hex_encode".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Str)) },
+        );
+
+        // hex_decode: Str -> Result[Str, Str]
+        env.bindings.insert(
+            "hex_decode".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str)))) },
+        );
+
+        // hex_encode_bytes: [Int] -> Str
+        env.bindings.insert(
+            "hex_encode_bytes".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Int))], Box::new(Ty::Str)) },
+        );
+
+        // hex_decode_bytes: Str -> Result[[Int], Str]
+        env.bindings.insert(
+            "hex_decode_bytes".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::List(Box::new(Ty::Int))), Box::new(Ty::Str)))) },
+        );
+
+        // ===== Hashing functions =====
+        // sha256: Str -> Str
+        env.bindings.insert(
+            "sha256".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Str)) },
+        );
+
+        // sha256_bytes: [Int] -> Str
+        env.bindings.insert(
+            "sha256_bytes".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Int))], Box::new(Ty::Str)) },
+        );
+
+        // hash_string: Str -> Int
+        env.bindings.insert(
+            "hash_string".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Int)) },
+        );
+
+        // ===== UUID functions =====
+        // uuid_v4: () -> Str
+        env.bindings.insert(
+            "uuid_v4".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![], Box::new(Ty::Str)) },
+        );
+
+        // uuid_parse: Str -> Result[Str, Str]
+        env.bindings.insert(
+            "uuid_parse".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str)))) },
+        );
+
+        // ===== Regex functions =====
+        // regex_match: (Str, Str) -> Bool
+        env.bindings.insert(
+            "regex_match".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Bool)) },
+        );
+
+        // regex_find: (Str, Str) -> Str?
+        env.bindings.insert(
+            "regex_find".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Option(Box::new(Ty::Str)))) },
+        );
+
+        // regex_find_all: (Str, Str) -> [Str]
+        env.bindings.insert(
+            "regex_find_all".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::List(Box::new(Ty::Str)))) },
+        );
+
+        // regex_replace: (Str, Str, Str) -> Str
+        env.bindings.insert(
+            "regex_replace".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str, Ty::Str], Box::new(Ty::Str)) },
+        );
+
+        // regex_replace_all: (Str, Str, Str) -> Str
+        env.bindings.insert(
+            "regex_replace_all".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str, Ty::Str], Box::new(Ty::Str)) },
+        );
+
+        // regex_split: (Str, Str) -> [Str]
+        env.bindings.insert(
+            "regex_split".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::List(Box::new(Ty::Str)))) },
+        );
+
+        // regex_captures: (Str, Str) -> [Str]?
+        env.bindings.insert(
+            "regex_captures".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Option(Box::new(Ty::List(Box::new(Ty::Str)))))) },
+        );
+
+        // regex_is_valid: Str -> Bool
+        env.bindings.insert(
+            "regex_is_valid".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Bool)) },
+        );
+
+        // ===== Process functions =====
+        // exec: Str -> Result[(Str, Str, Int), Str]
+        env.bindings.insert(
+            "exec".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Tuple(vec![Ty::Str, Ty::Str, Ty::Int])), Box::new(Ty::Str)))) },
+        );
+
+        // env_set: (Str, Str) -> ()
+        env.bindings.insert(
+            "env_set".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Unit)) },
+        );
+
+        // env_remove: Str -> ()
+        env.bindings.insert(
+            "env_remove".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Unit)) },
+        );
+
+        // env_vars: () -> {Str: Str}
+        env.bindings.insert(
+            "env_vars".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![], Box::new(Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str)))) },
+        );
+
+        // pid: () -> Int
+        env.bindings.insert(
+            "pid".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![], Box::new(Ty::Int)) },
+        );
+
+        // cwd: () -> Str
+        env.bindings.insert(
+            "cwd".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![], Box::new(Ty::Str)) },
+        );
+
+        // chdir: Str -> Result[(), Str]
+        env.bindings.insert(
+            "chdir".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str)))) },
+        );
+
+        // home_dir: () -> Str?
+        env.bindings.insert(
+            "home_dir".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![], Box::new(Ty::Option(Box::new(Ty::Str)))) },
+        );
+
+        // temp_dir: () -> Str
+        env.bindings.insert(
+            "temp_dir".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![], Box::new(Ty::Str)) },
+        );
+
+        // ===== Path functions =====
+        // path_join: [Str] -> Str
+        env.bindings.insert(
+            "path_join".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Str))], Box::new(Ty::Str)) },
+        );
+
+        // path_parent: Str -> Str?
+        env.bindings.insert(
+            "path_parent".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Option(Box::new(Ty::Str)))) },
+        );
+
+        // path_filename: Str -> Str?
+        env.bindings.insert(
+            "path_filename".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Option(Box::new(Ty::Str)))) },
+        );
+
+        // path_stem: Str -> Str?
+        env.bindings.insert(
+            "path_stem".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Option(Box::new(Ty::Str)))) },
+        );
+
+        // path_extension: Str -> Str?
+        env.bindings.insert(
+            "path_extension".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Option(Box::new(Ty::Str)))) },
+        );
+
+        // path_is_absolute: Str -> Bool
+        env.bindings.insert(
+            "path_is_absolute".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Bool)) },
+        );
+
+        // path_is_relative: Str -> Bool
+        env.bindings.insert(
+            "path_is_relative".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Bool)) },
+        );
+
+        // path_absolute: Str -> Result[Str, Str]
+        env.bindings.insert(
+            "path_absolute".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str)))) },
+        );
+
+        // file_is_file: Str -> Bool
+        env.bindings.insert(
+            "file_is_file".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Bool)) },
+        );
+
+        // file_is_dir: Str -> Bool
+        env.bindings.insert(
+            "file_is_dir".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Bool)) },
+        );
+
+        // file_size: Str -> Result[Int, Str]
+        env.bindings.insert(
+            "file_size".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Int), Box::new(Ty::Str)))) },
+        );
+
+        // dir_create: Str -> Result[(), Str]
+        env.bindings.insert(
+            "dir_create".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str)))) },
+        );
+
+        // dir_create_all: Str -> Result[(), Str]
+        env.bindings.insert(
+            "dir_create_all".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str)))) },
+        );
+
+        // dir_remove: Str -> Result[(), Str]
+        env.bindings.insert(
+            "dir_remove".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str)))) },
+        );
+
+        // dir_remove_all: Str -> Result[(), Str]
+        env.bindings.insert(
+            "dir_remove_all".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str)))) },
+        );
+
+        // dir_list: Str -> Result[[Str], Str]
+        env.bindings.insert(
+            "dir_list".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::List(Box::new(Ty::Str))), Box::new(Ty::Str)))) },
+        );
+
+        // file_copy: (Str, Str) -> Result[(), Str]
+        env.bindings.insert(
+            "file_copy".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str)))) },
+        );
+
+        // file_move: (Str, Str) -> Result[(), Str]
+        env.bindings.insert(
+            "file_move".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str)))) },
+        );
+
+        // file_remove: Str -> Result[(), Str]
+        env.bindings.insert(
+            "file_remove".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str)))) },
+        );
+
+        // ===== HTTP functions =====
+        // http_get: Str -> Result[(Int, Str, {Str: Str}), Str]
+        env.bindings.insert(
+            "http_get".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Tuple(vec![Ty::Int, Ty::Str, Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str))])), Box::new(Ty::Str)))) },
+        );
+
+        // http_post: (Str, Str) -> Result[(Int, Str, {Str: Str}), Str]
+        env.bindings.insert(
+            "http_post".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Result(Box::new(Ty::Tuple(vec![Ty::Int, Ty::Str, Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str))])), Box::new(Ty::Str)))) },
+        );
+
+        // http_post_json: (Str, Json) -> Result[(Int, Str, {Str: Str}), Str]
+        env.bindings.insert(
+            "http_post_json".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Json], Box::new(Ty::Result(Box::new(Ty::Tuple(vec![Ty::Int, Ty::Str, Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str))])), Box::new(Ty::Str)))) },
+        );
+
+        // http_put: (Str, Str) -> Result[(Int, Str, {Str: Str}), Str]
+        env.bindings.insert(
+            "http_put".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Result(Box::new(Ty::Tuple(vec![Ty::Int, Ty::Str, Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str))])), Box::new(Ty::Str)))) },
+        );
+
+        // http_delete: Str -> Result[(Int, Str, {Str: Str}), Str]
+        env.bindings.insert(
+            "http_delete".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Tuple(vec![Ty::Int, Ty::Str, Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str))])), Box::new(Ty::Str)))) },
+        );
+
         env
     }
 
@@ -946,7 +1655,8 @@ impl Unifier {
             | (Ty::Char, Ty::Char)
             | (Ty::Str, Ty::Str)
             | (Ty::Unit, Ty::Unit)
-            | (Ty::Never, Ty::Never) => Ok(()),
+            | (Ty::Never, Ty::Never)
+            | (Ty::Json, Ty::Json) => Ok(()),
 
             // Type variable unification
             (Ty::Var(v), t) | (t, Ty::Var(v)) => {

@@ -1,0 +1,105 @@
+# Test DateTime Module
+# Tests for date/time manipulation, formatting, and parsing
+# Expected output: All tests pass
+
+# Test creating timestamp from parts
+f test_time_from_parts() -> Bool
+    # January 1, 2020 00:00:00 UTC = 1577836800
+    ts := time_from_parts(2020, 1, 1, 0, 0, 0)
+    ts == 1577836800
+
+# Test component extraction
+f test_time_components() -> Bool
+    ts := time_from_parts(2026, 6, 15, 14, 30, 45)
+    (time_year(ts) == 2026) && (time_month(ts) == 6) && (time_day(ts) == 15) && (time_hour(ts) == 14) && (time_minute(ts) == 30) && (time_second(ts) == 45)
+
+# Test weekday (0=Sunday)
+f test_time_weekday() -> Bool
+    # January 1, 2020 was a Wednesday (day 3)
+    ts := time_from_parts(2020, 1, 1, 12, 0, 0)
+    time_weekday(ts) == 3
+
+# Test ISO format
+f test_time_format_iso() -> Bool
+    ts := time_from_parts(2026, 1, 24, 12, 30, 0)
+    iso := time_format_iso(ts)
+    str_contains(iso, "2026") && str_contains(iso, "01") && str_contains(iso, "24")
+
+# Test custom format
+f test_time_format() -> Bool
+    ts := time_from_parts(2026, 1, 24, 14, 30, 0)
+    formatted := time_format(ts, "%Y-%m-%d")
+    formatted == "2026-01-24"
+
+# Test RFC2822 format
+f test_time_format_rfc2822() -> Bool
+    ts := time_from_parts(2026, 1, 24, 12, 0, 0)
+    rfc := time_format_rfc2822(ts)
+    str_contains(rfc, "2026") && str_contains(rfc, "Jan")
+
+# Test ISO parsing
+f test_time_parse_iso() -> Bool
+    m time_parse_iso("2026-01-24T12:30:00+00:00")
+        Ok(ts) -> time_year(ts) == 2026
+        Err(_) -> false
+
+# Test duration_minutes
+f test_duration_minutes() -> Bool
+    duration_minutes(5) == 300
+
+# Test duration_hours
+f test_duration_hours() -> Bool
+    duration_hours(2) == 7200
+
+# Test duration_days
+f test_duration_days() -> Bool
+    duration_days(1) == 86400
+
+# Test time_add
+f test_time_add() -> Bool
+    ts := time_from_parts(2026, 1, 24, 12, 0, 0)
+    ts2 := time_add(ts, duration_hours(2))
+    time_hour(ts2) == 14
+
+# Test time_sub
+f test_time_sub() -> Bool
+    ts := time_from_parts(2026, 1, 24, 12, 0, 0)
+    ts2 := time_sub(ts, duration_days(1))
+    time_day(ts2) == 23
+
+# Test time_diff
+f test_time_diff() -> Bool
+    ts1 := time_from_parts(2026, 1, 24, 12, 0, 0)
+    ts2 := time_from_parts(2026, 1, 24, 10, 0, 0)
+    time_diff(ts1, ts2) == 7200
+
+# Test time_now returns reasonable value
+f test_time_now() -> Bool
+    ts := time_now()
+    # Should be after year 2020 (1577836800)
+    ts > 1577836800
+
+f run_all_tests() -> Int
+    passed := 0
+    if test_time_from_parts() then passed = passed + 1 else print("FAIL: test_time_from_parts")
+    if test_time_components() then passed = passed + 1 else print("FAIL: test_time_components")
+    if test_time_weekday() then passed = passed + 1 else print("FAIL: test_time_weekday")
+    if test_time_format_iso() then passed = passed + 1 else print("FAIL: test_time_format_iso")
+    if test_time_format() then passed = passed + 1 else print("FAIL: test_time_format")
+    if test_time_format_rfc2822() then passed = passed + 1 else print("FAIL: test_time_format_rfc2822")
+    if test_time_parse_iso() then passed = passed + 1 else print("FAIL: test_time_parse_iso")
+    if test_duration_minutes() then passed = passed + 1 else print("FAIL: test_duration_minutes")
+    if test_duration_hours() then passed = passed + 1 else print("FAIL: test_duration_hours")
+    if test_duration_days() then passed = passed + 1 else print("FAIL: test_duration_days")
+    if test_time_add() then passed = passed + 1 else print("FAIL: test_time_add")
+    if test_time_sub() then passed = passed + 1 else print("FAIL: test_time_sub")
+    if test_time_diff() then passed = passed + 1 else print("FAIL: test_time_diff")
+    if test_time_now() then passed = passed + 1 else print("FAIL: test_time_now")
+
+    print("DateTime tests passed:")
+    print(passed)
+    print("of 14")
+
+    if passed == 14 then 1 else 0
+
+f main() -> Int = run_all_tests()

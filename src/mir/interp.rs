@@ -7,6 +7,12 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH, Duration};
 use std::thread;
 use rand::Rng;
+use serde_json;
+use chrono::{DateTime, Utc, TimeZone, Datelike, Timelike, Weekday};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use sha2::{Sha256, Digest};
+use uuid::Uuid;
+use regex::Regex;
 
 use super::mir::{
     BinOp, BlockId, Constant, Function, Local, Operand, Program, Rvalue,
@@ -55,6 +61,8 @@ pub enum Value {
         func_name: String,
         captures: Vec<Value>,
     },
+    /// JSON value for dynamic JSON operations
+    Json(serde_json::Value),
 }
 
 impl Value {
@@ -154,6 +162,7 @@ impl std::fmt::Display for Value {
                 }
                 write!(f, "]>")
             }
+            Value::Json(json) => write!(f, "{}", json),
         }
     }
 }
@@ -1275,6 +1284,7 @@ impl Interpreter {
                     Value::Ref(_) => "Ref",
                     Value::Map(_) => "Map",
                     Value::Closure { .. } => "Closure",
+                    Value::Json(_) => "Json",
                 };
                 Ok(Some(Value::Str(type_name.to_string())))
             }
@@ -1709,6 +1719,1492 @@ impl Interpreter {
                 };
                 thread::sleep(Duration::from_millis(ms));
                 Ok(Some(Value::Unit))
+            }
+
+            // ===== DateTime operations (chrono-based) =====
+            "time_from_parts" => {
+                // time_from_parts(year, month, day, hour, min, sec) -> Int
+                let year = match &args[0] { Value::Int(n) => *n as i32, _ => return Err(InterpError { message: "time_from_parts: year must be Int".to_string() }) };
+                let month = match &args[1] { Value::Int(n) => *n as u32, _ => return Err(InterpError { message: "time_from_parts: month must be Int".to_string() }) };
+                let day = match &args[2] { Value::Int(n) => *n as u32, _ => return Err(InterpError { message: "time_from_parts: day must be Int".to_string() }) };
+                let hour = match &args[3] { Value::Int(n) => *n as u32, _ => return Err(InterpError { message: "time_from_parts: hour must be Int".to_string() }) };
+                let min = match &args[4] { Value::Int(n) => *n as u32, _ => return Err(InterpError { message: "time_from_parts: min must be Int".to_string() }) };
+                let sec = match &args[5] { Value::Int(n) => *n as u32, _ => return Err(InterpError { message: "time_from_parts: sec must be Int".to_string() }) };
+                match Utc.with_ymd_and_hms(year, month, day, hour, min, sec) {
+                    chrono::LocalResult::Single(dt) => Ok(Some(Value::Int(dt.timestamp()))),
+                    _ => Ok(Some(Value::Int(0))) // Invalid date
+                }
+            }
+            "time_format" => {
+                // time_format(timestamp, format_str) -> Str
+                let ts = match &args[0] { Value::Int(n) => *n, _ => return Err(InterpError { message: "time_format: timestamp must be Int".to_string() }) };
+                let fmt = match &args[1] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "time_format: format must be Str".to_string() }) };
+                let dt = DateTime::from_timestamp(ts, 0).unwrap_or_else(|| Utc.timestamp_opt(0, 0).unwrap());
+                Ok(Some(Value::Str(dt.format(&fmt).to_string())))
+            }
+            "time_format_iso" => {
+                // time_format_iso(timestamp) -> Str
+                let ts = match &args[0] { Value::Int(n) => *n, _ => return Err(InterpError { message: "time_format_iso: timestamp must be Int".to_string() }) };
+                let dt = DateTime::from_timestamp(ts, 0).unwrap_or_else(|| Utc.timestamp_opt(0, 0).unwrap());
+                Ok(Some(Value::Str(dt.to_rfc3339())))
+            }
+            "time_format_rfc2822" => {
+                // time_format_rfc2822(timestamp) -> Str
+                let ts = match &args[0] { Value::Int(n) => *n, _ => return Err(InterpError { message: "time_format_rfc2822: timestamp must be Int".to_string() }) };
+                let dt = DateTime::from_timestamp(ts, 0).unwrap_or_else(|| Utc.timestamp_opt(0, 0).unwrap());
+                Ok(Some(Value::Str(dt.to_rfc2822())))
+            }
+            "time_parse" => {
+                // time_parse(s, format) -> Result[Int, Str]
+                let s = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "time_parse: input must be Str".to_string() }) };
+                let fmt = match &args[1] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "time_parse: format must be Str".to_string() }) };
+                match DateTime::parse_from_str(&s, &fmt) {
+                    Ok(dt) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Ok".to_string(),
+                        fields: vec![Value::Int(dt.timestamp())],
+                    })),
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+            "time_parse_iso" => {
+                // time_parse_iso(s) -> Result[Int, Str]
+                let s = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "time_parse_iso: input must be Str".to_string() }) };
+                match DateTime::parse_from_rfc3339(&s) {
+                    Ok(dt) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Ok".to_string(),
+                        fields: vec![Value::Int(dt.timestamp())],
+                    })),
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+            "time_year" => {
+                // time_year(timestamp) -> Int
+                let ts = match &args[0] { Value::Int(n) => *n, _ => return Err(InterpError { message: "time_year: timestamp must be Int".to_string() }) };
+                let dt = DateTime::from_timestamp(ts, 0).unwrap_or_else(|| Utc.timestamp_opt(0, 0).unwrap());
+                Ok(Some(Value::Int(dt.year() as i64)))
+            }
+            "time_month" => {
+                // time_month(timestamp) -> Int
+                let ts = match &args[0] { Value::Int(n) => *n, _ => return Err(InterpError { message: "time_month: timestamp must be Int".to_string() }) };
+                let dt = DateTime::from_timestamp(ts, 0).unwrap_or_else(|| Utc.timestamp_opt(0, 0).unwrap());
+                Ok(Some(Value::Int(dt.month() as i64)))
+            }
+            "time_day" => {
+                // time_day(timestamp) -> Int
+                let ts = match &args[0] { Value::Int(n) => *n, _ => return Err(InterpError { message: "time_day: timestamp must be Int".to_string() }) };
+                let dt = DateTime::from_timestamp(ts, 0).unwrap_or_else(|| Utc.timestamp_opt(0, 0).unwrap());
+                Ok(Some(Value::Int(dt.day() as i64)))
+            }
+            "time_hour" => {
+                // time_hour(timestamp) -> Int
+                let ts = match &args[0] { Value::Int(n) => *n, _ => return Err(InterpError { message: "time_hour: timestamp must be Int".to_string() }) };
+                let dt = DateTime::from_timestamp(ts, 0).unwrap_or_else(|| Utc.timestamp_opt(0, 0).unwrap());
+                Ok(Some(Value::Int(dt.hour() as i64)))
+            }
+            "time_minute" => {
+                // time_minute(timestamp) -> Int
+                let ts = match &args[0] { Value::Int(n) => *n, _ => return Err(InterpError { message: "time_minute: timestamp must be Int".to_string() }) };
+                let dt = DateTime::from_timestamp(ts, 0).unwrap_or_else(|| Utc.timestamp_opt(0, 0).unwrap());
+                Ok(Some(Value::Int(dt.minute() as i64)))
+            }
+            "time_second" => {
+                // time_second(timestamp) -> Int
+                let ts = match &args[0] { Value::Int(n) => *n, _ => return Err(InterpError { message: "time_second: timestamp must be Int".to_string() }) };
+                let dt = DateTime::from_timestamp(ts, 0).unwrap_or_else(|| Utc.timestamp_opt(0, 0).unwrap());
+                Ok(Some(Value::Int(dt.second() as i64)))
+            }
+            "time_weekday" => {
+                // time_weekday(timestamp) -> Int (0=Sunday, 6=Saturday)
+                let ts = match &args[0] { Value::Int(n) => *n, _ => return Err(InterpError { message: "time_weekday: timestamp must be Int".to_string() }) };
+                let dt = DateTime::from_timestamp(ts, 0).unwrap_or_else(|| Utc.timestamp_opt(0, 0).unwrap());
+                let weekday = match dt.weekday() {
+                    Weekday::Sun => 0,
+                    Weekday::Mon => 1,
+                    Weekday::Tue => 2,
+                    Weekday::Wed => 3,
+                    Weekday::Thu => 4,
+                    Weekday::Fri => 5,
+                    Weekday::Sat => 6,
+                };
+                Ok(Some(Value::Int(weekday)))
+            }
+            "duration_seconds" => {
+                // duration_seconds(n) -> Int
+                let n = match &args[0] { Value::Int(n) => *n, _ => return Err(InterpError { message: "duration_seconds: expected Int".to_string() }) };
+                Ok(Some(Value::Int(n)))
+            }
+            "duration_minutes" => {
+                // duration_minutes(n) -> Int
+                let n = match &args[0] { Value::Int(n) => *n, _ => return Err(InterpError { message: "duration_minutes: expected Int".to_string() }) };
+                Ok(Some(Value::Int(n * 60)))
+            }
+            "duration_hours" => {
+                // duration_hours(n) -> Int
+                let n = match &args[0] { Value::Int(n) => *n, _ => return Err(InterpError { message: "duration_hours: expected Int".to_string() }) };
+                Ok(Some(Value::Int(n * 3600)))
+            }
+            "duration_days" => {
+                // duration_days(n) -> Int
+                let n = match &args[0] { Value::Int(n) => *n, _ => return Err(InterpError { message: "duration_days: expected Int".to_string() }) };
+                Ok(Some(Value::Int(n * 86400)))
+            }
+            "time_add" => {
+                // time_add(timestamp, duration) -> Int
+                let ts = match &args[0] { Value::Int(n) => *n, _ => return Err(InterpError { message: "time_add: timestamp must be Int".to_string() }) };
+                let dur = match &args[1] { Value::Int(n) => *n, _ => return Err(InterpError { message: "time_add: duration must be Int".to_string() }) };
+                Ok(Some(Value::Int(ts + dur)))
+            }
+            "time_sub" => {
+                // time_sub(timestamp, duration) -> Int
+                let ts = match &args[0] { Value::Int(n) => *n, _ => return Err(InterpError { message: "time_sub: timestamp must be Int".to_string() }) };
+                let dur = match &args[1] { Value::Int(n) => *n, _ => return Err(InterpError { message: "time_sub: duration must be Int".to_string() }) };
+                Ok(Some(Value::Int(ts - dur)))
+            }
+            "time_diff" => {
+                // time_diff(a, b) -> Int (a - b in seconds)
+                let a = match &args[0] { Value::Int(n) => *n, _ => return Err(InterpError { message: "time_diff: first arg must be Int".to_string() }) };
+                let b = match &args[1] { Value::Int(n) => *n, _ => return Err(InterpError { message: "time_diff: second arg must be Int".to_string() }) };
+                Ok(Some(Value::Int(a - b)))
+            }
+
+            // ===== Encoding operations =====
+            "base64_encode" => {
+                // base64_encode(s: Str) -> Str
+                let s = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "base64_encode: expected Str".to_string() }) };
+                Ok(Some(Value::Str(BASE64.encode(s.as_bytes()))))
+            }
+            "base64_decode" => {
+                // base64_decode(s: Str) -> Result[Str, Str]
+                let s = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "base64_decode: expected Str".to_string() }) };
+                match BASE64.decode(&s) {
+                    Ok(bytes) => match String::from_utf8(bytes) {
+                        Ok(decoded) => Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Ok".to_string(),
+                            fields: vec![Value::Str(decoded)],
+                        })),
+                        Err(e) => Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Err".to_string(),
+                            fields: vec![Value::Str(e.to_string())],
+                        })),
+                    },
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+            "base64_encode_bytes" => {
+                // base64_encode_bytes(bytes: [Int]) -> Str
+                let bytes: Vec<u8> = match &args[0] {
+                    Value::Array(arr) => arr.iter().map(|v| match v { Value::Int(n) => *n as u8, _ => 0 }).collect(),
+                    _ => return Err(InterpError { message: "base64_encode_bytes: expected [Int]".to_string() })
+                };
+                Ok(Some(Value::Str(BASE64.encode(&bytes))))
+            }
+            "base64_decode_bytes" => {
+                // base64_decode_bytes(s: Str) -> Result[[Int], Str]
+                let s = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "base64_decode_bytes: expected Str".to_string() }) };
+                match BASE64.decode(&s) {
+                    Ok(bytes) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Ok".to_string(),
+                        fields: vec![Value::Array(bytes.into_iter().map(|b| Value::Int(b as i64)).collect())],
+                    })),
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+            "hex_encode" => {
+                // hex_encode(s: Str) -> Str
+                let s = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "hex_encode: expected Str".to_string() }) };
+                Ok(Some(Value::Str(hex::encode(s.as_bytes()))))
+            }
+            "hex_decode" => {
+                // hex_decode(s: Str) -> Result[Str, Str]
+                let s = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "hex_decode: expected Str".to_string() }) };
+                match hex::decode(&s) {
+                    Ok(bytes) => match String::from_utf8(bytes) {
+                        Ok(decoded) => Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Ok".to_string(),
+                            fields: vec![Value::Str(decoded)],
+                        })),
+                        Err(e) => Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Err".to_string(),
+                            fields: vec![Value::Str(e.to_string())],
+                        })),
+                    },
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+            "hex_encode_bytes" => {
+                // hex_encode_bytes(bytes: [Int]) -> Str
+                let bytes: Vec<u8> = match &args[0] {
+                    Value::Array(arr) => arr.iter().map(|v| match v { Value::Int(n) => *n as u8, _ => 0 }).collect(),
+                    _ => return Err(InterpError { message: "hex_encode_bytes: expected [Int]".to_string() })
+                };
+                Ok(Some(Value::Str(hex::encode(&bytes))))
+            }
+            "hex_decode_bytes" => {
+                // hex_decode_bytes(s: Str) -> Result[[Int], Str]
+                let s = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "hex_decode_bytes: expected Str".to_string() }) };
+                match hex::decode(&s) {
+                    Ok(bytes) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Ok".to_string(),
+                        fields: vec![Value::Array(bytes.into_iter().map(|b| Value::Int(b as i64)).collect())],
+                    })),
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+
+            // ===== Hashing operations =====
+            "sha256" => {
+                // sha256(s: Str) -> Str
+                let s = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "sha256: expected Str".to_string() }) };
+                let mut hasher = Sha256::new();
+                hasher.update(s.as_bytes());
+                let result = hasher.finalize();
+                Ok(Some(Value::Str(hex::encode(result))))
+            }
+            "sha256_bytes" => {
+                // sha256_bytes(bytes: [Int]) -> Str
+                let bytes: Vec<u8> = match &args[0] {
+                    Value::Array(arr) => arr.iter().map(|v| match v { Value::Int(n) => *n as u8, _ => 0 }).collect(),
+                    _ => return Err(InterpError { message: "sha256_bytes: expected [Int]".to_string() })
+                };
+                let mut hasher = Sha256::new();
+                hasher.update(&bytes);
+                let result = hasher.finalize();
+                Ok(Some(Value::Str(hex::encode(result))))
+            }
+            "hash_string" => {
+                // hash_string(s: Str) -> Int (fast non-crypto hash)
+                let s = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "hash_string: expected Str".to_string() }) };
+                use std::hash::{Hash, Hasher};
+                use std::collections::hash_map::DefaultHasher;
+                let mut hasher = DefaultHasher::new();
+                s.hash(&mut hasher);
+                Ok(Some(Value::Int(hasher.finish() as i64)))
+            }
+
+            // ===== UUID operations =====
+            "uuid_v4" => {
+                // uuid_v4() -> Str
+                Ok(Some(Value::Str(Uuid::new_v4().to_string())))
+            }
+            "uuid_parse" => {
+                // uuid_parse(s: Str) -> Result[Str, Str]
+                let s = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "uuid_parse: expected Str".to_string() }) };
+                match Uuid::parse_str(&s) {
+                    Ok(uuid) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Ok".to_string(),
+                        fields: vec![Value::Str(uuid.to_string())],
+                    })),
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+
+            // ===== Regex operations =====
+            "regex_match" => {
+                // regex_match(pattern, text) -> Bool
+                let pattern = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "regex_match: pattern must be Str".to_string() }) };
+                let text = match &args[1] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "regex_match: text must be Str".to_string() }) };
+                match Regex::new(&pattern) {
+                    Ok(re) => Ok(Some(Value::Bool(re.is_match(&text)))),
+                    Err(_) => Ok(Some(Value::Bool(false))),
+                }
+            }
+            "regex_find" => {
+                // regex_find(pattern, text) -> Str?
+                let pattern = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "regex_find: pattern must be Str".to_string() }) };
+                let text = match &args[1] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "regex_find: text must be Str".to_string() }) };
+                match Regex::new(&pattern) {
+                    Ok(re) => match re.find(&text) {
+                        Some(m) => Ok(Some(Value::Enum {
+                            type_name: "Option".to_string(),
+                            variant: "Some".to_string(),
+                            fields: vec![Value::Str(m.as_str().to_string())],
+                        })),
+                        None => Ok(Some(Value::Enum {
+                            type_name: "Option".to_string(),
+                            variant: "None".to_string(),
+                            fields: vec![],
+                        })),
+                    },
+                    Err(_) => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "None".to_string(),
+                        fields: vec![],
+                    })),
+                }
+            }
+            "regex_find_all" => {
+                // regex_find_all(pattern, text) -> [Str]
+                let pattern = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "regex_find_all: pattern must be Str".to_string() }) };
+                let text = match &args[1] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "regex_find_all: text must be Str".to_string() }) };
+                match Regex::new(&pattern) {
+                    Ok(re) => {
+                        let matches: Vec<Value> = re.find_iter(&text)
+                            .map(|m| Value::Str(m.as_str().to_string()))
+                            .collect();
+                        Ok(Some(Value::Array(matches)))
+                    },
+                    Err(_) => Ok(Some(Value::Array(vec![]))),
+                }
+            }
+            "regex_replace" => {
+                // regex_replace(pattern, text, replacement) -> Str
+                let pattern = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "regex_replace: pattern must be Str".to_string() }) };
+                let text = match &args[1] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "regex_replace: text must be Str".to_string() }) };
+                let replacement = match &args[2] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "regex_replace: replacement must be Str".to_string() }) };
+                match Regex::new(&pattern) {
+                    Ok(re) => Ok(Some(Value::Str(re.replace(&text, replacement.as_str()).to_string()))),
+                    Err(_) => Ok(Some(Value::Str(text))),
+                }
+            }
+            "regex_replace_all" => {
+                // regex_replace_all(pattern, text, replacement) -> Str
+                let pattern = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "regex_replace_all: pattern must be Str".to_string() }) };
+                let text = match &args[1] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "regex_replace_all: text must be Str".to_string() }) };
+                let replacement = match &args[2] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "regex_replace_all: replacement must be Str".to_string() }) };
+                match Regex::new(&pattern) {
+                    Ok(re) => Ok(Some(Value::Str(re.replace_all(&text, replacement.as_str()).to_string()))),
+                    Err(_) => Ok(Some(Value::Str(text))),
+                }
+            }
+            "regex_split" => {
+                // regex_split(pattern, text) -> [Str]
+                let pattern = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "regex_split: pattern must be Str".to_string() }) };
+                let text = match &args[1] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "regex_split: text must be Str".to_string() }) };
+                match Regex::new(&pattern) {
+                    Ok(re) => {
+                        let parts: Vec<Value> = re.split(&text)
+                            .map(|s| Value::Str(s.to_string()))
+                            .collect();
+                        Ok(Some(Value::Array(parts)))
+                    },
+                    Err(_) => Ok(Some(Value::Array(vec![Value::Str(text)]))),
+                }
+            }
+            "regex_captures" => {
+                // regex_captures(pattern, text) -> [Str]?
+                let pattern = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "regex_captures: pattern must be Str".to_string() }) };
+                let text = match &args[1] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "regex_captures: text must be Str".to_string() }) };
+                match Regex::new(&pattern) {
+                    Ok(re) => match re.captures(&text) {
+                        Some(caps) => {
+                            let groups: Vec<Value> = caps.iter()
+                                .map(|m| match m {
+                                    Some(m) => Value::Str(m.as_str().to_string()),
+                                    None => Value::Str(String::new()),
+                                })
+                                .collect();
+                            Ok(Some(Value::Enum {
+                                type_name: "Option".to_string(),
+                                variant: "Some".to_string(),
+                                fields: vec![Value::Array(groups)],
+                            }))
+                        },
+                        None => Ok(Some(Value::Enum {
+                            type_name: "Option".to_string(),
+                            variant: "None".to_string(),
+                            fields: vec![],
+                        })),
+                    },
+                    Err(_) => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "None".to_string(),
+                        fields: vec![],
+                    })),
+                }
+            }
+            "regex_is_valid" => {
+                // regex_is_valid(pattern) -> Bool
+                let pattern = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "regex_is_valid: pattern must be Str".to_string() }) };
+                Ok(Some(Value::Bool(Regex::new(&pattern).is_ok())))
+            }
+
+            // ===== Process operations =====
+            "exec" => {
+                // exec(cmd: Str) -> Result[(Str, Str, Int), Str]
+                let cmd = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "exec: cmd must be Str".to_string() }) };
+                match std::process::Command::new("sh").arg("-c").arg(&cmd).output() {
+                    Ok(output) => {
+                        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                        let status = output.status.code().unwrap_or(-1) as i64;
+                        Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Ok".to_string(),
+                            fields: vec![Value::Tuple(vec![Value::Str(stdout), Value::Str(stderr), Value::Int(status)])],
+                        }))
+                    },
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+            "env_set" => {
+                // env_set(name: Str, value: Str) -> ()
+                let name = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "env_set: name must be Str".to_string() }) };
+                let value = match &args[1] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "env_set: value must be Str".to_string() }) };
+                // SAFETY: We're setting a single env var in a single-threaded interpreter context
+                unsafe { std::env::set_var(&name, &value); }
+                Ok(Some(Value::Unit))
+            }
+            "env_remove" => {
+                // env_remove(name: Str) -> ()
+                let name = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "env_remove: name must be Str".to_string() }) };
+                // SAFETY: We're removing a single env var in a single-threaded interpreter context
+                unsafe { std::env::remove_var(&name); }
+                Ok(Some(Value::Unit))
+            }
+            "env_vars" => {
+                // env_vars() -> {Str: Str}
+                let mut map = HashMap::new();
+                for (key, value) in std::env::vars() {
+                    map.insert(key, Value::Str(value));
+                }
+                Ok(Some(Value::Map(map)))
+            }
+            "pid" => {
+                // pid() -> Int
+                Ok(Some(Value::Int(std::process::id() as i64)))
+            }
+            "cwd" => {
+                // cwd() -> Str
+                match std::env::current_dir() {
+                    Ok(path) => Ok(Some(Value::Str(path.to_string_lossy().to_string()))),
+                    Err(_) => Ok(Some(Value::Str(String::new()))),
+                }
+            }
+            "chdir" => {
+                // chdir(path: Str) -> Result[(), Str]
+                let path = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "chdir: path must be Str".to_string() }) };
+                match std::env::set_current_dir(&path) {
+                    Ok(()) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Ok".to_string(),
+                        fields: vec![Value::Unit],
+                    })),
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+            "home_dir" => {
+                // home_dir() -> Str?
+                match std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
+                    Ok(home) => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "Some".to_string(),
+                        fields: vec![Value::Str(home)],
+                    })),
+                    Err(_) => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "None".to_string(),
+                        fields: vec![],
+                    })),
+                }
+            }
+            "temp_dir" => {
+                // temp_dir() -> Str
+                Ok(Some(Value::Str(std::env::temp_dir().to_string_lossy().to_string())))
+            }
+
+            // ===== Path operations =====
+            "path_join" => {
+                // path_join(parts: [Str]) -> Str
+                let parts: Vec<String> = match &args[0] {
+                    Value::Array(arr) => arr.iter().filter_map(|v| match v {
+                        Value::Str(s) => Some(s.clone()),
+                        _ => None,
+                    }).collect(),
+                    _ => return Err(InterpError { message: "path_join: parts must be [Str]".to_string() })
+                };
+                let path: std::path::PathBuf = parts.iter().collect();
+                Ok(Some(Value::Str(path.to_string_lossy().to_string())))
+            }
+            "path_parent" => {
+                // path_parent(path: Str) -> Str?
+                let path = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "path_parent: path must be Str".to_string() }) };
+                let p = std::path::Path::new(&path);
+                match p.parent() {
+                    Some(parent) => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "Some".to_string(),
+                        fields: vec![Value::Str(parent.to_string_lossy().to_string())],
+                    })),
+                    None => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "None".to_string(),
+                        fields: vec![],
+                    })),
+                }
+            }
+            "path_filename" => {
+                // path_filename(path: Str) -> Str?
+                let path = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "path_filename: path must be Str".to_string() }) };
+                let p = std::path::Path::new(&path);
+                match p.file_name() {
+                    Some(name) => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "Some".to_string(),
+                        fields: vec![Value::Str(name.to_string_lossy().to_string())],
+                    })),
+                    None => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "None".to_string(),
+                        fields: vec![],
+                    })),
+                }
+            }
+            "path_stem" => {
+                // path_stem(path: Str) -> Str?
+                let path = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "path_stem: path must be Str".to_string() }) };
+                let p = std::path::Path::new(&path);
+                match p.file_stem() {
+                    Some(stem) => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "Some".to_string(),
+                        fields: vec![Value::Str(stem.to_string_lossy().to_string())],
+                    })),
+                    None => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "None".to_string(),
+                        fields: vec![],
+                    })),
+                }
+            }
+            "path_extension" => {
+                // path_extension(path: Str) -> Str?
+                let path = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "path_extension: path must be Str".to_string() }) };
+                let p = std::path::Path::new(&path);
+                match p.extension() {
+                    Some(ext) => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "Some".to_string(),
+                        fields: vec![Value::Str(ext.to_string_lossy().to_string())],
+                    })),
+                    None => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "None".to_string(),
+                        fields: vec![],
+                    })),
+                }
+            }
+            "path_is_absolute" => {
+                // path_is_absolute(path: Str) -> Bool
+                let path = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "path_is_absolute: path must be Str".to_string() }) };
+                Ok(Some(Value::Bool(std::path::Path::new(&path).is_absolute())))
+            }
+            "path_is_relative" => {
+                // path_is_relative(path: Str) -> Bool
+                let path = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "path_is_relative: path must be Str".to_string() }) };
+                Ok(Some(Value::Bool(std::path::Path::new(&path).is_relative())))
+            }
+            "path_absolute" => {
+                // path_absolute(path: Str) -> Result[Str, Str]
+                let path = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "path_absolute: path must be Str".to_string() }) };
+                match std::fs::canonicalize(&path) {
+                    Ok(abs) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Ok".to_string(),
+                        fields: vec![Value::Str(abs.to_string_lossy().to_string())],
+                    })),
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+            "file_is_file" => {
+                // file_is_file(path: Str) -> Bool
+                let path = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "file_is_file: path must be Str".to_string() }) };
+                Ok(Some(Value::Bool(std::path::Path::new(&path).is_file())))
+            }
+            "file_is_dir" => {
+                // file_is_dir(path: Str) -> Bool
+                let path = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "file_is_dir: path must be Str".to_string() }) };
+                Ok(Some(Value::Bool(std::path::Path::new(&path).is_dir())))
+            }
+            "file_size" => {
+                // file_size(path: Str) -> Result[Int, Str]
+                let path = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "file_size: path must be Str".to_string() }) };
+                match std::fs::metadata(&path) {
+                    Ok(meta) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Ok".to_string(),
+                        fields: vec![Value::Int(meta.len() as i64)],
+                    })),
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+            "dir_create" => {
+                // dir_create(path: Str) -> Result[(), Str]
+                let path = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "dir_create: path must be Str".to_string() }) };
+                match std::fs::create_dir(&path) {
+                    Ok(()) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Ok".to_string(),
+                        fields: vec![Value::Unit],
+                    })),
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+            "dir_create_all" => {
+                // dir_create_all(path: Str) -> Result[(), Str]
+                let path = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "dir_create_all: path must be Str".to_string() }) };
+                match std::fs::create_dir_all(&path) {
+                    Ok(()) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Ok".to_string(),
+                        fields: vec![Value::Unit],
+                    })),
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+            "dir_remove" => {
+                // dir_remove(path: Str) -> Result[(), Str]
+                let path = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "dir_remove: path must be Str".to_string() }) };
+                match std::fs::remove_dir(&path) {
+                    Ok(()) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Ok".to_string(),
+                        fields: vec![Value::Unit],
+                    })),
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+            "dir_remove_all" => {
+                // dir_remove_all(path: Str) -> Result[(), Str]
+                let path = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "dir_remove_all: path must be Str".to_string() }) };
+                match std::fs::remove_dir_all(&path) {
+                    Ok(()) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Ok".to_string(),
+                        fields: vec![Value::Unit],
+                    })),
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+            "dir_list" => {
+                // dir_list(path: Str) -> Result[[Str], Str]
+                let path = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "dir_list: path must be Str".to_string() }) };
+                match std::fs::read_dir(&path) {
+                    Ok(entries) => {
+                        let files: Vec<Value> = entries
+                            .filter_map(|e| e.ok())
+                            .map(|e| Value::Str(e.path().to_string_lossy().to_string()))
+                            .collect();
+                        Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Ok".to_string(),
+                            fields: vec![Value::Array(files)],
+                        }))
+                    },
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+            "file_copy" => {
+                // file_copy(from: Str, to: Str) -> Result[(), Str]
+                let from = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "file_copy: from must be Str".to_string() }) };
+                let to = match &args[1] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "file_copy: to must be Str".to_string() }) };
+                match std::fs::copy(&from, &to) {
+                    Ok(_) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Ok".to_string(),
+                        fields: vec![Value::Unit],
+                    })),
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+            "file_move" => {
+                // file_move(from: Str, to: Str) -> Result[(), Str]
+                let from = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "file_move: from must be Str".to_string() }) };
+                let to = match &args[1] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "file_move: to must be Str".to_string() }) };
+                match std::fs::rename(&from, &to) {
+                    Ok(()) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Ok".to_string(),
+                        fields: vec![Value::Unit],
+                    })),
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+            "file_remove" => {
+                // file_remove(path: Str) -> Result[(), Str]
+                let path = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "file_remove: path must be Str".to_string() }) };
+                match std::fs::remove_file(&path) {
+                    Ok(()) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Ok".to_string(),
+                        fields: vec![Value::Unit],
+                    })),
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+
+            // ===== HTTP operations =====
+            "http_get" => {
+                // http_get(url: Str) -> Result[(Int, Str, {Str: Str}), Str]
+                let url = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "http_get: url must be Str".to_string() }) };
+                match reqwest::blocking::get(&url) {
+                    Ok(resp) => {
+                        let status = resp.status().as_u16() as i64;
+                        let headers: HashMap<String, Value> = resp.headers()
+                            .iter()
+                            .filter_map(|(k, v)| v.to_str().ok().map(|v| (k.to_string(), Value::Str(v.to_string()))))
+                            .collect();
+                        let body = resp.text().unwrap_or_default();
+                        Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Ok".to_string(),
+                            fields: vec![Value::Tuple(vec![Value::Int(status), Value::Str(body), Value::Map(headers)])],
+                        }))
+                    },
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+            "http_post" => {
+                // http_post(url: Str, body: Str) -> Result[(Int, Str, {Str: Str}), Str]
+                let url = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "http_post: url must be Str".to_string() }) };
+                let body = match &args[1] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "http_post: body must be Str".to_string() }) };
+                let client = reqwest::blocking::Client::new();
+                match client.post(&url).body(body).send() {
+                    Ok(resp) => {
+                        let status = resp.status().as_u16() as i64;
+                        let headers: HashMap<String, Value> = resp.headers()
+                            .iter()
+                            .filter_map(|(k, v)| v.to_str().ok().map(|v| (k.to_string(), Value::Str(v.to_string()))))
+                            .collect();
+                        let body = resp.text().unwrap_or_default();
+                        Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Ok".to_string(),
+                            fields: vec![Value::Tuple(vec![Value::Int(status), Value::Str(body), Value::Map(headers)])],
+                        }))
+                    },
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+            "http_post_json" => {
+                // http_post_json(url: Str, json: Json) -> Result[(Int, Str, {Str: Str}), Str]
+                let url = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "http_post_json: url must be Str".to_string() }) };
+                let json = match &args[1] { Value::Json(j) => j.clone(), _ => return Err(InterpError { message: "http_post_json: body must be Json".to_string() }) };
+                let client = reqwest::blocking::Client::new();
+                match client.post(&url).json(&json).send() {
+                    Ok(resp) => {
+                        let status = resp.status().as_u16() as i64;
+                        let headers: HashMap<String, Value> = resp.headers()
+                            .iter()
+                            .filter_map(|(k, v)| v.to_str().ok().map(|v| (k.to_string(), Value::Str(v.to_string()))))
+                            .collect();
+                        let body = resp.text().unwrap_or_default();
+                        Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Ok".to_string(),
+                            fields: vec![Value::Tuple(vec![Value::Int(status), Value::Str(body), Value::Map(headers)])],
+                        }))
+                    },
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+            "http_put" => {
+                // http_put(url: Str, body: Str) -> Result[(Int, Str, {Str: Str}), Str]
+                let url = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "http_put: url must be Str".to_string() }) };
+                let body = match &args[1] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "http_put: body must be Str".to_string() }) };
+                let client = reqwest::blocking::Client::new();
+                match client.put(&url).body(body).send() {
+                    Ok(resp) => {
+                        let status = resp.status().as_u16() as i64;
+                        let headers: HashMap<String, Value> = resp.headers()
+                            .iter()
+                            .filter_map(|(k, v)| v.to_str().ok().map(|v| (k.to_string(), Value::Str(v.to_string()))))
+                            .collect();
+                        let body = resp.text().unwrap_or_default();
+                        Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Ok".to_string(),
+                            fields: vec![Value::Tuple(vec![Value::Int(status), Value::Str(body), Value::Map(headers)])],
+                        }))
+                    },
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+            "http_delete" => {
+                // http_delete(url: Str) -> Result[(Int, Str, {Str: Str}), Str]
+                let url = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "http_delete: url must be Str".to_string() }) };
+                let client = reqwest::blocking::Client::new();
+                match client.delete(&url).send() {
+                    Ok(resp) => {
+                        let status = resp.status().as_u16() as i64;
+                        let headers: HashMap<String, Value> = resp.headers()
+                            .iter()
+                            .filter_map(|(k, v)| v.to_str().ok().map(|v| (k.to_string(), Value::Str(v.to_string()))))
+                            .collect();
+                        let body = resp.text().unwrap_or_default();
+                        Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Ok".to_string(),
+                            fields: vec![Value::Tuple(vec![Value::Int(status), Value::Str(body), Value::Map(headers)])],
+                        }))
+                    },
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+
+            // ===== JSON operations =====
+            "json_parse" => {
+                // json_parse(s: Str) -> Result[Json, Str]
+                let s = match &args[0] {
+                    Value::Str(s) => s.clone(),
+                    _ => return Err(InterpError { message: "json_parse: expected Str".to_string() })
+                };
+                match serde_json::from_str::<serde_json::Value>(&s) {
+                    Ok(json) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Ok".to_string(),
+                        fields: vec![Value::Json(json)],
+                    })),
+                    Err(e) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+            "json_stringify" => {
+                // json_stringify(json: Json) -> Str
+                let json = match &args[0] {
+                    Value::Json(j) => j.clone(),
+                    _ => return Err(InterpError { message: "json_stringify: expected Json".to_string() })
+                };
+                Ok(Some(Value::Str(json.to_string())))
+            }
+            "json_stringify_pretty" => {
+                // json_stringify_pretty(json: Json) -> Str
+                let json = match &args[0] {
+                    Value::Json(j) => j.clone(),
+                    _ => return Err(InterpError { message: "json_stringify_pretty: expected Json".to_string() })
+                };
+                Ok(Some(Value::Str(serde_json::to_string_pretty(&json).unwrap_or_default())))
+            }
+            "json_get" => {
+                // json_get(json: Json, key: Str) -> Json?
+                let json = match &args[0] {
+                    Value::Json(j) => j.clone(),
+                    _ => return Err(InterpError { message: "json_get: expected Json".to_string() })
+                };
+                let key = match &args[1] {
+                    Value::Str(s) => s.clone(),
+                    _ => return Err(InterpError { message: "json_get: key must be Str".to_string() })
+                };
+                match json.get(&key) {
+                    Some(v) => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "Some".to_string(),
+                        fields: vec![Value::Json(v.clone())],
+                    })),
+                    None => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "None".to_string(),
+                        fields: vec![],
+                    })),
+                }
+            }
+            "json_get_str" => {
+                // json_get_str(json: Json, key: Str) -> Str?
+                let json = match &args[0] {
+                    Value::Json(j) => j.clone(),
+                    _ => return Err(InterpError { message: "json_get_str: expected Json".to_string() })
+                };
+                let key = match &args[1] {
+                    Value::Str(s) => s.clone(),
+                    _ => return Err(InterpError { message: "json_get_str: key must be Str".to_string() })
+                };
+                match json.get(&key).and_then(|v| v.as_str()) {
+                    Some(s) => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "Some".to_string(),
+                        fields: vec![Value::Str(s.to_string())],
+                    })),
+                    None => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "None".to_string(),
+                        fields: vec![],
+                    })),
+                }
+            }
+            "json_get_int" => {
+                // json_get_int(json: Json, key: Str) -> Int?
+                let json = match &args[0] {
+                    Value::Json(j) => j.clone(),
+                    _ => return Err(InterpError { message: "json_get_int: expected Json".to_string() })
+                };
+                let key = match &args[1] {
+                    Value::Str(s) => s.clone(),
+                    _ => return Err(InterpError { message: "json_get_int: key must be Str".to_string() })
+                };
+                match json.get(&key).and_then(|v| v.as_i64()) {
+                    Some(n) => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "Some".to_string(),
+                        fields: vec![Value::Int(n)],
+                    })),
+                    None => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "None".to_string(),
+                        fields: vec![],
+                    })),
+                }
+            }
+            "json_get_float" => {
+                // json_get_float(json: Json, key: Str) -> Float?
+                let json = match &args[0] {
+                    Value::Json(j) => j.clone(),
+                    _ => return Err(InterpError { message: "json_get_float: expected Json".to_string() })
+                };
+                let key = match &args[1] {
+                    Value::Str(s) => s.clone(),
+                    _ => return Err(InterpError { message: "json_get_float: key must be Str".to_string() })
+                };
+                match json.get(&key).and_then(|v| v.as_f64()) {
+                    Some(n) => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "Some".to_string(),
+                        fields: vec![Value::Float(n)],
+                    })),
+                    None => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "None".to_string(),
+                        fields: vec![],
+                    })),
+                }
+            }
+            "json_get_bool" => {
+                // json_get_bool(json: Json, key: Str) -> Bool?
+                let json = match &args[0] {
+                    Value::Json(j) => j.clone(),
+                    _ => return Err(InterpError { message: "json_get_bool: expected Json".to_string() })
+                };
+                let key = match &args[1] {
+                    Value::Str(s) => s.clone(),
+                    _ => return Err(InterpError { message: "json_get_bool: key must be Str".to_string() })
+                };
+                match json.get(&key).and_then(|v| v.as_bool()) {
+                    Some(b) => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "Some".to_string(),
+                        fields: vec![Value::Bool(b)],
+                    })),
+                    None => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "None".to_string(),
+                        fields: vec![],
+                    })),
+                }
+            }
+            "json_get_array" => {
+                // json_get_array(json: Json, key: Str) -> [Json]?
+                let json = match &args[0] {
+                    Value::Json(j) => j.clone(),
+                    _ => return Err(InterpError { message: "json_get_array: expected Json".to_string() })
+                };
+                let key = match &args[1] {
+                    Value::Str(s) => s.clone(),
+                    _ => return Err(InterpError { message: "json_get_array: key must be Str".to_string() })
+                };
+                match json.get(&key).and_then(|v| v.as_array()) {
+                    Some(arr) => {
+                        let vals: Vec<Value> = arr.iter().map(|v| Value::Json(v.clone())).collect();
+                        Ok(Some(Value::Enum {
+                            type_name: "Option".to_string(),
+                            variant: "Some".to_string(),
+                            fields: vec![Value::Array(vals)],
+                        }))
+                    }
+                    None => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "None".to_string(),
+                        fields: vec![],
+                    })),
+                }
+            }
+            "json_array_get" => {
+                // json_array_get(json: Json, idx: Int) -> Json?
+                let json = match &args[0] {
+                    Value::Json(j) => j.clone(),
+                    _ => return Err(InterpError { message: "json_array_get: expected Json".to_string() })
+                };
+                let idx = match &args[1] {
+                    Value::Int(n) => *n as usize,
+                    _ => return Err(InterpError { message: "json_array_get: index must be Int".to_string() })
+                };
+                match json.as_array().and_then(|arr| arr.get(idx)) {
+                    Some(v) => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "Some".to_string(),
+                        fields: vec![Value::Json(v.clone())],
+                    })),
+                    None => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "None".to_string(),
+                        fields: vec![],
+                    })),
+                }
+            }
+            "json_array_len" => {
+                // json_array_len(json: Json) -> Int
+                let json = match &args[0] {
+                    Value::Json(j) => j.clone(),
+                    _ => return Err(InterpError { message: "json_array_len: expected Json".to_string() })
+                };
+                let len = json.as_array().map(|arr| arr.len()).unwrap_or(0);
+                Ok(Some(Value::Int(len as i64)))
+            }
+            "json_keys" => {
+                // json_keys(json: Json) -> [Str]
+                let json = match &args[0] {
+                    Value::Json(j) => j.clone(),
+                    _ => return Err(InterpError { message: "json_keys: expected Json".to_string() })
+                };
+                let keys: Vec<Value> = json.as_object()
+                    .map(|obj| obj.keys().map(|k| Value::Str(k.clone())).collect())
+                    .unwrap_or_default();
+                Ok(Some(Value::Array(keys)))
+            }
+            "json_values" => {
+                // json_values(json: Json) -> [Json]
+                let json = match &args[0] {
+                    Value::Json(j) => j.clone(),
+                    _ => return Err(InterpError { message: "json_values: expected Json".to_string() })
+                };
+                let vals: Vec<Value> = json.as_object()
+                    .map(|obj| obj.values().map(|v| Value::Json(v.clone())).collect())
+                    .unwrap_or_default();
+                Ok(Some(Value::Array(vals)))
+            }
+            "json_type" => {
+                // json_type(json: Json) -> Str
+                let json = match &args[0] {
+                    Value::Json(j) => j.clone(),
+                    _ => return Err(InterpError { message: "json_type: expected Json".to_string() })
+                };
+                let type_name = match &json {
+                    serde_json::Value::Null => "null",
+                    serde_json::Value::Bool(_) => "bool",
+                    serde_json::Value::Number(_) => "number",
+                    serde_json::Value::String(_) => "string",
+                    serde_json::Value::Array(_) => "array",
+                    serde_json::Value::Object(_) => "object",
+                };
+                Ok(Some(Value::Str(type_name.to_string())))
+            }
+            "json_is_null" => {
+                let json = match &args[0] {
+                    Value::Json(j) => j.clone(),
+                    _ => return Err(InterpError { message: "json_is_null: expected Json".to_string() })
+                };
+                Ok(Some(Value::Bool(json.is_null())))
+            }
+            "json_is_bool" => {
+                let json = match &args[0] {
+                    Value::Json(j) => j.clone(),
+                    _ => return Err(InterpError { message: "json_is_bool: expected Json".to_string() })
+                };
+                Ok(Some(Value::Bool(json.is_boolean())))
+            }
+            "json_is_number" => {
+                let json = match &args[0] {
+                    Value::Json(j) => j.clone(),
+                    _ => return Err(InterpError { message: "json_is_number: expected Json".to_string() })
+                };
+                Ok(Some(Value::Bool(json.is_number())))
+            }
+            "json_is_string" => {
+                let json = match &args[0] {
+                    Value::Json(j) => j.clone(),
+                    _ => return Err(InterpError { message: "json_is_string: expected Json".to_string() })
+                };
+                Ok(Some(Value::Bool(json.is_string())))
+            }
+            "json_is_array" => {
+                let json = match &args[0] {
+                    Value::Json(j) => j.clone(),
+                    _ => return Err(InterpError { message: "json_is_array: expected Json".to_string() })
+                };
+                Ok(Some(Value::Bool(json.is_array())))
+            }
+            "json_is_object" => {
+                let json = match &args[0] {
+                    Value::Json(j) => j.clone(),
+                    _ => return Err(InterpError { message: "json_is_object: expected Json".to_string() })
+                };
+                Ok(Some(Value::Bool(json.is_object())))
+            }
+            "json_from_str" => {
+                let s = match &args[0] {
+                    Value::Str(s) => s.clone(),
+                    _ => return Err(InterpError { message: "json_from_str: expected Str".to_string() })
+                };
+                Ok(Some(Value::Json(serde_json::Value::String(s))))
+            }
+            "json_from_int" => {
+                let n = match &args[0] {
+                    Value::Int(n) => *n,
+                    _ => return Err(InterpError { message: "json_from_int: expected Int".to_string() })
+                };
+                Ok(Some(Value::Json(serde_json::Value::Number(n.into()))))
+            }
+            "json_from_float" => {
+                let n = match &args[0] {
+                    Value::Float(n) => *n,
+                    _ => return Err(InterpError { message: "json_from_float: expected Float".to_string() })
+                };
+                let num = serde_json::Number::from_f64(n).unwrap_or_else(|| serde_json::Number::from(0));
+                Ok(Some(Value::Json(serde_json::Value::Number(num))))
+            }
+            "json_from_bool" => {
+                let b = match &args[0] {
+                    Value::Bool(b) => *b,
+                    _ => return Err(InterpError { message: "json_from_bool: expected Bool".to_string() })
+                };
+                Ok(Some(Value::Json(serde_json::Value::Bool(b))))
+            }
+            "json_null" => {
+                Ok(Some(Value::Json(serde_json::Value::Null)))
+            }
+            "json_object" => {
+                // json_object() -> Json (empty object)
+                Ok(Some(Value::Json(serde_json::Value::Object(serde_json::Map::new()))))
+            }
+            "json_array" => {
+                // json_array() -> Json (empty array)
+                Ok(Some(Value::Json(serde_json::Value::Array(vec![]))))
+            }
+            "json_set" => {
+                // json_set(json: Json, key: Str, value: Json) -> Json
+                let json = match &args[0] {
+                    Value::Json(j) => j.clone(),
+                    _ => return Err(InterpError { message: "json_set: expected Json".to_string() })
+                };
+                let key = match &args[1] {
+                    Value::Str(s) => s.clone(),
+                    _ => return Err(InterpError { message: "json_set: key must be Str".to_string() })
+                };
+                let value = match &args[2] {
+                    Value::Json(j) => j.clone(),
+                    _ => return Err(InterpError { message: "json_set: value must be Json".to_string() })
+                };
+                let mut obj = json.as_object().cloned().unwrap_or_else(serde_json::Map::new);
+                obj.insert(key, value);
+                Ok(Some(Value::Json(serde_json::Value::Object(obj))))
+            }
+            "json_has" => {
+                // json_has(json: Json, key: Str) -> Bool
+                let json = match &args[0] {
+                    Value::Json(j) => j.clone(),
+                    _ => return Err(InterpError { message: "json_has: expected Json".to_string() })
+                };
+                let key = match &args[1] {
+                    Value::Str(s) => s.clone(),
+                    _ => return Err(InterpError { message: "json_has: key must be Str".to_string() })
+                };
+                let has = json.as_object().map(|obj| obj.contains_key(&key)).unwrap_or(false);
+                Ok(Some(Value::Bool(has)))
+            }
+            "json_to_value" => {
+                // json_to_value(json: Json) -> native FORMA value
+                // Converts JSON to native FORMA types where possible
+                let json = match &args[0] {
+                    Value::Json(j) => j.clone(),
+                    _ => return Err(InterpError { message: "json_to_value: expected Json".to_string() })
+                };
+                fn json_to_forma_value(j: &serde_json::Value) -> Value {
+                    match j {
+                        serde_json::Value::Null => Value::Unit,
+                        serde_json::Value::Bool(b) => Value::Bool(*b),
+                        serde_json::Value::Number(n) => {
+                            if let Some(i) = n.as_i64() {
+                                Value::Int(i)
+                            } else if let Some(f) = n.as_f64() {
+                                Value::Float(f)
+                            } else {
+                                Value::Int(0)
+                            }
+                        }
+                        serde_json::Value::String(s) => Value::Str(s.clone()),
+                        serde_json::Value::Array(arr) => {
+                            Value::Array(arr.iter().map(json_to_forma_value).collect())
+                        }
+                        serde_json::Value::Object(obj) => {
+                            let map: HashMap<String, Value> = obj.iter()
+                                .map(|(k, v)| (k.clone(), json_to_forma_value(v)))
+                                .collect();
+                            Value::Map(map)
+                        }
+                    }
+                }
+                Ok(Some(json_to_forma_value(&json)))
+            }
+
+            // ===== Sorting operations =====
+            "sort_ints" => {
+                // sort_ints(arr: [Int]) -> [Int]
+                let arr = match &args[0] {
+                    Value::Array(arr) => arr.clone(),
+                    _ => return Err(InterpError { message: "sort_ints: expected array".to_string() })
+                };
+                let mut ints: Vec<i64> = arr.iter()
+                    .filter_map(|v| v.as_int())
+                    .collect();
+                ints.sort();
+                Ok(Some(Value::Array(ints.into_iter().map(Value::Int).collect())))
+            }
+            "sort_ints_desc" => {
+                // sort_ints_desc(arr: [Int]) -> [Int]
+                let arr = match &args[0] {
+                    Value::Array(arr) => arr.clone(),
+                    _ => return Err(InterpError { message: "sort_ints_desc: expected array".to_string() })
+                };
+                let mut ints: Vec<i64> = arr.iter()
+                    .filter_map(|v| v.as_int())
+                    .collect();
+                ints.sort_by(|a, b| b.cmp(a));
+                Ok(Some(Value::Array(ints.into_iter().map(Value::Int).collect())))
+            }
+            "sort_floats" => {
+                // sort_floats(arr: [Float]) -> [Float]
+                let arr = match &args[0] {
+                    Value::Array(arr) => arr.clone(),
+                    _ => return Err(InterpError { message: "sort_floats: expected array".to_string() })
+                };
+                let mut floats: Vec<f64> = arr.iter()
+                    .filter_map(|v| v.as_float())
+                    .collect();
+                floats.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                Ok(Some(Value::Array(floats.into_iter().map(Value::Float).collect())))
+            }
+            "sort_strings" => {
+                // sort_strings(arr: [Str]) -> [Str]
+                let arr = match &args[0] {
+                    Value::Array(arr) => arr.clone(),
+                    _ => return Err(InterpError { message: "sort_strings: expected array".to_string() })
+                };
+                let mut strs: Vec<String> = arr.iter()
+                    .filter_map(|v| match v {
+                        Value::Str(s) => Some(s.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                strs.sort();
+                Ok(Some(Value::Array(strs.into_iter().map(Value::Str).collect())))
+            }
+            "sort_strings_desc" => {
+                // sort_strings_desc(arr: [Str]) -> [Str]
+                let arr = match &args[0] {
+                    Value::Array(arr) => arr.clone(),
+                    _ => return Err(InterpError { message: "sort_strings_desc: expected array".to_string() })
+                };
+                let mut strs: Vec<String> = arr.iter()
+                    .filter_map(|v| match v {
+                        Value::Str(s) => Some(s.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                strs.sort_by(|a, b| b.cmp(a));
+                Ok(Some(Value::Array(strs.into_iter().map(Value::Str).collect())))
+            }
+            "reverse" => {
+                // reverse(arr: [T]) -> [T]
+                let arr = match &args[0] {
+                    Value::Array(arr) => arr.clone(),
+                    _ => return Err(InterpError { message: "reverse: expected array".to_string() })
+                };
+                let mut result = arr;
+                result.reverse();
+                Ok(Some(Value::Array(result)))
+            }
+            "shuffle" => {
+                // shuffle(arr: [T]) -> [T]
+                let arr = match &args[0] {
+                    Value::Array(arr) => arr.clone(),
+                    _ => return Err(InterpError { message: "shuffle: expected array".to_string() })
+                };
+                let mut result = arr;
+                let mut rng = rand::thread_rng();
+                for i in (1..result.len()).rev() {
+                    let j = rng.gen_range(0..=i);
+                    result.swap(i, j);
+                }
+                Ok(Some(Value::Array(result)))
+            }
+            "min_of" => {
+                // min_of(arr: [Int]) -> Int?
+                let arr = match &args[0] {
+                    Value::Array(arr) => arr.clone(),
+                    _ => return Err(InterpError { message: "min_of: expected array".to_string() })
+                };
+                let ints: Vec<i64> = arr.iter().filter_map(|v| v.as_int()).collect();
+                match ints.iter().min() {
+                    Some(&min) => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "Some".to_string(),
+                        fields: vec![Value::Int(min)],
+                    })),
+                    None => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "None".to_string(),
+                        fields: vec![],
+                    })),
+                }
+            }
+            "max_of" => {
+                // max_of(arr: [Int]) -> Int?
+                let arr = match &args[0] {
+                    Value::Array(arr) => arr.clone(),
+                    _ => return Err(InterpError { message: "max_of: expected array".to_string() })
+                };
+                let ints: Vec<i64> = arr.iter().filter_map(|v| v.as_int()).collect();
+                match ints.iter().max() {
+                    Some(&max) => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "Some".to_string(),
+                        fields: vec![Value::Int(max)],
+                    })),
+                    None => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "None".to_string(),
+                        fields: vec![],
+                    })),
+                }
+            }
+            "sum_of" => {
+                // sum_of(arr: [Int]) -> Int
+                let arr = match &args[0] {
+                    Value::Array(arr) => arr.clone(),
+                    _ => return Err(InterpError { message: "sum_of: expected array".to_string() })
+                };
+                let sum: i64 = arr.iter().filter_map(|v| v.as_int()).sum();
+                Ok(Some(Value::Int(sum)))
+            }
+            "binary_search" => {
+                // binary_search(arr: [Int], target: Int) -> Int?
+                // Returns index if found
+                let arr = match &args[0] {
+                    Value::Array(arr) => arr.clone(),
+                    _ => return Err(InterpError { message: "binary_search: expected array".to_string() })
+                };
+                let target = match &args[1] {
+                    Value::Int(n) => *n,
+                    _ => return Err(InterpError { message: "binary_search: target must be Int".to_string() })
+                };
+                let ints: Vec<i64> = arr.iter().filter_map(|v| v.as_int()).collect();
+                match ints.binary_search(&target) {
+                    Ok(idx) => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "Some".to_string(),
+                        fields: vec![Value::Int(idx as i64)],
+                    })),
+                    Err(_) => Ok(Some(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "None".to_string(),
+                        fields: vec![],
+                    })),
+                }
             }
 
             // Not a built-in function

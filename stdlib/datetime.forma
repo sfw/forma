@@ -1,0 +1,217 @@
+# FORMA Standard Library - DateTime Module
+# Provides date/time manipulation, formatting, and parsing functions
+# Uses built-in functions based on chrono crate
+
+# ============================================================
+# Timestamp Functions
+# ============================================================
+
+# Get current Unix timestamp in seconds
+# Example: time_now() -> 1706097600
+# Uses builtin: time_now
+
+# Get current Unix timestamp in milliseconds
+# Example: time_now_ms() -> 1706097600000
+# Uses builtin: time_now_ms
+
+# Create timestamp from date/time components (UTC)
+# Example: time_from_parts(2026, 1, 24, 12, 30, 0) -> timestamp
+# Uses builtin: time_from_parts
+
+# ============================================================
+# Formatting Functions
+# ============================================================
+
+# Format timestamp with custom format string
+# Format codes: %Y=year, %m=month, %d=day, %H=hour, %M=minute, %S=second
+# Example: time_format(ts, "%Y-%m-%d %H:%M:%S") -> "2026-01-24 12:30:00"
+# Uses builtin: time_format
+
+# Format timestamp as ISO 8601 (RFC 3339)
+# Example: time_format_iso(ts) -> "2026-01-24T12:30:00+00:00"
+# Uses builtin: time_format_iso
+
+# Format timestamp as RFC 2822 (email format)
+# Example: time_format_rfc2822(ts) -> "Sat, 24 Jan 2026 12:30:00 +0000"
+# Uses builtin: time_format_rfc2822
+
+# ============================================================
+# Parsing Functions
+# ============================================================
+
+# Parse string with custom format into timestamp
+# Returns Result[Int, Str] - Ok(timestamp) or Err(error message)
+# Example: time_parse("2026-01-24 12:30:00", "%Y-%m-%d %H:%M:%S")
+# Uses builtin: time_parse
+
+# Parse ISO 8601 string into timestamp
+# Returns Result[Int, Str]
+# Example: time_parse_iso("2026-01-24T12:30:00+00:00")
+# Uses builtin: time_parse_iso
+
+# ============================================================
+# Component Extraction
+# ============================================================
+
+# Get year from timestamp
+# Example: time_year(ts) -> 2026
+# Uses builtin: time_year
+
+# Get month from timestamp (1-12)
+# Example: time_month(ts) -> 1
+# Uses builtin: time_month
+
+# Get day of month from timestamp (1-31)
+# Example: time_day(ts) -> 24
+# Uses builtin: time_day
+
+# Get hour from timestamp (0-23)
+# Example: time_hour(ts) -> 12
+# Uses builtin: time_hour
+
+# Get minute from timestamp (0-59)
+# Example: time_minute(ts) -> 30
+# Uses builtin: time_minute
+
+# Get second from timestamp (0-59)
+# Example: time_second(ts) -> 0
+# Uses builtin: time_second
+
+# Get day of week from timestamp (0=Sunday, 6=Saturday)
+# Example: time_weekday(ts) -> 6 (Saturday)
+# Uses builtin: time_weekday
+
+# ============================================================
+# Duration Functions
+# ============================================================
+
+# Create duration in seconds
+# Example: duration_seconds(60) -> 60
+# Uses builtin: duration_seconds
+
+# Create duration in minutes (returns seconds)
+# Example: duration_minutes(5) -> 300
+# Uses builtin: duration_minutes
+
+# Create duration in hours (returns seconds)
+# Example: duration_hours(2) -> 7200
+# Uses builtin: duration_hours
+
+# Create duration in days (returns seconds)
+# Example: duration_days(1) -> 86400
+# Uses builtin: duration_days
+
+# ============================================================
+# Arithmetic Functions
+# ============================================================
+
+# Add duration to timestamp
+# Example: time_add(ts, duration_hours(2)) -> ts + 7200
+# Uses builtin: time_add
+
+# Subtract duration from timestamp
+# Example: time_sub(ts, duration_days(1)) -> ts - 86400
+# Uses builtin: time_sub
+
+# Get difference between two timestamps (in seconds)
+# Example: time_diff(ts1, ts2) -> ts1 - ts2
+# Uses builtin: time_diff
+
+# ============================================================
+# Utility Functions (FORMA implementations)
+# ============================================================
+
+# Check if year is a leap year
+f is_leap_year(year: Int) -> Bool
+    (year % 4 == 0) && ((year % 100 != 0) || (year % 400 == 0))
+
+# Get number of days in a month
+f days_in_month(year: Int, month: Int) -> Int
+    if month == 2 then
+        if is_leap_year(year) then 29 else 28
+    else if (month == 4) || (month == 6) || (month == 9) || (month == 11) then
+        30
+    else
+        31
+
+# Format timestamp as simple date string (YYYY-MM-DD)
+f format_date(ts: Int) -> Str
+    time_format(ts, "%Y-%m-%d")
+
+# Format timestamp as simple time string (HH:MM:SS)
+f format_time(ts: Int) -> Str
+    time_format(ts, "%H:%M:%S")
+
+# Format timestamp as human-readable string
+f format_datetime(ts: Int) -> Str
+    time_format(ts, "%Y-%m-%d %H:%M:%S")
+
+# Get start of day (midnight) for a timestamp
+f start_of_day(ts: Int) -> Int
+    year := time_year(ts)
+    month := time_month(ts)
+    day := time_day(ts)
+    time_from_parts(year, month, day, 0, 0, 0)
+
+# Get end of day (23:59:59) for a timestamp
+f end_of_day(ts: Int) -> Int
+    year := time_year(ts)
+    month := time_month(ts)
+    day := time_day(ts)
+    time_from_parts(year, month, day, 23, 59, 59)
+
+# Check if two timestamps are on the same day
+f same_day(ts1: Int, ts2: Int) -> Bool
+    (time_year(ts1) == time_year(ts2)) && (time_month(ts1) == time_month(ts2)) && (time_day(ts1) == time_day(ts2))
+
+# Get name of weekday
+f weekday_name(ts: Int) -> Str
+    day := time_weekday(ts)
+    if day == 0 then "Sunday"
+    else if day == 1 then "Monday"
+    else if day == 2 then "Tuesday"
+    else if day == 3 then "Wednesday"
+    else if day == 4 then "Thursday"
+    else if day == 5 then "Friday"
+    else "Saturday"
+
+# Get short name of weekday (3 letters)
+f weekday_short(ts: Int) -> Str
+    day := time_weekday(ts)
+    if day == 0 then "Sun"
+    else if day == 1 then "Mon"
+    else if day == 2 then "Tue"
+    else if day == 3 then "Wed"
+    else if day == 4 then "Thu"
+    else if day == 5 then "Fri"
+    else "Sat"
+
+# Get name of month
+f month_name(month: Int) -> Str
+    if month == 1 then "January"
+    else if month == 2 then "February"
+    else if month == 3 then "March"
+    else if month == 4 then "April"
+    else if month == 5 then "May"
+    else if month == 6 then "June"
+    else if month == 7 then "July"
+    else if month == 8 then "August"
+    else if month == 9 then "September"
+    else if month == 10 then "October"
+    else if month == 11 then "November"
+    else "December"
+
+# Get short name of month (3 letters)
+f month_short(month: Int) -> Str
+    if month == 1 then "Jan"
+    else if month == 2 then "Feb"
+    else if month == 3 then "Mar"
+    else if month == 4 then "Apr"
+    else if month == 5 then "May"
+    else if month == 6 then "Jun"
+    else if month == 7 then "Jul"
+    else if month == 8 then "Aug"
+    else if month == 9 then "Sep"
+    else if month == 10 then "Oct"
+    else if month == 11 then "Nov"
+    else "Dec"

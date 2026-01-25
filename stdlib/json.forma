@@ -1,0 +1,183 @@
+# FORMA Standard Library - JSON Module
+# Provides JSON parsing, generation, and manipulation functions
+# Uses built-in functions: json_parse, json_stringify, json_get, etc.
+
+# ============================================================
+# Parsing and Stringification
+# ============================================================
+
+# Parse JSON string into JSON value
+# Returns Result[Json, Str] - Ok(json) or Err(error message)
+# Example: json_parse('{"name": "Alice"}')
+# Uses builtin: json_parse
+
+# Convert JSON to string (compact)
+# Example: json_stringify(json) -> '{"name":"Alice"}'
+# Uses builtin: json_stringify
+
+# Convert JSON to string (formatted/pretty)
+# Example: json_stringify_pretty(json) -> formatted JSON with indentation
+# Uses builtin: json_stringify_pretty
+
+# ============================================================
+# Accessing JSON Values
+# ============================================================
+
+# Get value by key from JSON object
+# Returns Option[Json] - Some(value) or None
+# Example: json_get(obj, "name") -> Some(json_string)
+# Uses builtin: json_get
+
+# Get string value by key
+# Returns Option[Str]
+# Example: json_get_str(obj, "name") -> Some("Alice")
+# Uses builtin: json_get_str
+
+# Get integer value by key
+# Returns Option[Int]
+# Example: json_get_int(obj, "age") -> Some(30)
+# Uses builtin: json_get_int
+
+# Get float value by key
+# Returns Option[Float]
+# Example: json_get_float(obj, "score") -> Some(95.5)
+# Uses builtin: json_get_float
+
+# Get boolean value by key
+# Returns Option[Bool]
+# Example: json_get_bool(obj, "active") -> Some(true)
+# Uses builtin: json_get_bool
+
+# Get array by key
+# Returns Option[[Json]]
+# Example: json_get_array(obj, "items") -> Some([json1, json2])
+# Uses builtin: json_get_array
+
+# Get element from JSON array by index
+# Returns Option[Json]
+# Example: json_array_get(arr, 0) -> Some(first_element)
+# Uses builtin: json_array_get
+
+# Get length of JSON array
+# Example: json_array_len(arr) -> 5
+# Uses builtin: json_array_len
+
+# ============================================================
+# JSON Object Manipulation
+# ============================================================
+
+# Get all keys from JSON object
+# Returns [Str]
+# Example: json_keys(obj) -> ["name", "age", "email"]
+# Uses builtin: json_keys
+
+# Get all values from JSON object
+# Returns [Json]
+# Example: json_values(obj) -> [json_name, json_age, json_email]
+# Uses builtin: json_values
+
+# Check if JSON object has a key
+# Returns Bool
+# Example: json_has(obj, "name") -> true
+# Uses builtin: json_has
+
+# Set a key-value pair in JSON object (returns new object)
+# Example: json_set(obj, "email", json_from_str("bob@example.com"))
+# Uses builtin: json_set
+
+# ============================================================
+# Type Checking
+# ============================================================
+
+# Get the type of a JSON value as string
+# Returns: "null", "bool", "number", "string", "array", "object"
+# Example: json_type(json_from_str("hello")) -> "string"
+# Uses builtin: json_type
+
+# Type predicates
+# json_is_null(json) -> Bool
+# json_is_bool(json) -> Bool
+# json_is_number(json) -> Bool
+# json_is_string(json) -> Bool
+# json_is_array(json) -> Bool
+# json_is_object(json) -> Bool
+
+# ============================================================
+# Creating JSON Values
+# ============================================================
+
+# Create JSON from FORMA values
+# json_from_str(s: Str) -> Json
+# json_from_int(n: Int) -> Json
+# json_from_float(f: Float) -> Json
+# json_from_bool(b: Bool) -> Json
+# json_null() -> Json
+
+# Create empty containers
+# json_object() -> Json (empty object {})
+# json_array() -> Json (empty array [])
+
+# ============================================================
+# Conversion
+# ============================================================
+
+# Convert JSON to native FORMA value
+# json_to_value(json) -> native value
+# - null -> Unit
+# - bool -> Bool
+# - number -> Int or Float
+# - string -> Str
+# - array -> Array
+# - object -> Map
+# Uses builtin: json_to_value
+
+# ============================================================
+# Utility Functions (FORMA implementations)
+# ============================================================
+
+# Safe get with default - get string or return default
+f json_get_str_or(json: Json, key: Str, default: Str) -> Str
+    m json_get_str(json, key)
+        Some(s) -> s
+        None -> default
+
+# Safe get with default - get int or return default
+f json_get_int_or(json: Json, key: Str, default: Int) -> Int
+    m json_get_int(json, key)
+        Some(n) -> n
+        None -> default
+
+# Safe get with default - get float or return default
+f json_get_float_or(json: Json, key: Str, default: Float) -> Float
+    m json_get_float(json, key)
+        Some(n) -> n
+        None -> default
+
+# Safe get with default - get bool or return default
+f json_get_bool_or(json: Json, key: Str, default: Bool) -> Bool
+    m json_get_bool(json, key)
+        Some(b) -> b
+        None -> default
+
+# Check if JSON is empty object or array
+f json_is_empty(json: Json) -> Bool
+    m json_type(json)
+        "object" -> vec_len(json_keys(json)) == 0
+        "array" -> json_array_len(json) == 0
+        _ -> false
+
+# Get nested value using dot notation path
+# Example: json_path(obj, "user.profile.name")
+f json_path(json: Json, path: Str) -> Json?
+    parts := str_split(path, ".")
+    json_path_parts(json, parts, 0)
+
+f json_path_parts(json: Json, parts: [Str], idx: Int) -> Json?
+    if idx >= vec_len(parts) then Some(json)
+    else
+        m vec_get(parts, idx)
+            Some(key) ->
+                m json_get(json, key)
+                    Some(next) -> json_path_parts(next, parts, idx + 1)
+                    None -> None
+            None -> None
