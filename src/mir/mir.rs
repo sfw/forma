@@ -45,6 +45,8 @@ impl fmt::Display for Local {
 pub struct Program {
     pub functions: HashMap<String, Function>,
     pub entry: Option<String>,
+    /// Enum variant registry: maps (enum_name, variant_name) -> variant index
+    pub enum_variants: HashMap<(String, String), usize>,
 }
 
 impl Program {
@@ -52,6 +54,7 @@ impl Program {
         Self {
             functions: HashMap::new(),
             entry: None,
+            enum_variants: HashMap::new(),
         }
     }
 }

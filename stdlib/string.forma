@@ -120,18 +120,16 @@ f sb_append_int(builder: [Str], n: Int) -> [Str]
 # Character utilities
 # ============================================================
 
-# TODO: These functions require char_to_str builtin which is not yet implemented
-# Uncomment when char-to-string conversion is available
+# Convert char to single-character string
+f str_from_char(c: Char) -> Str
+    char_to_str(c)
 
-# # Get character at index as string (single char)
+# Get character at index as string (single char)
+# Note: Commented out due to type inference issue with match arms
 # f str_char_at_str(s: Str, idx: Int) -> Option[Str]
 #     m str_char_at(s, idx)
 #         Some(c) -> Some(str_from_char(c))
 #         None -> None
-#
-# # Convert char to single-character string
-# f str_from_char(c: Char) -> Str
-#     char_to_str(c)
 
 # Check if character is a digit
 f is_digit(c: Char) -> Bool

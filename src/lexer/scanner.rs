@@ -89,6 +89,8 @@ impl<'a> Scanner<'a> {
         let Some(c) = self.advance() else {
             // End of file - emit remaining dedents
             if self.indent_stack.len() > 1 {
+                // We return one Dedent now, and set pending_dedents for the rest
+                // Pop accounts for the one we're returning now
                 self.indent_stack.pop();
                 self.pending_dedents = self.indent_stack.len() - 1;
                 self.indent_stack.clear();

@@ -836,6 +836,28 @@ impl TypeEnv {
             TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Unit)) },
         );
 
+        // ===== Duration functions =====
+        // duration_seconds(Int) -> Int (returns milliseconds)
+        env.bindings.insert(
+            "duration_seconds".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+        );
+        // duration_minutes(Int) -> Int (returns milliseconds)
+        env.bindings.insert(
+            "duration_minutes".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+        );
+        // duration_hours(Int) -> Int (returns milliseconds)
+        env.bindings.insert(
+            "duration_hours".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+        );
+        // duration_days(Int) -> Int (returns milliseconds)
+        env.bindings.insert(
+            "duration_days".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+        );
+
         // ===== Async functions =====
         // sleep_async(Int) -> Future[()]
         env.bindings.insert(
@@ -2542,12 +2564,14 @@ impl Unifier {
             | (Ty::I32, Ty::I32)
             | (Ty::I64, Ty::I64)
             | (Ty::I128, Ty::I128)
+            | (Ty::Isize, Ty::Isize)
             | (Ty::UInt, Ty::UInt)
             | (Ty::U8, Ty::U8)
             | (Ty::U16, Ty::U16)
             | (Ty::U32, Ty::U32)
             | (Ty::U64, Ty::U64)
             | (Ty::U128, Ty::U128)
+            | (Ty::Usize, Ty::Usize)
             | (Ty::Float, Ty::Float)
             | (Ty::F32, Ty::F32)
             | (Ty::F64, Ty::F64)
@@ -3089,8 +3113,15 @@ impl InferenceEngine {
             Ty::Map(key, val) => ("Map".to_string(), vec![*key.clone(), *val.clone()]),
             Ty::Str => ("Str".to_string(), vec![]),
             Ty::Char => ("Char".to_string(), vec![]),
+            // Generic integer/float
             Ty::Int => ("Int".to_string(), vec![]),
             Ty::Float => ("Float".to_string(), vec![]),
+            // Signed integers - treat as Int for method lookup
+            Ty::I8 | Ty::I16 | Ty::I32 | Ty::I64 | Ty::I128 | Ty::Isize => ("Int".to_string(), vec![]),
+            // Unsigned integers - treat as Int for method lookup
+            Ty::UInt | Ty::U8 | Ty::U16 | Ty::U32 | Ty::U64 | Ty::U128 | Ty::Usize => ("Int".to_string(), vec![]),
+            // Float types
+            Ty::F32 | Ty::F64 => ("Float".to_string(), vec![]),
             Ty::Bool => ("Bool".to_string(), vec![]),
             // Handle references by looking at the inner type
             Ty::Ref(inner, _) => self.classify_type_for_method(inner),

@@ -2260,6 +2260,40 @@ impl Interpreter {
                 Ok(Some(Value::Unit))
             }
 
+            // ===== Duration functions =====
+            "duration_seconds" => {
+                // duration_seconds(secs: Int) -> Int (returns milliseconds)
+                let secs = match &args[0] {
+                    Value::Int(n) => *n,
+                    _ => return Err(InterpError { message: "duration_seconds: expected Int".to_string() })
+                };
+                Ok(Some(Value::Int(secs * 1000)))
+            }
+            "duration_minutes" => {
+                // duration_minutes(mins: Int) -> Int (returns milliseconds)
+                let mins = match &args[0] {
+                    Value::Int(n) => *n,
+                    _ => return Err(InterpError { message: "duration_minutes: expected Int".to_string() })
+                };
+                Ok(Some(Value::Int(mins * 60 * 1000)))
+            }
+            "duration_hours" => {
+                // duration_hours(hours: Int) -> Int (returns milliseconds)
+                let hours = match &args[0] {
+                    Value::Int(n) => *n,
+                    _ => return Err(InterpError { message: "duration_hours: expected Int".to_string() })
+                };
+                Ok(Some(Value::Int(hours * 60 * 60 * 1000)))
+            }
+            "duration_days" => {
+                // duration_days(days: Int) -> Int (returns milliseconds)
+                let days = match &args[0] {
+                    Value::Int(n) => *n,
+                    _ => return Err(InterpError { message: "duration_days: expected Int".to_string() })
+                };
+                Ok(Some(Value::Int(days * 24 * 60 * 60 * 1000)))
+            }
+
             // ===== Async operations =====
             "sleep_async" => {
                 // sleep_async(ms: Int) -> Future[()]
@@ -2696,26 +2730,6 @@ impl Interpreter {
                     Weekday::Sat => 6,
                 };
                 Ok(Some(Value::Int(weekday)))
-            }
-            "duration_seconds" => {
-                // duration_seconds(n) -> Int
-                let n = match &args[0] { Value::Int(n) => *n, _ => return Err(InterpError { message: "duration_seconds: expected Int".to_string() }) };
-                Ok(Some(Value::Int(n)))
-            }
-            "duration_minutes" => {
-                // duration_minutes(n) -> Int
-                let n = match &args[0] { Value::Int(n) => *n, _ => return Err(InterpError { message: "duration_minutes: expected Int".to_string() }) };
-                Ok(Some(Value::Int(n * 60)))
-            }
-            "duration_hours" => {
-                // duration_hours(n) -> Int
-                let n = match &args[0] { Value::Int(n) => *n, _ => return Err(InterpError { message: "duration_hours: expected Int".to_string() }) };
-                Ok(Some(Value::Int(n * 3600)))
-            }
-            "duration_days" => {
-                // duration_days(n) -> Int
-                let n = match &args[0] { Value::Int(n) => *n, _ => return Err(InterpError { message: "duration_days: expected Int".to_string() }) };
-                Ok(Some(Value::Int(n * 86400)))
             }
             "time_add" => {
                 // time_add(timestamp, duration) -> Int
@@ -6021,26 +6035,17 @@ impl Interpreter {
                             // Built-in Bool (used in some match lowering)
                             ("Bool", "true") => 1,
                             ("Bool", "false") => 0,
-                            // For user-defined enums, use order-dependent hash
-                            // that includes both enum name and variant name
+                            // User-defined enums use registry-based index
                             _ => {
-                                // FNV-1a inspired hash for order-dependent hashing
-                                let mut hash: u64 = 14695981039346656037;
-                                // Include enum name in hash
-                                for b in type_name.bytes() {
-                                    hash ^= b as u64;
-                                    hash = hash.wrapping_mul(1099511628211);
-                                }
-                                // Add separator
-                                hash ^= 0xFF;
-                                hash = hash.wrapping_mul(1099511628211);
-                                // Include variant name
-                                for b in variant.bytes() {
-                                    hash ^= b as u64;
-                                    hash = hash.wrapping_mul(1099511628211);
-                                }
-                                // Convert to i64, preserving uniqueness
-                                (hash as i64).abs()
+                                let key = (type_name.clone(), variant.clone());
+                                self.program.enum_variants
+                                    .get(&key)
+                                    .map(|&idx| idx as i64)
+                                    .unwrap_or_else(|| {
+                                        // Fallback: use simple index based on variant name
+                                        // This handles enums not registered at lowering time
+                                        variant.bytes().fold(0i64, |acc, b| acc.wrapping_add(b as i64))
+                                    })
                             }
                         };
                         Ok(Value::Int(disc))

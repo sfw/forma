@@ -74,8 +74,15 @@ f sign(n: Int) -> Int
     else 0
 
 # Power function (integer exponent)
+# For negative exponents: returns 0 for |base| > 1 (integer division rounds down)
 f pow(base: Int, exp: Int) -> Int
-    if exp == 0 then 1
+    if exp < 0 then
+        # Integer power with negative exponent
+        if base == 1 then 1
+        else if base == 0 - 1 then
+            if exp % 2 == 0 then 1 else 0 - 1
+        else 0
+    else if exp == 0 then 1
     else if exp == 1 then base
     else base * pow(base, exp - 1)
 

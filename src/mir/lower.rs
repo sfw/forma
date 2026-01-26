@@ -98,7 +98,7 @@ impl Lowerer {
         for item in &source.items {
             if let ItemKind::Enum(e) = &item.kind {
                 let enum_name = e.name.name.clone();
-                for variant in &e.variants {
+                for (idx, variant) in e.variants.iter().enumerate() {
                     let field_count = match &variant.kind {
                         crate::parser::VariantKind::Unit => 0,
                         crate::parser::VariantKind::Tuple(fields) => fields.len(),
@@ -107,6 +107,11 @@ impl Lowerer {
                     self.enum_variants.insert(
                         variant.name.name.clone(),
                         (enum_name.clone(), field_count),
+                    );
+                    // Register in program for runtime discriminant lookup
+                    self.program.enum_variants.insert(
+                        (enum_name.clone(), variant.name.name.clone()),
+                        idx,
                     );
                 }
             }
