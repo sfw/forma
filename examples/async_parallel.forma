@@ -8,18 +8,20 @@ f fib(n: Int) -> Int
         fib(n - 1) + fib(n - 2)
 
 # Test parallel execution
-f main()
+f main() -> Int
     start := time_now_ms()
 
-    # Spawn three parallel computations using closures
-    t1 := sp || fib(30)
-    t2 := sp || fib(30)
-    t3 := sp || fib(30)
+    # Spawn three parallel computations
+    t1 := sp fib(30)
+    t2 := sp fib(30)
+    t3 := sp fib(30)
 
     # Await all - should complete in ~1x time if parallel, ~3x if sequential
     results := await_all([t1, t2, t3])
 
     elapsed := time_now_ms() - start
     print(f"Computed 3x fib(30) in {elapsed}ms")
-    print(f"Results: {results}")
+    for r in results
+        print(f"Result: {r}")
     print("If truly parallel, elapsed should be ~1x single fib(30) time, not 3x")
+    0

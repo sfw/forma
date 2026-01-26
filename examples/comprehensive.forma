@@ -50,7 +50,7 @@ f process_list(items: [Int]) -> Int
 #     data = aw get_url(url)?
 #     data
 
-f main
+f main() -> Int
     x = 42
     y := 0
     name = "Alice"
@@ -68,3 +68,4 @@ f main
         _ -> "positive"
 
     print(description)
+    0

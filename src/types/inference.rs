@@ -89,6 +89,8 @@ pub struct TypeEnv {
     fn_info: HashMap<String, FunctionInfo>,
     /// Trait definitions
     traits: HashMap<String, TraitInfo>,
+    /// Maps variant names to their parent enum names (e.g., "Some" -> "Option")
+    variant_to_enum: HashMap<String, String>,
 }
 
 /// Definition of a named type.
@@ -185,6 +187,12 @@ impl TypeEnv {
             "Err".to_string(),
             TypeScheme { vars: vec![err_t, err_e], ty: err_type },
         );
+
+        // Register variant-to-enum mappings for pattern matching
+        env.variant_to_enum.insert("Some".to_string(), "Option".to_string());
+        env.variant_to_enum.insert("None".to_string(), "Option".to_string());
+        env.variant_to_enum.insert("Ok".to_string(), "Result".to_string());
+        env.variant_to_enum.insert("Err".to_string(), "Result".to_string());
 
         // ===== Built-in functions =====
 
@@ -2510,12 +2518,29 @@ impl TypeEnv {
 
     /// Insert a type definition.
     pub fn insert_type(&mut self, name: String, def: TypeDef) {
+        // Auto-register variant-to-enum mappings for enum types
+        if let TypeDef::Enum { variants, .. } = &def {
+            for (variant_name, _) in variants {
+                self.variant_to_enum.insert(variant_name.clone(), name.clone());
+            }
+        }
         self.types.insert(name, def);
     }
 
     /// Look up a type definition.
     pub fn get_type(&self, name: &str) -> Option<&TypeDef> {
         self.types.get(name)
+    }
+
+    /// Look up an enum type by variant name.
+    /// Returns the enum name and its TypeDef if the variant is known.
+    pub fn get_enum_for_variant(&self, variant_name: &str) -> Option<(&str, &TypeDef)> {
+        if let Some(enum_name) = self.variant_to_enum.get(variant_name) {
+            if let Some(def) = self.types.get(enum_name) {
+                return Some((enum_name.as_str(), def));
+            }
+        }
+        None
     }
 
     pub fn insert_trait(&mut self, name: String, info: TraitInfo) {
@@ -2547,6 +2572,7 @@ impl TypeEnv {
             types: self.types.clone(),
             fn_info: self.fn_info.clone(),
             traits: self.traits.clone(),
+            variant_to_enum: self.variant_to_enum.clone(),
         }
     }
 
@@ -4584,19 +4610,31 @@ impl InferenceEngine {
                     .unwrap_or_default();
 
                 // Look up the struct definition
-                let struct_def = self.env.get_type(&struct_name).cloned();
+                // First try direct lookup, then check if it's a variant name
+                let (resolved_name, struct_def) = if let Some(def) = self.env.get_type(&struct_name) {
+                    (struct_name.clone(), Some(def.clone()))
+                } else if path.segments.len() == 1 {
+                    // Single segment path might be a variant name (e.g., "Some", "Ok")
+                    if let Some((enum_name, def)) = self.env.get_enum_for_variant(&struct_name) {
+                        (enum_name.to_string(), Some(def.clone()))
+                    } else {
+                        (struct_name.clone(), None)
+                    }
+                } else {
+                    (struct_name.clone(), None)
+                };
 
                 match struct_def {
                     Some(TypeDef::Struct { type_params, fields: struct_fields }) => {
                         // Unify expected type with struct type
                         let struct_ty = if type_params.is_empty() {
-                            Ty::Named(TypeId::new(&struct_name), vec![])
+                            Ty::Named(TypeId::new(&resolved_name), vec![])
                         } else {
                             // For generic structs, create fresh type variables
                             let type_args: Vec<Ty> = type_params.iter()
                                 .map(|_| Ty::fresh_var())
                                 .collect();
-                            Ty::Named(TypeId::new(&struct_name), type_args)
+                            Ty::Named(TypeId::new(&resolved_name), type_args)
                         };
                         self.unifier.unify(&struct_ty, ty, pattern.span)?;
 
@@ -4645,17 +4683,21 @@ impl InferenceEngine {
                     Some(TypeDef::Enum { type_params, variants }) => {
                         // This is an enum pattern like Some(x) or Color::Red
                         let enum_ty = if type_params.is_empty() {
-                            Ty::Named(TypeId::new(&struct_name), vec![])
+                            Ty::Named(TypeId::new(&resolved_name), vec![])
                         } else {
                             let type_args: Vec<Ty> = type_params.iter()
                                 .map(|_| Ty::fresh_var())
                                 .collect();
-                            Ty::Named(TypeId::new(&struct_name), type_args)
+                            Ty::Named(TypeId::new(&resolved_name), type_args)
                         };
                         self.unifier.unify(&enum_ty, ty, pattern.span)?;
 
                         // Get variant name from pattern
-                        let variant_name = if path.segments.len() >= 2 {
+                        // If struct_name != resolved_name, struct_name is the variant (e.g., "Some" resolved to "Option")
+                        // Otherwise, use the last segment or first field name
+                        let variant_name = if struct_name != resolved_name {
+                            struct_name.clone()
+                        } else if path.segments.len() >= 2 {
                             path.segments.last().map(|s| s.name.name.clone()).unwrap_or_default()
                         } else {
                             fields.first().map(|f| f.name.name.clone()).unwrap_or_default()
@@ -4672,7 +4714,7 @@ impl InferenceEngine {
                                 return Err(TypeError::new(
                                     format!(
                                         "variant '{}::{}' has {} field(s), pattern has {}",
-                                        struct_name, variant_name, field_types.len(), pattern_field_count
+                                        resolved_name, variant_name, field_types.len(), pattern_field_count
                                     ),
                                     pattern.span,
                                 ));
@@ -4692,7 +4734,7 @@ impl InferenceEngine {
                             return Err(TypeError::new(
                                 format!(
                                     "enum '{}' has no variant '{}'. Available: {}",
-                                    struct_name, variant_name, available.join(", ")
+                                    resolved_name, variant_name, available.join(", ")
                                 ),
                                 pattern.span,
                             ));
@@ -4768,32 +4810,62 @@ impl InferenceEngine {
                 Ok(())
             }
             PatternKind::Struct(path, fields, _rest) => {
-                // Try to get field types from the struct definition
+                // Try to get field types from the struct/enum definition
                 let struct_name = path.segments.last()
                     .map(|s| s.name.name.clone())
                     .unwrap_or_default();
 
-                let struct_fields = if let Some(TypeDef::Struct { fields: sf, .. }) = self.env.get_type(&struct_name) {
-                    sf.clone()
+                // First try direct lookup, then check if it's a variant name
+                let type_def = if let Some(def) = self.env.get_type(&struct_name) {
+                    Some((struct_name.clone(), def.clone()))
+                } else if path.segments.len() == 1 {
+                    // Single segment path might be a variant name (e.g., "Some", "Ok")
+                    if let Some((_enum_name, def)) = self.env.get_enum_for_variant(&struct_name) {
+                        Some((struct_name.clone(), def.clone()))  // struct_name is the variant
+                    } else {
+                        None
+                    }
                 } else {
-                    vec![]
+                    None
                 };
 
-                for field in fields {
-                    // Look up the field type from the struct definition
-                    let field_ty = struct_fields.iter()
-                        .find(|(name, _)| name == &field.name.name)
-                        .map(|(_, ty)| ty.clone())
-                        .ok_or_else(|| TypeError::new(
-                            format!("Unknown field '{}' in struct pattern", field.name.name),
-                            field.name.span,
-                        ))?;
+                match type_def {
+                    Some((_name, TypeDef::Struct { fields: sf, .. })) => {
+                        // Handle struct pattern
+                        for field in fields {
+                            let field_ty = sf.iter()
+                                .find(|(n, _)| n == &field.name.name)
+                                .map(|(_, ty)| ty.clone())
+                                .ok_or_else(|| TypeError::new(
+                                    format!("Unknown field '{}' in struct pattern", field.name.name),
+                                    field.name.span,
+                                ))?;
 
-                    if let Some(p) = &field.pattern {
-                        self.collect_pattern_bindings(p, &field_ty, env)?;
-                    } else {
-                        // Shorthand: field name is also the binding
-                        env.insert(field.name.name.clone(), TypeScheme::mono(field_ty));
+                            if let Some(p) = &field.pattern {
+                                self.collect_pattern_bindings(p, &field_ty, env)?;
+                            } else {
+                                // Shorthand: field name is also the binding
+                                env.insert(field.name.name.clone(), TypeScheme::mono(field_ty));
+                            }
+                        }
+                    }
+                    Some((variant_name, TypeDef::Enum { variants, .. })) => {
+                        // Handle enum variant pattern (e.g., Some(x), Ok(value))
+                        if let Some((_, field_types)) = variants.iter().find(|(n, _)| n == &variant_name) {
+                            // Bind each field pattern to its expected type
+                            for (field, expected_ty) in fields.iter().zip(field_types.iter()) {
+                                if let Some(p) = &field.pattern {
+                                    self.collect_pattern_bindings(p, expected_ty, env)?;
+                                } else {
+                                    // The field name is the binding
+                                    env.insert(field.name.name.clone(), TypeScheme::mono(expected_ty.clone()));
+                                }
+                            }
+                        }
+                    }
+                    _ => {
+                        // Unknown type - fields won't be bound but don't error
+                        // (error should be caught in check_pattern)
                     }
                 }
                 Ok(())
