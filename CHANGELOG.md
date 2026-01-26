@@ -4,6 +4,27 @@ All notable changes to FORMA are documented in this file.
 
 ---
 
+## [1.2.0] - January 26, 2026
+
+### 🚀 Feature Complete Release
+
+FORMA v1.2 completes all planned v1.x features, achieving full async parallelism and LLVM closure support.
+
+**250 Rust tests passing** | All std/*.forma and examples/*.forma verified
+
+#### New in v1.2 (Sprint 16)
+
+| Feature | Description |
+|---------|-------------|
+| **True Async Parallelism** | Tokio runtime integration - `sp` (spawn) now runs truly parallel |
+| **LLVM Indirect Closures** | Fat pointer closures work in compiled code |
+| **Loop Labels** | `'label: for` with `break 'label` and `continue 'label` |
+| **Proper Tuple Iteration** | `EnumeratedInt` struct replaces encoding hack |
+| **Multiline Expressions** | Improved newline handling for chained operators |
+| **Grammar Export** | Complete EBNF with shorthand keywords and indentation rules |
+
+---
+
 ## [1.0.0] - January 26, 2026
 
 ### 🎉 Initial Production Release
@@ -105,7 +126,17 @@ FORMA v1.0 is the first production-ready release of the AI-optimized programming
 
 ## Development Sprints
 
-### Sprint 15 - Tooling Polish (Final)
+### Sprint 16 - v1.1 + v1.2 Features (Complete)
+| Task | Feature |
+|------|---------|
+| 16.1 | True Async with Tokio (Arc<Runtime>, JoinHandle, block_on) |
+| 16.2 | LLVM Indirect Closure Calls (fat pointer {fn_ptr, env_ptr}) |
+| 16.3 | Loop Labels (`'label: for` with break/continue support) |
+| 16.4 | Proper Tuple Iteration (EnumeratedInt struct) |
+| 16.5 | Multiline Expression Improvements (trailing operator handling) |
+| 16.6 | Grammar Export Completeness (shorthand keywords, indentation rules) |
+
+### Sprint 15 - Tooling Polish
 | Task | Feature |
 |------|---------|
 | 15.1 | Multi-error reporting - parser returns `Vec<CompileError>` |
@@ -152,17 +183,17 @@ FORMA v1.0 is the first production-ready release of the AI-optimized programming
 
 See [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) for complete details.
 
-**Remaining (all low priority):**
+**v1.2 Status: All v1.x features complete!**
 
-| Item | Priority | Target |
-|------|----------|--------|
-| True async parallelism | Medium | v1.1 |
-| Indirect closure calls (LLVM) | Medium | v1.1 |
-| Loop labels | Low | v1.2 |
-| Iterator encoding hack | Low | v1.2 |
-| Multiline expression edge cases | Low | v1.2 |
-| Grammar export gaps | Low | v1.2 |
-| Higher-kinded types | Research | v2.0 |
+| Item | Status | Notes |
+|------|--------|-------|
+| True async parallelism | ✅ Fixed | Sprint 16.1 - Tokio integration |
+| Indirect closure calls (LLVM) | ✅ Fixed | Sprint 16.2 - Fat pointer closures |
+| Loop labels | ✅ Fixed | Sprint 16.3 - `'label: for` syntax |
+| Iterator encoding hack | ✅ Fixed | Sprint 16.4 - EnumeratedInt struct |
+| Multiline expression edge cases | ✅ Fixed | Sprint 16.5 - Trailing operator handling |
+| Grammar export gaps | ✅ Fixed | Sprint 16.6 - Complete EBNF |
+| Higher-kinded types | Research | v2.0 (future) |
 
 ---
 

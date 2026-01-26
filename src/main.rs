@@ -455,7 +455,8 @@ fn run(file: &PathBuf, dump_mir: bool, _check_contracts: bool, error_format: Err
     }
 
     // Run the interpreter
-    let mut interp = Interpreter::new(program);
+    let mut interp = Interpreter::new(program)
+        .map_err(|e| format!("Failed to create interpreter: {}", e))?;
     match interp.run("main", &[]) {
         Ok(result) => {
             println!("{}", result);
@@ -2039,7 +2040,13 @@ fn repl_eval_expr(expr: &str, session_code: &str) {
     }
 
     // Run the interpreter (print() inside the code handles output, no need to print return value)
-    let mut interp = Interpreter::new(program);
+    let mut interp = match Interpreter::new(program) {
+        Ok(i) => i,
+        Err(e) => {
+            println!("Failed to create interpreter: {}", e);
+            return;
+        }
+    };
     if let Err(e) = interp.run("__repl_main__", &[]) {
         println!("Runtime error: {}", e);
     }

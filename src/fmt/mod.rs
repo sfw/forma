@@ -278,7 +278,6 @@ impl Formatter {
                 if *is_mut { self.write("mut "); }
                 self.format_type(inner);
             }
-            _ => self.write("?"),
         }
     }
 
@@ -449,7 +448,198 @@ impl Formatter {
                 self.write("sp ");
                 self.format_expr(expr);
             }
-            _ => self.write("?"),
+            ExprKind::TupleField(base, idx) => {
+                self.format_expr(base);
+                self.write(&format!(".{}", idx));
+            }
+            ExprKind::Match(scrutinee, arms) => {
+                self.write("m ");
+                self.format_expr(scrutinee);
+                self.newline();
+                self.indent += 1;
+                for arm in arms {
+                    self.write_indent();
+                    self.format_pattern(&arm.pattern);
+                    self.write(" -> ");
+                    self.format_expr(&arm.body);
+                    self.newline();
+                }
+                self.indent -= 1;
+            }
+            ExprKind::For(_label, pattern, iterable, body) => {
+                self.write("fo ");
+                self.format_pattern(pattern);
+                self.write(" in ");
+                self.format_expr(iterable);
+                self.newline();
+                self.indent += 1;
+                for stmt in &body.stmts {
+                    self.format_stmt(stmt);
+                }
+                self.indent -= 1;
+            }
+            ExprKind::While(_label, cond, body) => {
+                self.write("wh ");
+                self.format_expr(cond);
+                self.newline();
+                self.indent += 1;
+                for stmt in &body.stmts {
+                    self.format_stmt(stmt);
+                }
+                self.indent -= 1;
+            }
+            ExprKind::WhileLet(_label, pattern, expr, body) => {
+                self.write("wh ");
+                self.format_pattern(pattern);
+                self.write(" = ");
+                self.format_expr(expr);
+                self.newline();
+                self.indent += 1;
+                for stmt in &body.stmts {
+                    self.format_stmt(stmt);
+                }
+                self.indent -= 1;
+            }
+            ExprKind::Loop(_label, body) => {
+                self.write("lp");
+                self.newline();
+                self.indent += 1;
+                for stmt in &body.stmts {
+                    self.format_stmt(stmt);
+                }
+                self.indent -= 1;
+            }
+            ExprKind::Block(block) => {
+                self.newline();
+                self.indent += 1;
+                for stmt in &block.stmts {
+                    self.format_stmt(stmt);
+                }
+                self.indent -= 1;
+            }
+            ExprKind::Break(label, value) => {
+                self.write("br");
+                if let Some(l) = label {
+                    self.write(&format!(" '{}", l.name));
+                }
+                if let Some(v) = value {
+                    self.write(" ");
+                    self.format_expr(v);
+                }
+            }
+            ExprKind::Continue(label) => {
+                self.write("ct");
+                if let Some(l) = label {
+                    self.write(&format!(" '{}", l.name));
+                }
+            }
+            ExprKind::Async(block) => {
+                self.write("as");
+                self.newline();
+                self.indent += 1;
+                for stmt in &block.stmts {
+                    self.format_stmt(stmt);
+                }
+                self.indent -= 1;
+            }
+            ExprKind::Coalesce(left, right) => {
+                self.format_expr(left);
+                self.write(" ?? ");
+                self.format_expr(right);
+            }
+            ExprKind::Pipeline(left, right) => {
+                self.format_expr(left);
+                self.write(" | ");
+                self.format_expr(right);
+            }
+            ExprKind::AssignOp(target, op, value) => {
+                self.format_expr(target);
+                self.write(" ");
+                self.format_binop(op);
+                self.write("= ");
+                self.format_expr(value);
+            }
+            ExprKind::Cast(expr, ty) => {
+                self.format_expr(expr);
+                self.write(" as ");
+                self.format_type(ty);
+            }
+            ExprKind::Unsafe(block) => {
+                self.write("unsafe");
+                self.newline();
+                self.indent += 1;
+                for stmt in &block.stmts {
+                    self.format_stmt(stmt);
+                }
+                self.indent -= 1;
+            }
+            ExprKind::ArrayRepeat(elem, count) => {
+                self.write("[");
+                self.format_expr(elem);
+                self.write("; ");
+                self.format_expr(count);
+                self.write("]");
+            }
+            ExprKind::MapOrSet(entries) => {
+                self.write("{");
+                for (i, entry) in entries.iter().enumerate() {
+                    if i > 0 {
+                        self.write(", ");
+                    }
+                    self.format_expr(&entry.key);
+                    if let Some(v) = &entry.value {
+                        self.write(": ");
+                        self.format_expr(v);
+                    }
+                }
+                self.write("}");
+            }
+            ExprKind::Struct(path, fields, base) => {
+                for (i, seg) in path.segments.iter().enumerate() {
+                    if i > 0 {
+                        self.write("::");
+                    }
+                    self.write(&seg.name.name);
+                }
+                self.write("(");
+                for (i, field) in fields.iter().enumerate() {
+                    if i > 0 {
+                        self.write(", ");
+                    }
+                    self.write(&field.name.name);
+                    if let Some(v) = &field.value {
+                        self.write(": ");
+                        self.format_expr(v);
+                    }
+                }
+                if let Some(b) = base {
+                    if !fields.is_empty() {
+                        self.write(", ");
+                    }
+                    self.write("..");
+                    self.format_expr(b);
+                }
+                self.write(")");
+            }
+            ExprKind::FieldShorthand(field) => {
+                self.write(".");
+                self.write(&field.name);
+            }
+            ExprKind::OpShorthand(op, operand, is_left) => {
+                self.write("(");
+                if *is_left {
+                    self.format_expr(operand);
+                    self.write(" ");
+                    self.format_binop(op);
+                    self.write(" _");
+                } else {
+                    self.write("_ ");
+                    self.format_binop(op);
+                    self.write(" ");
+                    self.format_expr(operand);
+                }
+                self.write(")");
+            }
         }
     }
 

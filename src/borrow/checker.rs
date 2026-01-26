@@ -515,7 +515,7 @@ impl BorrowChecker {
                 }
             }
 
-            ExprKind::For(pattern, iter, body) => {
+            ExprKind::For(_label, pattern, iter, body) => {
                 self.check_expr(iter);
                 self.push_scope();
                 self.bind_pattern_for_match(pattern);
@@ -523,12 +523,12 @@ impl BorrowChecker {
                 self.pop_scope();
             }
 
-            ExprKind::While(cond, body) => {
+            ExprKind::While(_label, cond, body) => {
                 self.check_expr(cond);
                 self.check_block(body);
             }
 
-            ExprKind::WhileLet(pattern, expr, body) => {
+            ExprKind::WhileLet(_label, pattern, expr, body) => {
                 self.check_expr(expr);
                 self.push_scope();
                 self.bind_pattern_for_match(pattern);
@@ -536,7 +536,7 @@ impl BorrowChecker {
                 self.pop_scope();
             }
 
-            ExprKind::Loop(body) => {
+            ExprKind::Loop(_label, body) => {
                 self.check_block(body);
             }
 

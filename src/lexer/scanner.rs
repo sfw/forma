@@ -307,7 +307,7 @@ impl<'a> Scanner<'a> {
             return None;
         }
 
-        let current_indent = *self.indent_stack.last().unwrap();
+        let current_indent = self.indent_stack.last().copied().unwrap_or(0);
 
         if indent > current_indent {
             self.indent_stack.push(indent);
@@ -315,7 +315,7 @@ impl<'a> Scanner<'a> {
         } else if indent < current_indent {
             // Pop indent levels and count dedents
             while self.indent_stack.len() > 1 {
-                let top = *self.indent_stack.last().unwrap();
+                let top = self.indent_stack.last().copied().unwrap_or(0);
                 if indent >= top {
                     break;
                 }
@@ -820,14 +820,20 @@ impl<'a> Scanner<'a> {
                                     self.advance();
                                     break;
                                 }
-                                expr.push(self.advance().unwrap());
+                                if let Some(c) = self.advance() {
+                                    expr.push(c);
+                                }
                             }
                             Some('{') => {
                                 brace_depth += 1;
-                                expr.push(self.advance().unwrap());
+                                if let Some(c) = self.advance() {
+                                    expr.push(c);
+                                }
                             }
                             Some(_) => {
-                                expr.push(self.advance().unwrap());
+                                if let Some(c) = self.advance() {
+                                    expr.push(c);
+                                }
                             }
                         }
                     }

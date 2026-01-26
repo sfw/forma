@@ -785,16 +785,16 @@ impl Lowerer {
                 self.lower_match(scrutinee, arms, expr.span)
             }
 
-            ExprKind::For(pattern, iter, body) => {
-                self.lower_for(pattern, iter, body, expr.span)
+            ExprKind::For(label, pattern, iter, body) => {
+                self.lower_for(label.as_ref().map(|l| l.name.clone()), pattern, iter, body, expr.span)
             }
 
-            ExprKind::While(cond, body) => {
-                self.lower_while(cond, body, expr.span)
+            ExprKind::While(label, cond, body) => {
+                self.lower_while(label.as_ref().map(|l| l.name.clone()), cond, body, expr.span)
             }
 
-            ExprKind::Loop(body) => {
-                self.lower_loop(body, expr.span)
+            ExprKind::Loop(label, body) => {
+                self.lower_loop(label.as_ref().map(|l| l.name.clone()), body, expr.span)
             }
 
             ExprKind::Block(block) => {
@@ -1827,6 +1827,7 @@ impl Lowerer {
 
     fn lower_for(
         &mut self,
+        label: Option<String>,
         pattern: &Pattern,
         iter: &Expr,
         body: &AstBlock,
@@ -1838,7 +1839,7 @@ impl Lowerer {
 
         // Check if this is a range iteration
         if let ExprKind::Range(start_opt, end_opt, inclusive) = &iter.kind {
-            return self.lower_for_range(pattern, start_opt, end_opt, *inclusive, body);
+            return self.lower_for_range(label.clone(), pattern, start_opt, end_opt, *inclusive, body);
         }
 
         // Check if this is an enumerate call: `arr.enumerate()`
@@ -1878,7 +1879,7 @@ impl Lowerer {
 
         // Push loop context (continue goes to increment, break goes to exit)
         self.loop_stack.push(LoopContext {
-            label: None,
+            label,
             continue_block: incr_block,
             break_block: exit_block,
             result_local: None,
@@ -1966,6 +1967,7 @@ impl Lowerer {
     /// Lower a for loop with range iteration: `for i in 0..10` or `for i in start..=end`
     fn lower_for_range(
         &mut self,
+        label: Option<String>,
         pattern: &Pattern,
         start_opt: &Option<Box<Expr>>,
         end_opt: &Option<Box<Expr>>,
@@ -2003,7 +2005,7 @@ impl Lowerer {
 
         // Push loop context (continue goes to increment, break goes to exit)
         self.loop_stack.push(LoopContext {
-            label: None,
+            label,
             continue_block: incr_block,
             break_block: exit_block,
             result_local: None,
@@ -2059,6 +2061,7 @@ impl Lowerer {
 
     fn lower_while(
         &mut self,
+        label: Option<String>,
         cond: &Expr,
         body: &AstBlock,
         _span: Span,
@@ -2069,7 +2072,7 @@ impl Lowerer {
 
         // Push loop context
         self.loop_stack.push(LoopContext {
-            label: None,
+            label,
             continue_block: cond_block,
             break_block: exit_block,
             result_local: None,
@@ -2103,14 +2106,14 @@ impl Lowerer {
         None
     }
 
-    fn lower_loop(&mut self, body: &AstBlock, _span: Span) -> Option<Operand> {
+    fn lower_loop(&mut self, label: Option<String>, body: &AstBlock, _span: Span) -> Option<Operand> {
         let body_block = self.new_block();
         let exit_block = self.new_block();
         let result = self.new_temp(Ty::Int);
 
         // Push loop context
         self.loop_stack.push(LoopContext {
-            label: None,
+            label,
             continue_block: body_block,
             break_block: exit_block,
             result_local: Some(result),

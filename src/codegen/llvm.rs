@@ -27,9 +27,9 @@ use inkwell::targets::{
 };
 use inkwell::types::{BasicMetadataTypeEnum, BasicTypeEnum};
 use inkwell::values::BasicMetadataValueEnum;
-use inkwell::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue};
+use inkwell::values::{BasicValueEnum, FloatValue, FunctionValue, IntValue, PointerValue, StructValue};
 use inkwell::OptimizationLevel;
-use inkwell::{AddressSpace, IntPredicate};
+use inkwell::{AddressSpace, FloatPredicate, IntPredicate};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -99,6 +99,38 @@ impl<'ctx> LLVMCodegen<'ctx> {
             2 => OptimizationLevel::Default,
             _ => OptimizationLevel::Aggressive,
         };
+    }
+
+    /// Safely convert a BasicValueEnum to IntValue.
+    fn as_int_value(&self, val: BasicValueEnum<'ctx>) -> Result<IntValue<'ctx>, CodegenError> {
+        match val {
+            BasicValueEnum::IntValue(i) => Ok(i),
+            _ => Err(CodegenError { message: format!("Expected integer, got {:?}", val.get_type()) }),
+        }
+    }
+
+    /// Safely convert a BasicValueEnum to FloatValue.
+    fn as_float_value(&self, val: BasicValueEnum<'ctx>) -> Result<FloatValue<'ctx>, CodegenError> {
+        match val {
+            BasicValueEnum::FloatValue(f) => Ok(f),
+            _ => Err(CodegenError { message: format!("Expected float, got {:?}", val.get_type()) }),
+        }
+    }
+
+    /// Safely convert a BasicValueEnum to StructValue.
+    fn as_struct_value(&self, val: BasicValueEnum<'ctx>) -> Result<StructValue<'ctx>, CodegenError> {
+        match val {
+            BasicValueEnum::StructValue(s) => Ok(s),
+            _ => Err(CodegenError { message: format!("Expected struct, got {:?}", val.get_type()) }),
+        }
+    }
+
+    /// Safely convert a BasicValueEnum to PointerValue.
+    fn as_pointer_value(&self, val: BasicValueEnum<'ctx>) -> Result<PointerValue<'ctx>, CodegenError> {
+        match val {
+            BasicValueEnum::PointerValue(p) => Ok(p),
+            _ => Err(CodegenError { message: format!("Expected pointer, got {:?}", val.get_type()) }),
+        }
     }
 
     /// Compile a MIR program to LLVM IR.
@@ -330,8 +362,40 @@ impl<'ctx> LLVMCodegen<'ctx> {
         lhs: BasicValueEnum<'ctx>,
         rhs: BasicValueEnum<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>, CodegenError> {
-        let lhs_int = lhs.into_int_value();
-        let rhs_int = rhs.into_int_value();
+        // Check if operands are floats
+        if lhs.is_float_value() && rhs.is_float_value() {
+            let lhs_float = self.as_float_value(lhs)?;
+            let rhs_float = self.as_float_value(rhs)?;
+            return match op {
+                BinOp::Add => Ok(self.builder.build_float_add(lhs_float, rhs_float, "fadd")
+                    .map_err(|e| CodegenError { message: format!("fadd failed: {:?}", e) })?.into()),
+                BinOp::Sub => Ok(self.builder.build_float_sub(lhs_float, rhs_float, "fsub")
+                    .map_err(|e| CodegenError { message: format!("fsub failed: {:?}", e) })?.into()),
+                BinOp::Mul => Ok(self.builder.build_float_mul(lhs_float, rhs_float, "fmul")
+                    .map_err(|e| CodegenError { message: format!("fmul failed: {:?}", e) })?.into()),
+                BinOp::Div => Ok(self.builder.build_float_div(lhs_float, rhs_float, "fdiv")
+                    .map_err(|e| CodegenError { message: format!("fdiv failed: {:?}", e) })?.into()),
+                BinOp::Rem => Ok(self.builder.build_float_rem(lhs_float, rhs_float, "frem")
+                    .map_err(|e| CodegenError { message: format!("frem failed: {:?}", e) })?.into()),
+                BinOp::Eq => Ok(self.builder.build_float_compare(FloatPredicate::OEQ, lhs_float, rhs_float, "feq")
+                    .map_err(|e| CodegenError { message: format!("feq failed: {:?}", e) })?.into()),
+                BinOp::Ne => Ok(self.builder.build_float_compare(FloatPredicate::ONE, lhs_float, rhs_float, "fne")
+                    .map_err(|e| CodegenError { message: format!("fne failed: {:?}", e) })?.into()),
+                BinOp::Lt => Ok(self.builder.build_float_compare(FloatPredicate::OLT, lhs_float, rhs_float, "flt")
+                    .map_err(|e| CodegenError { message: format!("flt failed: {:?}", e) })?.into()),
+                BinOp::Le => Ok(self.builder.build_float_compare(FloatPredicate::OLE, lhs_float, rhs_float, "fle")
+                    .map_err(|e| CodegenError { message: format!("fle failed: {:?}", e) })?.into()),
+                BinOp::Gt => Ok(self.builder.build_float_compare(FloatPredicate::OGT, lhs_float, rhs_float, "fgt")
+                    .map_err(|e| CodegenError { message: format!("fgt failed: {:?}", e) })?.into()),
+                BinOp::Ge => Ok(self.builder.build_float_compare(FloatPredicate::OGE, lhs_float, rhs_float, "fge")
+                    .map_err(|e| CodegenError { message: format!("fge failed: {:?}", e) })?.into()),
+                _ => Err(CodegenError { message: format!("Float operation not supported: {:?}", op) }),
+            };
+        }
+
+        // Integer operations (using safe helper)
+        let lhs_int = self.as_int_value(lhs)?;
+        let rhs_int = self.as_int_value(rhs)?;
 
         let result: IntValue = match op {
             BinOp::Add => self.builder.build_int_add(lhs_int, rhs_int, "add")
@@ -360,6 +424,17 @@ impl<'ctx> LLVMCodegen<'ctx> {
                 .map_err(|e| CodegenError { message: format!("and failed: {:?}", e) })?,
             BinOp::Or => self.builder.build_or(lhs_int, rhs_int, "or")
                 .map_err(|e| CodegenError { message: format!("or failed: {:?}", e) })?,
+            // Bitwise operations
+            BinOp::BitAnd => self.builder.build_and(lhs_int, rhs_int, "bitand")
+                .map_err(|e| CodegenError { message: format!("bitand failed: {:?}", e) })?,
+            BinOp::BitOr => self.builder.build_or(lhs_int, rhs_int, "bitor")
+                .map_err(|e| CodegenError { message: format!("bitor failed: {:?}", e) })?,
+            BinOp::BitXor => self.builder.build_xor(lhs_int, rhs_int, "bitxor")
+                .map_err(|e| CodegenError { message: format!("bitxor failed: {:?}", e) })?,
+            BinOp::Shl => self.builder.build_left_shift(lhs_int, rhs_int, "shl")
+                .map_err(|e| CodegenError { message: format!("shl failed: {:?}", e) })?,
+            BinOp::Shr => self.builder.build_right_shift(lhs_int, rhs_int, false, "shr")
+                .map_err(|e| CodegenError { message: format!("shr failed: {:?}", e) })?,
             _ => {
                 return Err(CodegenError {
                     message: format!("Unsupported binary operator: {:?}", op),
@@ -376,7 +451,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
         op: UnOp,
         val: BasicValueEnum<'ctx>,
     ) -> Result<BasicValueEnum<'ctx>, CodegenError> {
-        let int_val = val.into_int_value();
+        let int_val = self.as_int_value(val)?;
         let result = match op {
             UnOp::Neg => {
                 self.builder.build_int_neg(int_val, "neg")
@@ -422,14 +497,15 @@ impl<'ctx> LLVMCodegen<'ctx> {
         });
 
         // Calculate size and allocate
-        let env_size = env_struct_type.size_of().unwrap();
-        let env_ptr_i8 = self.builder
+        let env_size = env_struct_type.size_of()
+            .ok_or_else(|| CodegenError { message: "Cannot get size of unsized closure environment".to_string() })?;
+        let malloc_result = self.builder
             .build_call(malloc_fn, &[env_size.into()], "env_alloc")
             .map_err(|e| CodegenError { message: format!("malloc call failed: {:?}", e) })?
             .try_as_basic_value()
             .left()
-            .ok_or_else(|| CodegenError { message: "malloc returned void".into() })?
-            .into_pointer_value();
+            .ok_or_else(|| CodegenError { message: "malloc returned void".into() })?;
+        let env_ptr_i8 = self.as_pointer_value(malloc_result)?;
 
         // 4. Cast to environment struct pointer
         let env_struct_ptr = self.builder
@@ -486,7 +562,11 @@ impl<'ctx> LLVMCodegen<'ctx> {
             .build_insert_value(closure_with_fn, env_ptr_i8_final, 1, "closure_env")
             .map_err(|e| CodegenError { message: format!("insert env failed: {:?}", e) })?;
 
-        Ok(closure_complete.into_struct_value().into())
+        // closure_complete is an AggregateValueEnum, convert safely
+        match closure_complete {
+            inkwell::values::AggregateValueEnum::StructValue(sv) => Ok(sv.into()),
+            _ => Err(CodegenError { message: "Expected struct value for closure".to_string() }),
+        }
     }
 
     /// Coerce a value to match a target type (e.g., i1 to i64 for comparisons stored in Int).
@@ -689,17 +769,17 @@ impl<'ctx> LLVMCodegen<'ctx> {
 
                 // 1. Compile the closure operand (should be a fat pointer struct)
                 let closure_val = self.compile_operand(callee)?;
-                let closure_struct = closure_val.into_struct_value();
+                let closure_struct = self.as_struct_value(closure_val)?;
 
                 // 2. Extract function pointer and environment pointer
-                let fn_ptr_i8 = self.builder
+                let fn_ptr_raw = self.builder
                     .build_extract_value(closure_struct, 0, "fn_ptr_raw")
-                    .map_err(|e| CodegenError { message: format!("extract fn_ptr failed: {:?}", e) })?
-                    .into_pointer_value();
-                let env_ptr = self.builder
+                    .map_err(|e| CodegenError { message: format!("extract fn_ptr failed: {:?}", e) })?;
+                let fn_ptr_i8 = self.as_pointer_value(fn_ptr_raw.into())?;
+                let env_ptr_raw = self.builder
                     .build_extract_value(closure_struct, 1, "env_ptr")
-                    .map_err(|e| CodegenError { message: format!("extract env_ptr failed: {:?}", e) })?
-                    .into_pointer_value();
+                    .map_err(|e| CodegenError { message: format!("extract env_ptr failed: {:?}", e) })?;
+                let env_ptr = self.as_pointer_value(env_ptr_raw.into())?;
 
                 // 3. Compile arguments (environment pointer is implicit first arg)
                 let mut compiled_args: Vec<BasicMetadataValueEnum> = vec![env_ptr.into()];

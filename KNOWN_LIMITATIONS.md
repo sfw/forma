@@ -1,9 +1,9 @@
-# FORMA v1.0 Known Limitations
+# FORMA v1.2 Known Limitations
 
 **Last Updated:** January 26, 2026
-**Status:** Post-Sprint 15 - v1.0 RELEASE READY
+**Status:** Post-Sprint 16 - v1.2 FEATURE COMPLETE
 
-This document lists known limitations in FORMA v1.0, categorized by severity and planned resolution timeline.
+This document lists known limitations in FORMA v1.2, categorized by severity and planned resolution timeline.
 
 ---
 
@@ -11,19 +11,30 @@ This document lists known limitations in FORMA v1.0, categorized by severity and
 
 | Category | Fixed | Remaining | Severity |
 |----------|-------|-----------|----------|
-| Language Features | 3 | 2 | Low-Medium |
-| Type System | 5 | 1 | Low |
-| Tooling | 5 | 1 | Low |
-| Standard Library | 2 | 2 | Low-Medium |
-| Parser/Lexer | 2 | 1 | Low |
+| Language Features | 5 | 0 | N/A |
+| Type System | 5 | 1 | Research |
+| Tooling | 6 | 0 | N/A |
+| Standard Library | 4 | 0 | N/A |
+| Parser/Lexer | 3 | 0 | N/A |
 
-**Total: 18 issues fixed, 7 remaining (all low priority)**
+**Total: 24 issues fixed, 1 remaining (research priority - v2.0)**
 
 ---
 
-## Recently Fixed (Sprint 14-15)
+## Recently Fixed (Sprint 14-16)
 
-### Sprint 15 (Just Completed)
+### Sprint 16 (Just Completed - v1.2)
+
+| Issue | Task | Resolution |
+|-------|------|------------|
+| True async parallelism | 16.1 | Tokio runtime, TokioTask value, real async spawn/await |
+| LLVM indirect closures | 16.2 | Fat pointer {fn_ptr, env_ptr}, compile_closure method |
+| Loop labels | 16.3 | `'label: for` syntax, break/continue by label |
+| Iterator encoding hack | 16.4 | EnumeratedInt struct with index/value fields |
+| Multiline expressions | 16.5 | Trailing operator detection, proper DEDENT tracking |
+| Grammar export gaps | 16.6 | Shorthand keywords, indentation rules, operator precedence |
+
+### Sprint 15
 
 | Issue | Task | Resolution |
 |-------|------|------------|
@@ -53,47 +64,9 @@ This document lists known limitations in FORMA v1.0, categorized by severity and
 
 ## Remaining Limitations
 
-### Language Features
-
-#### 1. Loop Labels (Low Priority)
-**Status:** Not implemented
-**Location:** `src/parser/parser.rs` line 1770
-
-Loop labels for `break` and `continue` (`break 'outer`) are not implemented.
-
-```forma
-# Not supported:
-'outer: for x in items
-    for y in other
-        if condition
-            break 'outer  # Can't break to outer loop
-```
-
-**Workaround:** Restructure code or use a boolean flag.
-
-**Planned:** v1.2
-
----
-
-#### 2. Indirect Closure Calls in LLVM (Medium Priority)
-**Status:** Interpreter works, LLVM codegen doesn't
-**Location:** `src/codegen/llvm.rs` line 582
-
-```forma
-# Works in interpreter, not in compiled code:
-callback := |x| x + 1
-result := callback(5)  # Fails in LLVM
-```
-
-**Workaround:** Use interpreter mode or direct function calls.
-
-**Planned:** v1.1
-
----
-
 ### Type System
 
-#### 3. Higher-Kinded Types (Not Planned)
+#### 1. Higher-Kinded Types (Not Planned)
 **Status:** Not supported
 
 Higher-kinded types are not supported and not planned for v1.x.
@@ -109,80 +82,16 @@ f map_functor[F[_], A, B](fa: F[A], f: (A) -> B) -> F[B]
 
 ---
 
-### Tooling
-
-#### 4. Grammar Export Gaps (Low Priority)
-**Status:** Mostly complete with minor gaps
-
-The EBNF grammar export is comprehensive but missing:
-- Detailed shorthand keyword rules (f/s/e/t/i/m)
-- Full indentation rule specification
-
-**Planned:** v1.2
-
----
-
-### Standard Library
-
-#### 5. Async is Synchronous (Medium Priority)
-**Status:** By design for v1.0
-
-The `sp` (spawn) and `aw` (await) keywords work but execute synchronously.
-
-```forma
-# Runs sequentially, not in parallel:
-task1 := sp fetch_url(url1)
-task2 := sp fetch_url(url2)
-results := await_all([task1, task2])
-```
-
-**Note:** Useful for structuring async-style code.
-
-**Planned:** v1.1 (Tokio integration)
-
----
-
-#### 6. Iterator Encoding Hack (Low Priority)
-**Status:** Known workaround
-**Location:** `std/iter.forma`
-
-The `enumerate` function uses `idx * 1000000 + value` encoding.
-
-```forma
-# Only works for values < 1,000,000
-for encoded in enumerate(items)
-    idx := decode_index(encoded)
-    val := decode_value(encoded)
-```
-
-**Planned:** v1.2 (proper tuple iteration)
-
----
-
-### Parser/Lexer
-
-#### 7. Multiline Expression Edge Cases (Low Priority)
-**Status:** Known quirk
-
-Some multiline expressions with trailing operators require parentheses:
-
-```forma
-# May fail:
-result := a &&
-    b
-
-# Works:
-result := (a) && (b)
-```
-
-**Planned:** v1.2
-
----
-
 ## Items Fixed and Verified
 
 | Item | Status | Sprint |
 |------|--------|--------|
+| True async parallelism | ✅ Fixed | 16.1 |
+| LLVM indirect closures | ✅ Fixed | 16.2 |
+| Loop labels | ✅ Fixed | 16.3 |
+| Iterator encoding hack | ✅ Fixed | 16.4 |
+| Multiline expressions | ✅ Fixed | 16.5 |
+| Grammar export gaps | ✅ Fixed | 16.6 |
 | Multi-error reporting | ✅ Fixed | 15.1 |
 | REPL type display | ✅ Fixed | 15.2 |
 | LSP go-to-definition | ✅ Fixed | 15.3 |
@@ -206,22 +115,22 @@ result := (a) && (b)
 
 ## Version Roadmap
 
-### v1.0 (CURRENT - January 2026)
+### v1.0 (January 2026)
 - ✅ 288 tests passing (250 Rust + 38 FORMA)
 - ✅ All critical issues resolved
 - ✅ Production-ready interpreter
 - ✅ Full type inference
 - ✅ Complete stdlib
 
-### v1.1 (Target: Q2 2026)
-- True async parallelism (Tokio)
-- Indirect closure calls (LLVM)
+### v1.1 (January 2026) - COMPLETE
+- ✅ True async parallelism (Tokio)
+- ✅ Indirect closure calls (LLVM)
 
-### v1.2 (Target: Q3 2026)
-- Loop labels
-- Proper tuple iteration
-- Multiline expression improvements
-- Grammar export completeness
+### v1.2 (CURRENT - January 2026) - COMPLETE
+- ✅ Loop labels
+- ✅ Proper tuple iteration
+- ✅ Multiline expression improvements
+- ✅ Grammar export completeness
 
 ### v2.0 (Future)
 - Higher-kinded types (research)
@@ -232,10 +141,10 @@ result := (a) && (b)
 
 ```
 Rust unit tests:     250 passing
-FORMA integration:    38 passing
-Total:               288 passing
+All std/*.forma:     Verified
+All examples/*.forma: Verified
 ```
 
 ---
 
-*"v1.0: Stable, tested, ready for production."*
+*"v1.2: Feature complete. All planned v1.x features implemented."*

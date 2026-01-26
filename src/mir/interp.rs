@@ -337,13 +337,13 @@ pub struct Interpreter {
 }
 
 impl Interpreter {
-    pub fn new(program: Program) -> Self {
+    pub fn new(program: Program) -> Result<Self, InterpError> {
         let runtime = Arc::new(
             tokio::runtime::Runtime::new()
-                .expect("failed to create Tokio runtime")
+                .map_err(|e| InterpError { message: format!("Failed to create Tokio runtime: {}", e) })?
         );
 
-        Self {
+        Ok(Self {
             program,
             call_stack: Vec::new(),
             max_steps: 1_000_000,
@@ -368,7 +368,7 @@ impl Interpreter {
             runtime,
             spawned_tasks: Arc::new(StdMutex::new(std::collections::HashMap::new())),
             next_task_id: 0,
-        }
+        })
     }
 
     /// Set the maximum number of steps to prevent infinite loops.
@@ -970,7 +970,8 @@ impl Interpreter {
 
                     // Store the handle
                     {
-                        let mut tasks = spawned_tasks.lock().unwrap();
+                        let mut tasks = spawned_tasks.lock()
+                            .map_err(|_| InterpError { message: "Task registry mutex poisoned".to_string() })?;
                         tasks.insert(task_id, handle);
                     }
 
@@ -989,7 +990,8 @@ impl Interpreter {
                         Value::TokioTask(task_id) => {
                             // Get and remove the task handle
                             let handle = {
-                                let mut tasks = self.spawned_tasks.lock().unwrap();
+                                let mut tasks = self.spawned_tasks.lock()
+                                    .map_err(|_| InterpError { message: "Task registry mutex poisoned".to_string() })?;
                                 tasks.remove(&task_id)
                             };
 
@@ -2382,7 +2384,8 @@ impl Interpreter {
 
                 // Store handle
                 {
-                    let mut tasks = self.spawned_tasks.lock().unwrap();
+                    let mut tasks = self.spawned_tasks.lock()
+                        .map_err(|_| InterpError { message: "Task registry mutex poisoned".to_string() })?;
                     tasks.insert(task_id, handle);
                 }
 
@@ -2426,7 +2429,8 @@ impl Interpreter {
 
                 // Get all handles
                 let handles: Vec<_> = {
-                    let mut task_map = self.spawned_tasks.lock().unwrap();
+                    let mut task_map = self.spawned_tasks.lock()
+                        .map_err(|_| InterpError { message: "Task registry mutex poisoned".to_string() })?;
                     task_ids.iter().filter_map(|id| task_map.remove(id)).collect()
                 };
 
@@ -5332,7 +5336,7 @@ impl Interpreter {
             "log_debug" => {
                 // log_debug(msg: Str) -> ()
                 let msg = match &args[0] { Value::Str(s) => s.clone(), _ => format!("{}", args[0]) };
-                if self.log_level <= 0 {
+                if self.log_level == 0 {
                     if self.log_format == "json" {
                         eprintln!(r#"{{"level":"debug","message":"{}"}}"#, msg.replace('"', "\\\""));
                     } else {
@@ -5511,8 +5515,10 @@ impl Interpreter {
                 let data = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "gzip_compress: expected Str".to_string() }) };
 
                 let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-                encoder.write_all(data.as_bytes()).unwrap();
-                let compressed = encoder.finish().unwrap();
+                encoder.write_all(data.as_bytes())
+                    .map_err(|e| InterpError { message: format!("gzip compression failed: {}", e) })?;
+                let compressed = encoder.finish()
+                    .map_err(|e| InterpError { message: format!("gzip finalization failed: {}", e) })?;
 
                 let result: Vec<Value> = compressed.into_iter().map(|b| Value::Int(b as i64)).collect();
                 Ok(Some(Value::Array(result)))
@@ -5549,8 +5555,10 @@ impl Interpreter {
                 let data = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "zlib_compress: expected Str".to_string() }) };
 
                 let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
-                encoder.write_all(data.as_bytes()).unwrap();
-                let compressed = encoder.finish().unwrap();
+                encoder.write_all(data.as_bytes())
+                    .map_err(|e| InterpError { message: format!("zlib compression failed: {}", e) })?;
+                let compressed = encoder.finish()
+                    .map_err(|e| InterpError { message: format!("zlib finalization failed: {}", e) })?;
 
                 let result: Vec<Value> = compressed.into_iter().map(|b| Value::Int(b as i64)).collect();
                 Ok(Some(Value::Array(result)))
@@ -5786,7 +5794,8 @@ impl Interpreter {
                 }
 
                 // Validate the SQL syntax by preparing it
-                let conn = self.databases.get(&db_id).unwrap();
+                let conn = self.databases.get(&db_id)
+                    .ok_or_else(|| InterpError { message: format!("Invalid database handle: {}", db_id) })?;
                 match conn.prepare(&sql) {
                     Ok(_) => {
                         // Store the prepared statement info
@@ -6433,7 +6442,8 @@ mod tests {
             .lower(&ast)
             .map_err(|e| format!("lower error: {:?}", e))?;
 
-        let mut interp = Interpreter::new(program);
+        let mut interp = Interpreter::new(program)
+            .map_err(|e| format!("interpreter init error: {}", e))?;
         interp
             .run("main", &[])
             .map_err(|e| format!("runtime error: {}", e))

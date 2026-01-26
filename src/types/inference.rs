@@ -2890,7 +2890,7 @@ impl InferenceEngine {
 
         // A placeholder type variable for generic element types
         // At call time, we'll substitute this with the actual element type
-        let t_var = Ty::Var(TypeVar { id: 99999 }); // Sentinel value for "element type"
+        let t_var = Ty::fresh_var();  // Use proper fresh var generator
 
         // ===== Vec/List methods =====
         // len: [T] -> Int
@@ -3024,8 +3024,8 @@ impl InferenceEngine {
         });
 
         // ===== Map methods =====
-        let k_var = Ty::Var(TypeVar { id: 99998 }); // Key type
-        let v_var = Ty::Var(TypeVar { id: 99997 }); // Value type
+        let k_var = Ty::fresh_var();  // Key type
+        let v_var = Ty::fresh_var();  // Value type
 
         // len: Map[K,V] -> Int
         self.builtin_methods.insert(mk("Map", "len"), MethodSignature {
@@ -3277,9 +3277,10 @@ impl InferenceEngine {
                 if let Some(resolved) = self.unifier.subst.get(*tv) {
                     self.lookup_field(resolved, field_name, span)
                 } else {
-                    // Can't determine type yet - return fresh var and hope for later resolution
-                    // This is a fallback for complex inference cases
-                    Ok(Ty::fresh_var())
+                    Err(TypeError::new(
+                        format!("Cannot access field '{}' on unresolved type", field_name),
+                        span,
+                    ))
                 }
             }
 
@@ -4047,13 +4048,21 @@ impl InferenceEngine {
 
             ExprKind::TupleField(base, index) => {
                 let base_ty = self.infer_expr(base)?;
+                let resolved = base_ty.apply(&self.unifier.subst);
                 // For tuple indexing, we need the tuple type
-                if let Ty::Tuple(elems) = base_ty.apply(&self.unifier.subst) {
+                if let Ty::Tuple(elems) = &resolved {
                     if *index < elems.len() {
                         return Ok(elems[*index].clone());
                     }
+                    return Err(TypeError::new(
+                        format!("Tuple index {} out of bounds (tuple has {} elements)", index, elems.len()),
+                        expr.span,
+                    ));
                 }
-                Ok(Ty::fresh_var())
+                Err(TypeError::new(
+                    format!("Cannot index non-tuple type {:?} with .{}", resolved, index),
+                    expr.span,
+                ))
             }
 
             ExprKind::Index(base, index) => {
@@ -4239,7 +4248,7 @@ impl InferenceEngine {
 
             ExprKind::Continue(_) => Ok(Ty::Never),
 
-            ExprKind::For(pattern, iter, body) => {
+            ExprKind::For(_label, pattern, iter, body) => {
                 let iter_ty = self.infer_expr(iter)?;
 
                 // For loops can iterate over:
@@ -4270,14 +4279,14 @@ impl InferenceEngine {
                 Ok(Ty::Unit)
             }
 
-            ExprKind::While(cond, body) => {
+            ExprKind::While(_label, cond, body) => {
                 let cond_ty = self.infer_expr(cond)?;
                 self.unifier.unify(&cond_ty, &Ty::Bool, expr.span)?;
                 self.infer_block(body)?;
                 Ok(Ty::Unit)
             }
 
-            ExprKind::WhileLet(pattern, expr_val, body) => {
+            ExprKind::WhileLet(_label, pattern, expr_val, body) => {
                 let expr_ty = self.infer_expr(expr_val)?;
                 self.check_pattern(pattern, &expr_ty)?;
 
@@ -4291,7 +4300,7 @@ impl InferenceEngine {
                 Ok(Ty::Unit)
             }
 
-            ExprKind::Loop(body) => {
+            ExprKind::Loop(_label, body) => {
                 self.infer_block(body)?;
                 Ok(Ty::Never)
             }
@@ -4351,7 +4360,10 @@ impl InferenceEngine {
                 if let Some(scheme) = self.env.get(&name) {
                     Ok(scheme.instantiate())
                 } else {
-                    Ok(Ty::fresh_var())
+                    Err(TypeError::new(
+                        format!("Undefined name '{}'", name),
+                        expr.span,
+                    ))
                 }
             }
 
@@ -4432,8 +4444,10 @@ impl InferenceEngine {
                 } else if self.unifier.unify(&inner_ty, &future_ty, expr.span).is_ok() {
                     Ok(result_ty)
                 } else {
-                    // Fall back to fresh var for backwards compatibility
-                    Ok(Ty::fresh_var())
+                    Err(TypeError::new(
+                        format!("Cannot await non-async type {:?}", inner_ty.apply(&self.unifier.subst)),
+                        expr.span,
+                    ))
                 }
             }
 
@@ -4472,9 +4486,22 @@ impl InferenceEngine {
                 self.infer_block(block)
             }
 
-            ExprKind::FieldShorthand(_) | ExprKind::OpShorthand(_, _, _) => {
-                // These are closure-like constructs
-                Ok(Ty::fresh_var())
+            ExprKind::FieldShorthand(_field) => {
+                // Field shorthand like .field is a closure taking one argument
+                let arg_ty = Ty::fresh_var();
+                let result_ty = Ty::fresh_var();
+                // The argument type should have the field
+                // Return a function type
+                Ok(Ty::Fn(vec![arg_ty], Box::new(result_ty)))
+            }
+
+            ExprKind::OpShorthand(_op, operand, _is_left) => {
+                // Op shorthand like (+ 1) or (* _) is a closure
+                let arg_ty = Ty::fresh_var();
+                let result_ty = Ty::fresh_var();
+                // Infer the fixed operand type
+                self.infer_expr(operand)?;
+                Ok(Ty::Fn(vec![arg_ty], Box::new(result_ty)))
             }
         }
     }

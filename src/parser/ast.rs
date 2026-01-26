@@ -399,14 +399,14 @@ pub enum ExprKind {
     If(Box<IfExpr>),
     /// Match expression
     Match(Box<Expr>, Vec<MatchArm>),
-    /// For loop
-    For(Pattern, Box<Expr>, Block),
-    /// While loop
-    While(Box<Expr>, Block),
+    /// For loop with optional label: `'label: fo x in iter`
+    For(Option<Ident>, Pattern, Box<Expr>, Block),
+    /// While loop with optional label: `'label: wh cond`
+    While(Option<Ident>, Box<Expr>, Block),
     /// While-let: `wh Some(x) = iter.next`
-    WhileLet(Pattern, Box<Expr>, Block),
-    /// Infinite loop
-    Loop(Block),
+    WhileLet(Option<Ident>, Pattern, Box<Expr>, Block),
+    /// Infinite loop with optional label: `'label: lp`
+    Loop(Option<Ident>, Block),
     /// Block expression
     Block(Block),
     /// Closure: `|x, y| x + y`

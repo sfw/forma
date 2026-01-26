@@ -2417,7 +2417,7 @@ impl<'a> Parser<'a> {
         let block = self.parse_block()?;
 
         Ok(Expr {
-            kind: ExprKind::For(pattern, Box::new(iter), block),
+            kind: ExprKind::For(None, pattern, Box::new(iter), block),
             span: start.merge(self.previous_span()),
         })
     }
@@ -2432,7 +2432,7 @@ impl<'a> Parser<'a> {
         let block = self.parse_block()?;
 
         Ok(Expr {
-            kind: ExprKind::While(Box::new(condition), block),
+            kind: ExprKind::While(None, Box::new(condition), block),
             span: start.merge(self.previous_span()),
         })
     }
@@ -2443,7 +2443,7 @@ impl<'a> Parser<'a> {
         let block = self.parse_block()?;
 
         Ok(Expr {
-            kind: ExprKind::Loop(block),
+            kind: ExprKind::Loop(None, block),
             span: start.merge(self.previous_span()),
         })
     }
