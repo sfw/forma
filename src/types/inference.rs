@@ -3330,6 +3330,7 @@ impl InferenceEngine {
         match &item.kind {
             ItemKind::Struct(s) => {
                 let type_params = self.get_type_params(&s.generics);
+                let struct_name = s.name.name.clone();
 
                 // Set up type params context before processing fields
                 let old_type_params = std::mem::take(&mut self.type_params);
@@ -3358,11 +3359,39 @@ impl InferenceEngine {
                     crate::parser::StructKind::Unit => vec![],
                 };
 
-                // Restore old type params
-                self.type_params = old_type_params;
+                // Restore old type params and save type var map for constructor
+                let current_type_params = std::mem::replace(&mut self.type_params, old_type_params);
+
+                // Build type var mapping for constructor type scheme
+                let type_var_map: Vec<(String, TypeVar)> = current_type_params
+                    .into_iter()
+                    .collect();
+
+                // Build the struct type with type arguments
+                let struct_ty_args: Vec<Ty> = type_var_map.iter().map(|(_, tv)| Ty::Var(*tv)).collect();
+                let struct_ty = Ty::Named(TypeId::new(&struct_name), struct_ty_args);
+
+                // Create constructor type: function from field types to struct type
+                let field_tys: Vec<Ty> = fields.iter().map(|(_, ty)| ty.clone()).collect();
+                let constructor_type = if field_tys.is_empty() {
+                    // Unit struct: just the struct type
+                    struct_ty.clone()
+                } else {
+                    // Struct with fields: function from fields to struct type
+                    Ty::Fn(field_tys, Box::new(struct_ty.clone()))
+                };
+
+                // Create type scheme with type variables
+                let scheme = TypeScheme {
+                    vars: type_var_map.iter().map(|(_, tv)| *tv).collect(),
+                    ty: constructor_type,
+                };
+
+                // Add struct constructor binding
+                self.env.insert(struct_name.clone(), scheme);
 
                 self.env.insert_type(
-                    s.name.name.clone(),
+                    struct_name,
                     TypeDef::Struct { type_params, fields },
                 );
             }

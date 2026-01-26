@@ -1,13 +1,35 @@
 # Test contextual keywords - single-letter keywords can be used as variable names
-# This verifies Sprint 12 (Pillar 1 alignment)
+# Sprint 12: Pillar 1 alignment - natural names should work
+# Expected: All tests pass, returns 1
 
-# Test 'm' as variable name
+# =============================================================================
+# Test m as variable name
+# =============================================================================
+
 f test_m_as_variable() -> Bool
     m := 42
     m == 42
 
-# Test 's' as variable name (string parameter)
-f test_s_as_param() -> Bool
+f test_m_in_expression() -> Bool
+    m := 10
+    result := m + 5
+    result == 15
+
+f test_m_in_comparison() -> Bool
+    m := 100
+    m > 50 && m < 200
+
+f test_m_as_parameter(m: Int) -> Int
+    m * 2
+
+f test_m_param_call() -> Bool
+    test_m_as_parameter(21) == 42
+
+# =============================================================================
+# Test s as variable name (commonly used for strings)
+# =============================================================================
+
+f test_s_as_variable() -> Bool
     s := "hello"
     str_len(s) == 5
 
@@ -17,8 +39,17 @@ f get_length(s: Str) -> Int
 f test_s_in_function_param() -> Bool
     get_length("world") == 5
 
-# Test 'e' as variable name (error)
-f test_e_as_param() -> Bool
+f test_s_in_expression() -> Bool
+    s := "hello"
+    s2 := " world"
+    result := s + s2
+    str_len(result) == 11
+
+# =============================================================================
+# Test e as variable name (commonly used for errors/elements)
+# =============================================================================
+
+f test_e_as_variable() -> Bool
     e := "something went wrong"
     str_len(e) > 0
 
@@ -28,64 +59,193 @@ f format_error(e: Str) -> Str
 f test_e_in_function_param() -> Bool
     format_error("test") == "Error: test"
 
-# Test 'i' as variable name (index)
-f test_i_as_index() -> Bool
+# =============================================================================
+# Test f as variable name (commonly used for functions/floats)
+# =============================================================================
+
+f test_f_as_variable() -> Bool
+    f := 3.14
+    f > 3.0
+
+f test_f_as_int() -> Bool
+    f := 100
+    f == 100
+
+# =============================================================================
+# Test i as variable name (commonly used for indices)
+# =============================================================================
+
+f test_i_as_variable() -> Bool
     i := 42
     i == 42
 
-# Test 't' as variable name
+f test_i_in_loop() -> Bool
+    sum := 0
+    for i in 0..5
+        sum = sum + i
+    sum == 10
+
+# =============================================================================
+# Test t as variable name (commonly used for time/temp)
+# =============================================================================
+
 f test_t_as_variable() -> Bool
     t := 3.14
     t > 3.0
 
-# Test all letters in tuple destructuring
+f test_t_as_int() -> Bool
+    t := 100
+    t == 100
+
+# =============================================================================
+# Test all keywords in tuple destructuring
+# =============================================================================
+
 f test_tuple_destructure() -> Bool
     (m, s, e) := (1, "two", 3.0)
     m == 1 && s == "two" && e > 2.0
 
-# Test match still works with 'm' syntax
+f test_tuple_destructure_all() -> Bool
+    (f, s, e, t, i, m) := (1, 2, 3, 4, 5, 6)
+    f + s + e + t + i + m == 21
+
+# =============================================================================
+# Test match keyword still works
+# =============================================================================
+
 f test_match_syntax() -> Bool
     x := Some(42)
     m x
         Some(v) -> v == 42
         None -> false
 
-# Test 'm' as pattern binding inside match
+f test_match_with_int() -> Bool
+    x := 2
+    result := m x
+        0 -> "zero"
+        1 -> "one"
+        _ -> "other"
+    result == "other"
+
+# =============================================================================
+# Test m as pattern binding inside match
+# =============================================================================
+
 f test_m_in_pattern() -> Bool
     opt := Some(100)
     m opt
         Some(m) -> m == 100
         None -> false
 
-# Test 'f' as variable name
-f test_f_as_variable() -> Bool
-    f := 100
-    f == 100
+# =============================================================================
+# Test m variable then match on it
+# =============================================================================
 
-# Test that 'm' can be used then match on it
 f test_m_var_then_match() -> Bool
     m := Some(99)
     m m
         Some(v) -> v == 99
         None -> false
 
+# =============================================================================
+# Test keywords in struct fields (using separate struct definitions)
+# =============================================================================
+
+s DataHolder { value_f: Int, value_s: Str, value_e: Bool }
+
+f test_struct_with_keyword_vars() -> Bool
+    f := 42
+    s := "hello"
+    e := true
+    d := DataHolder(f, s, e)
+    d.value_f == 42 && d.value_s == "hello" && d.value_e
+
+# =============================================================================
+# Test multiple keywords in one expression
+# =============================================================================
+
+f compute_sum(f: Int, s: Int, e: Int, t: Int, i: Int, m: Int) -> Int
+    f + s + e + t + i + m
+
+f test_all_keywords_as_params() -> Bool
+    compute_sum(1, 2, 3, 4, 5, 6) == 21
+
+# =============================================================================
+# Test keywords as local variables in sequence
+# =============================================================================
+
+f test_all_as_local_vars() -> Bool
+    f := 1
+    s := 2
+    e := 3
+    t := 4
+    i := 5
+    m := 6
+    f + s + e + t + i + m == 21
+
+# =============================================================================
+# Test keywords in closures
+# =============================================================================
+
+f test_keyword_in_closure() -> Bool
+    m := 10
+    add_m := |x| x + m
+    add_m(5) == 15
+
+# =============================================================================
 # Main test runner
+# =============================================================================
+
 f main() -> Int
     passed := 0
-    total := 12
+    total := 28
 
+    # m tests
     if test_m_as_variable() then passed = passed + 1 else print("FAIL: test_m_as_variable")
-    if test_s_as_param() then passed = passed + 1 else print("FAIL: test_s_as_param")
+    if test_m_in_expression() then passed = passed + 1 else print("FAIL: test_m_in_expression")
+    if test_m_in_comparison() then passed = passed + 1 else print("FAIL: test_m_in_comparison")
+    if test_m_param_call() then passed = passed + 1 else print("FAIL: test_m_param_call")
+
+    # s tests
+    if test_s_as_variable() then passed = passed + 1 else print("FAIL: test_s_as_variable")
     if test_s_in_function_param() then passed = passed + 1 else print("FAIL: test_s_in_function_param")
-    if test_e_as_param() then passed = passed + 1 else print("FAIL: test_e_as_param")
+    if test_s_in_expression() then passed = passed + 1 else print("FAIL: test_s_in_expression")
+
+    # e tests
+    if test_e_as_variable() then passed = passed + 1 else print("FAIL: test_e_as_variable")
     if test_e_in_function_param() then passed = passed + 1 else print("FAIL: test_e_in_function_param")
-    if test_i_as_index() then passed = passed + 1 else print("FAIL: test_i_as_index")
-    if test_t_as_variable() then passed = passed + 1 else print("FAIL: test_t_as_variable")
-    if test_tuple_destructure() then passed = passed + 1 else print("FAIL: test_tuple_destructure")
-    if test_match_syntax() then passed = passed + 1 else print("FAIL: test_match_syntax")
-    if test_m_in_pattern() then passed = passed + 1 else print("FAIL: test_m_in_pattern")
+
+    # f tests
     if test_f_as_variable() then passed = passed + 1 else print("FAIL: test_f_as_variable")
+    if test_f_as_int() then passed = passed + 1 else print("FAIL: test_f_as_int")
+
+    # i tests
+    if test_i_as_variable() then passed = passed + 1 else print("FAIL: test_i_as_variable")
+    if test_i_in_loop() then passed = passed + 1 else print("FAIL: test_i_in_loop")
+
+    # t tests
+    if test_t_as_variable() then passed = passed + 1 else print("FAIL: test_t_as_variable")
+    if test_t_as_int() then passed = passed + 1 else print("FAIL: test_t_as_int")
+
+    # Tuple destructuring
+    if test_tuple_destructure() then passed = passed + 1 else print("FAIL: test_tuple_destructure")
+    if test_tuple_destructure_all() then passed = passed + 1 else print("FAIL: test_tuple_destructure_all")
+
+    # Match tests
+    if test_match_syntax() then passed = passed + 1 else print("FAIL: test_match_syntax")
+    if test_match_with_int() then passed = passed + 1 else print("FAIL: test_match_with_int")
+    if test_m_in_pattern() then passed = passed + 1 else print("FAIL: test_m_in_pattern")
     if test_m_var_then_match() then passed = passed + 1 else print("FAIL: test_m_var_then_match")
+
+    # Struct tests
+    if test_struct_with_keyword_vars() then passed = passed + 1 else print("FAIL: test_struct_with_keyword_vars")
+
+    # Multi-keyword tests
+    if test_all_keywords_as_params() then passed = passed + 1 else print("FAIL: test_all_keywords_as_params")
+    if test_all_as_local_vars() then passed = passed + 1 else print("FAIL: test_all_as_local_vars")
+
+    # Closure test
+    if test_keyword_in_closure() then passed = passed + 1 else print("FAIL: test_keyword_in_closure")
 
     print("Contextual keyword tests passed:")
     print(passed)

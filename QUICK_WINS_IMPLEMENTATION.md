@@ -1,7 +1,7 @@
 # FORMA Language Quick Wins & Core Language Fixes
 
 **Status:** ✅ COMPLETE
-**Last Updated:** January 24, 2026
+**Last Updated:** January 25, 2026
 
 ---
 
@@ -20,6 +20,7 @@
 | 9 | VS Code Syntax | ✅ DONE | |
 | 10 | Trait Fixes | ✅ DONE | Type-aware method resolution |
 | 11 | Default Parameters | ✅ DONE | |
+| 12 | Contextual Keywords | ✅ DONE | f/s/e/t/i/m work as identifiers in context |
 
 Legend: ⬜ TODO | 🔄 IN PROGRESS | ✅ DONE | ❌ BLOCKED
 
