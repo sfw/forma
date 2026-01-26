@@ -5554,6 +5554,7 @@ impl Interpreter {
 
             // ===== Sorting operations =====
             "sort_ints" => {
+                validate_args!(args, 1, "sort_ints");
                 // sort_ints(arr: [Int]) -> [Int]
                 let arr = match &args[0] {
                     Value::Array(arr) => arr.clone(),
@@ -5566,6 +5567,7 @@ impl Interpreter {
                 Ok(Some(Value::Array(ints.into_iter().map(Value::Int).collect())))
             }
             "sort_ints_desc" => {
+                validate_args!(args, 1, "sort_ints_desc");
                 // sort_ints_desc(arr: [Int]) -> [Int]
                 let arr = match &args[0] {
                     Value::Array(arr) => arr.clone(),
@@ -5578,6 +5580,7 @@ impl Interpreter {
                 Ok(Some(Value::Array(ints.into_iter().map(Value::Int).collect())))
             }
             "sort_floats" => {
+                validate_args!(args, 1, "sort_floats");
                 // sort_floats(arr: [Float]) -> [Float]
                 let arr = match &args[0] {
                     Value::Array(arr) => arr.clone(),
@@ -5590,6 +5593,7 @@ impl Interpreter {
                 Ok(Some(Value::Array(floats.into_iter().map(Value::Float).collect())))
             }
             "sort_strings" => {
+                validate_args!(args, 1, "sort_strings");
                 // sort_strings(arr: [Str]) -> [Str]
                 let arr = match &args[0] {
                     Value::Array(arr) => arr.clone(),
@@ -5605,6 +5609,7 @@ impl Interpreter {
                 Ok(Some(Value::Array(strs.into_iter().map(Value::Str).collect())))
             }
             "sort_strings_desc" => {
+                validate_args!(args, 1, "sort_strings_desc");
                 // sort_strings_desc(arr: [Str]) -> [Str]
                 let arr = match &args[0] {
                     Value::Array(arr) => arr.clone(),
@@ -6062,6 +6067,7 @@ impl Interpreter {
                 }
             }
             "db_query" => {
+                validate_args!(args, 2, "db_query");
                 // db_query(db: Database, sql: Str) -> Result[[Row], Str]
                 let id = match &args[0] { Value::Database(id) => *id, _ => return Err(InterpError { message: "db_query: expected Database".to_string() }) };
                 let sql = match &args[1] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "db_query: expected Str sql".to_string() }) };
@@ -6120,6 +6126,7 @@ impl Interpreter {
                 }
             }
             "db_query_one" => {
+                validate_args!(args, 2, "db_query_one");
                 // db_query_one(db: Database, sql: Str) -> Result[Row?, Str]
                 let id = match &args[0] { Value::Database(id) => *id, _ => return Err(InterpError { message: "db_query_one: expected Database".to_string() }) };
                 let sql = match &args[1] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "db_query_one: expected Str sql".to_string() }) };
@@ -6182,12 +6189,14 @@ impl Interpreter {
                 }
             }
             "db_close" => {
+                validate_args!(args, 1, "db_close");
                 // db_close(db: Database) -> ()
                 let id = match &args[0] { Value::Database(id) => *id, _ => return Err(InterpError { message: "db_close: expected Database".to_string() }) };
                 self.databases.remove(&id);
                 Ok(Some(Value::Unit))
             }
             "db_prepare" => {
+                validate_args!(args, 2, "db_prepare");
                 // db_prepare(db: Database, sql: Str) -> Result[Statement, Str]
                 let db_id = match &args[0] { Value::Database(id) => *id, _ => return Err(InterpError { message: "db_prepare: expected Database".to_string() }) };
                 let sql = match &args[1] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "db_prepare: expected Str sql".to_string() }) };
@@ -6224,6 +6233,7 @@ impl Interpreter {
                 }
             }
             "db_execute_prepared" => {
+                validate_args!(args, 2, "db_execute_prepared");
                 // db_execute_prepared(stmt: Statement, params: [Any]) -> Result[Int, Str]
                 let stmt_id = match &args[0] { Value::Statement(id) => *id, _ => return Err(InterpError { message: "db_execute_prepared: expected Statement".to_string() }) };
                 let params = match &args[1] { Value::Array(arr) => arr.clone(), _ => return Err(InterpError { message: "db_execute_prepared: expected array of parameters".to_string() }) };
@@ -6285,6 +6295,7 @@ impl Interpreter {
                 }
             }
             "db_query_prepared" => {
+                validate_args!(args, 2, "db_query_prepared");
                 // db_query_prepared(stmt: Statement, params: [Any]) -> Result[[Row], Str]
                 let stmt_id = match &args[0] { Value::Statement(id) => *id, _ => return Err(InterpError { message: "db_query_prepared: expected Statement".to_string() }) };
                 let params = match &args[1] { Value::Array(arr) => arr.clone(), _ => return Err(InterpError { message: "db_query_prepared: expected array of parameters".to_string() }) };
@@ -6377,6 +6388,7 @@ impl Interpreter {
                 }
             }
             "row_get" => {
+                validate_args!(args, 2, "row_get");
                 // row_get(row: Row, index: Int) -> Value?
                 let row = match &args[0] { Value::DbRow(cols) => cols, _ => return Err(InterpError { message: "row_get: expected Row".to_string() }) };
                 let idx = match &args[1] { Value::Int(n) => *n as usize, _ => return Err(InterpError { message: "row_get: index must be Int".to_string() }) };
@@ -6395,6 +6407,7 @@ impl Interpreter {
                 }
             }
             "row_get_int" => {
+                validate_args!(args, 2, "row_get_int");
                 // row_get_int(row: Row, index: Int) -> Int
                 let row = match &args[0] { Value::DbRow(cols) => cols, _ => return Err(InterpError { message: "row_get_int: expected Row".to_string() }) };
                 let idx = match &args[1] { Value::Int(n) => *n as usize, _ => return Err(InterpError { message: "row_get_int: index must be Int".to_string() }) };
@@ -6406,6 +6419,7 @@ impl Interpreter {
                 }
             }
             "row_get_str" => {
+                validate_args!(args, 2, "row_get_str");
                 // row_get_str(row: Row, index: Int) -> Str
                 let row = match &args[0] { Value::DbRow(cols) => cols, _ => return Err(InterpError { message: "row_get_str: expected Row".to_string() }) };
                 let idx = match &args[1] { Value::Int(n) => *n as usize, _ => return Err(InterpError { message: "row_get_str: index must be Int".to_string() }) };
@@ -6417,6 +6431,7 @@ impl Interpreter {
                 }
             }
             "row_get_float" => {
+                validate_args!(args, 2, "row_get_float");
                 // row_get_float(row: Row, index: Int) -> Float
                 let row = match &args[0] { Value::DbRow(cols) => cols, _ => return Err(InterpError { message: "row_get_float: expected Row".to_string() }) };
                 let idx = match &args[1] { Value::Int(n) => *n as usize, _ => return Err(InterpError { message: "row_get_float: index must be Int".to_string() }) };
@@ -6428,6 +6443,7 @@ impl Interpreter {
                 }
             }
             "row_get_bool" => {
+                validate_args!(args, 2, "row_get_bool");
                 // row_get_bool(row: Row, index: Int) -> Bool
                 let row = match &args[0] { Value::DbRow(cols) => cols, _ => return Err(InterpError { message: "row_get_bool: expected Row".to_string() }) };
                 let idx = match &args[1] { Value::Int(n) => *n as usize, _ => return Err(InterpError { message: "row_get_bool: index must be Int".to_string() }) };
@@ -6440,6 +6456,7 @@ impl Interpreter {
                 }
             }
             "row_is_null" => {
+                validate_args!(args, 2, "row_is_null");
                 // row_is_null(row: Row, index: Int) -> Bool
                 let row = match &args[0] { Value::DbRow(cols) => cols, _ => return Err(InterpError { message: "row_is_null: expected Row".to_string() }) };
                 let idx = match &args[1] { Value::Int(n) => *n as usize, _ => return Err(InterpError { message: "row_is_null: index must be Int".to_string() }) };
@@ -6451,6 +6468,7 @@ impl Interpreter {
                 }
             }
             "row_len" => {
+                validate_args!(args, 1, "row_len");
                 // row_len(row: Row) -> Int
                 let row = match &args[0] { Value::DbRow(cols) => cols, _ => return Err(InterpError { message: "row_len: expected Row".to_string() }) };
                 Ok(Some(Value::Int(row.len() as i64)))
