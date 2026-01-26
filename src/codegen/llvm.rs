@@ -296,6 +296,83 @@ impl<'ctx> LLVMCodegen<'ctx> {
             Rvalue::Closure { func_name, captures } => {
                 self.compile_closure(func_name, captures)
             }
+            // Tuple construction
+            Rvalue::Tuple(elements) => {
+                let mut values = Vec::new();
+                for elem in elements {
+                    values.push(self.compile_operand(elem)?);
+                }
+                // Create anonymous struct type for tuple
+                let types: Vec<BasicTypeEnum> = values.iter()
+                    .map(|v| v.get_type())
+                    .collect();
+                let tuple_type = self.context.struct_type(&types, false);
+                let mut tuple = tuple_type.get_undef();
+                for (i, val) in values.into_iter().enumerate() {
+                    tuple = self.builder.build_insert_value(tuple, val, i as u32, "tuple_insert")
+                        .map_err(|e| CodegenError { message: format!("Failed to insert tuple value: {:?}", e) })?
+                        .into_struct_value();
+                }
+                Ok(tuple.into())
+            }
+            // Array construction
+            Rvalue::Array(elements) => {
+                if elements.is_empty() {
+                    return Err(CodegenError { message: "Empty array not supported in LLVM codegen".to_string() });
+                }
+                let first = self.compile_operand(&elements[0])?;
+                let elem_type = first.get_type();
+                let array_type = elem_type.array_type(elements.len() as u32);
+                let array_alloca = self.builder.build_alloca(array_type, "array")
+                    .map_err(|e| CodegenError { message: format!("array alloca failed: {:?}", e) })?;
+
+                for (i, elem) in elements.iter().enumerate() {
+                    let val = self.compile_operand(elem)?;
+                    let idx = self.context.i32_type().const_int(i as u64, false);
+                    let ptr = unsafe {
+                        self.builder.build_gep(array_type, array_alloca, &[self.context.i32_type().const_zero(), idx], "elem_ptr")
+                            .map_err(|e| CodegenError { message: format!("array gep failed: {:?}", e) })?
+                    };
+                    self.builder.build_store(ptr, val)
+                        .map_err(|e| CodegenError { message: format!("array store failed: {:?}", e) })?;
+                }
+                Ok(self.builder.build_load(array_type, array_alloca, "array_val")
+                    .map_err(|e| CodegenError { message: format!("array load failed: {:?}", e) })?)
+            }
+            // Field access
+            Rvalue::Field(base, field_idx) => {
+                let base_val = self.compile_operand(base)?;
+                let struct_val = self.as_struct_value(base_val)?;
+                self.builder.build_extract_value(struct_val, *field_idx as u32, "field")
+                    .map_err(|e| CodegenError { message: format!("Failed to extract field: {:?}", e) })
+                    .map(|v| v.into())
+            }
+            // Tuple field access
+            Rvalue::TupleField(base, idx) => {
+                let base_val = self.compile_operand(base)?;
+                let struct_val = self.as_struct_value(base_val)?;
+                self.builder.build_extract_value(struct_val, *idx as u32, "tuple_field")
+                    .map_err(|e| CodegenError { message: format!("Failed to extract tuple field: {:?}", e) })
+                    .map(|v| v.into())
+            }
+            // Struct construction
+            Rvalue::Struct(fields) => {
+                let mut values = Vec::new();
+                for (_, operand) in fields {
+                    values.push(self.compile_operand(operand)?);
+                }
+                let types: Vec<BasicTypeEnum> = values.iter()
+                    .map(|v| v.get_type())
+                    .collect();
+                let struct_type = self.context.struct_type(&types, false);
+                let mut struct_val = struct_type.get_undef();
+                for (i, val) in values.into_iter().enumerate() {
+                    struct_val = self.builder.build_insert_value(struct_val, val, i as u32, "struct_insert")
+                        .map_err(|e| CodegenError { message: format!("Failed to insert struct value: {:?}", e) })?
+                        .into_struct_value();
+                }
+                Ok(struct_val.into())
+            }
             // Note: function calls are handled in Terminator::Call, not in Rvalue
             _ => Err(CodegenError {
                 message: format!("Unsupported rvalue: {:?}", rvalue),
@@ -688,7 +765,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
                 }
             }
             Terminator::If { cond, then_block, else_block } => {
-                let cond_val = self.compile_operand(cond)?.into_int_value();
+                let cond_val = self.as_int_value(self.compile_operand(cond)?)?;
                 let then_bb = blocks.get(&(then_block.0 as usize)).copied().ok_or_else(|| CodegenError {
                     message: "Missing then block".into(),
                 })?;
@@ -709,7 +786,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
                     .map_err(|e| CodegenError { message: format!("branch failed: {:?}", e) })?;
             }
             Terminator::Switch { operand, targets, default } => {
-                let val = self.compile_operand(operand)?.into_int_value();
+                let val = self.as_int_value(self.compile_operand(operand)?)?;
                 let default_bb = blocks.get(&(default.0 as usize)).copied().ok_or_else(|| CodegenError {
                     message: "Missing default block".into(),
                 })?;

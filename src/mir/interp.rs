@@ -289,7 +289,7 @@ impl Frame {
 
 /// MIR interpreter.
 pub struct Interpreter {
-    program: Program,
+    program: Arc<Program>,
     call_stack: Vec<Frame>,
     max_steps: usize,
     /// Channel state: maps channel ID to (queue, capacity, closed)
@@ -344,7 +344,7 @@ impl Interpreter {
         );
 
         Ok(Self {
-            program,
+            program: Arc::new(program),
             call_stack: Vec::new(),
             max_steps: 1_000_000,
             channels: std::collections::HashMap::new(),
@@ -375,6 +375,42 @@ impl Interpreter {
     pub fn with_max_steps(mut self, max: usize) -> Self {
         self.max_steps = max;
         self
+    }
+
+    /// Create a minimal interpreter for running spawned tasks.
+    /// This shares the program via Arc but has its own call stack and state.
+    pub fn new_for_task(program: Arc<Program>) -> Result<Self, InterpError> {
+        let runtime = Arc::new(
+            tokio::runtime::Runtime::new()
+                .map_err(|e| InterpError { message: format!("Failed to create task runtime: {}", e) })?
+        );
+
+        Ok(Self {
+            program,
+            call_stack: Vec::new(),
+            max_steps: 1_000_000,
+            channels: std::collections::HashMap::new(),
+            next_channel_id: 0,
+            mutexes: std::collections::HashMap::new(),
+            next_mutex_id: 0,
+            tcp_streams: std::collections::HashMap::new(),
+            next_tcp_stream_id: 0,
+            tcp_listeners: std::collections::HashMap::new(),
+            next_tcp_listener_id: 0,
+            udp_sockets: std::collections::HashMap::new(),
+            next_udp_socket_id: 0,
+            tls_streams: std::collections::HashMap::new(),
+            next_tls_stream_id: 0,
+            databases: std::collections::HashMap::new(),
+            next_db_id: 0,
+            statements: std::collections::HashMap::new(),
+            next_stmt_id: 0,
+            log_level: 1,
+            log_format: "text".to_string(),
+            runtime,
+            spawned_tasks: Arc::new(StdMutex::new(std::collections::HashMap::new())),
+            next_task_id: 0,
+        })
     }
 
     /// Get a reference to the current call frame, returning an error if the stack is empty.
@@ -957,16 +993,53 @@ impl Interpreter {
                     let task_id = self.next_task_id;
                     self.next_task_id += 1;
 
-                    // Clone runtime for spawning
-                    let runtime = Arc::clone(&self.runtime);
+                    // Clone what we need for spawning
                     let spawned_tasks = Arc::clone(&self.spawned_tasks);
 
-                    // Spawn the task onto Tokio runtime
-                    let handle = runtime.spawn(async move {
-                        // The value is already evaluated, just return it
-                        // For true async, this would execute an async block
-                        value
-                    });
+                    let handle = match value {
+                        // If it's a closure, spawn with deferred execution
+                        Value::Closure { func_name, captures } => {
+                            let program = Arc::clone(&self.program);
+                            let func_name_clone = func_name.clone();
+                            let captures_clone = captures.clone();
+
+                            // Use spawn_blocking for CPU-bound closure execution
+                            self.runtime.spawn(async move {
+                                // Execute closure in blocking context
+                                tokio::task::spawn_blocking(move || {
+                                    // Create a mini-interpreter for this task
+                                    let mut task_interp = match Interpreter::new_for_task(program) {
+                                        Ok(i) => i,
+                                        Err(_) => return Value::Unit,
+                                    };
+
+                                    // Get the closure's implementation function
+                                    let func = match task_interp.program.functions.get(&func_name_clone) {
+                                        Some(f) => f.clone(),
+                                        None => return Value::Unit,
+                                    };
+
+                                    // Create frame for closure execution
+                                    let mut frame = Frame::new(func_name_clone, func.entry_block);
+
+                                    // Bind captured values (closures with no args just have captures)
+                                    for ((local, _ty), value) in func.params.iter().zip(captures_clone.iter()) {
+                                        frame.locals.insert(*local, value.clone());
+                                    }
+
+                                    task_interp.call_stack.push(frame);
+                                    match task_interp.execute(&func) {
+                                        Ok(val) => val,
+                                        Err(_) => Value::Unit,
+                                    }
+                                }).await.unwrap_or(Value::Unit)
+                            })
+                        }
+                        // For non-closure values, spawn immediately with the value
+                        other => {
+                            self.runtime.spawn(async move { other })
+                        }
+                    };
 
                     // Store the handle
                     {
@@ -1036,6 +1109,20 @@ impl Interpreter {
     /// Handle built-in functions. Returns Some(result) if the function is a built-in,
     /// None if it should be handled as a regular function call.
     fn call_builtin(&mut self, fn_name: &str, args: &[Value]) -> Result<Option<Value>, InterpError> {
+        // Macro to validate builtin argument counts
+        macro_rules! validate_args {
+            ($args:expr, $count:expr, $name:expr) => {
+                if $args.len() < $count {
+                    return Err(InterpError {
+                        message: format!(
+                            "{}() requires {} argument(s), got {}",
+                            $name, $count, $args.len()
+                        ),
+                    });
+                }
+            };
+        }
+
         match fn_name {
             // ===== I/O =====
             "print" => {
@@ -1051,9 +1138,7 @@ impl Interpreter {
 
             // str(value) -> Str - convert any value to a string
             "str" => {
-                if args.is_empty() {
-                    return Err(InterpError { message: "str: expected 1 argument".to_string() });
-                }
+                validate_args!(args, 1, "str");
                 // Special case: strings should not get extra quotes
                 let s = match &args[0] {
                     Value::Str(s) => s.clone(),
@@ -1071,6 +1156,7 @@ impl Interpreter {
                 Ok(Some(Value::Array(vec![])))
             }
             "vec_len" => {
+                validate_args!(args, 1, "vec_len");
                 match &args[0] {
                     Value::Array(arr) => Ok(Some(Value::Int(arr.len() as i64))),
                     Value::Str(s) => Ok(Some(Value::Int(s.len() as i64))),  // Support .len() on strings
@@ -1085,6 +1171,7 @@ impl Interpreter {
                 }
             }
             "vec_get" => {
+                validate_args!(args, 2, "vec_get");
                 let arr = match &args[0] {
                     Value::Array(arr) => arr,
                     Value::Ref(inner) => {
@@ -1115,6 +1202,7 @@ impl Interpreter {
                 }
             }
             "vec_first" => {
+                validate_args!(args, 1, "vec_first");
                 let arr = match &args[0] {
                     Value::Array(arr) => arr,
                     Value::Ref(inner) => {
@@ -1141,6 +1229,7 @@ impl Interpreter {
                 }
             }
             "vec_last" => {
+                validate_args!(args, 1, "vec_last");
                 let arr = match &args[0] {
                     Value::Array(arr) => arr,
                     Value::Ref(inner) => {
@@ -1169,6 +1258,7 @@ impl Interpreter {
 
             // ===== String operations =====
             "str_len" => {
+                validate_args!(args, 1, "str_len");
                 let s = match &args[0] {
                     Value::Str(s) => s,
                     Value::Ref(inner) => {
@@ -1183,6 +1273,7 @@ impl Interpreter {
                 Ok(Some(Value::Int(s.len() as i64)))
             }
             "str_char_at" => {
+                validate_args!(args, 2, "str_char_at");
                 let s = match &args[0] {
                     Value::Str(s) => s.clone(),
                     Value::Ref(inner) => {
@@ -1211,6 +1302,7 @@ impl Interpreter {
                 }
             }
             "str_slice" => {
+                validate_args!(args, 3, "str_slice");
                 let s = match &args[0] {
                     Value::Str(s) => s.clone(),
                     Value::Ref(inner) => {
@@ -1235,6 +1327,7 @@ impl Interpreter {
                 Ok(Some(Value::Str(result)))
             }
             "str_contains" => {
+                validate_args!(args, 2, "str_contains");
                 let s = match &args[0] {
                     Value::Str(s) => s.clone(),
                     Value::Ref(inner) => {
@@ -1260,6 +1353,7 @@ impl Interpreter {
                 Ok(Some(Value::Bool(s.contains(&sub))))
             }
             "str_starts_with" => {
+                validate_args!(args, 2, "str_starts_with");
                 let s = match &args[0] {
                     Value::Str(s) => s.clone(),
                     Value::Ref(inner) => {
@@ -1285,6 +1379,7 @@ impl Interpreter {
                 Ok(Some(Value::Bool(s.starts_with(&prefix))))
             }
             "str_ends_with" => {
+                validate_args!(args, 2, "str_ends_with");
                 let s = match &args[0] {
                     Value::Str(s) => s.clone(),
                     Value::Ref(inner) => {
@@ -1310,6 +1405,7 @@ impl Interpreter {
                 Ok(Some(Value::Bool(s.ends_with(&suffix))))
             }
             "str_split" => {
+                validate_args!(args, 2, "str_split");
                 let s = match &args[0] {
                     Value::Str(s) => s.clone(),
                     Value::Ref(inner) => {
@@ -1336,6 +1432,7 @@ impl Interpreter {
                 Ok(Some(Value::Array(parts)))
             }
             "str_trim" => {
+                validate_args!(args, 1, "str_trim");
                 let s = match &args[0] {
                     Value::Str(s) => s.clone(),
                     Value::Ref(inner) => {
@@ -1350,6 +1447,7 @@ impl Interpreter {
                 Ok(Some(Value::Str(s.trim().to_string())))
             }
             "str_to_int" => {
+                validate_args!(args, 1, "str_to_int");
                 let s = match &args[0] {
                     Value::Str(s) => s.clone(),
                     Value::Ref(inner) => {
@@ -1375,12 +1473,14 @@ impl Interpreter {
                 }
             }
             "int_to_str" => {
+                validate_args!(args, 1, "int_to_str");
                 let n = args[0].as_int().ok_or_else(|| InterpError {
                     message: "int_to_str: expected Int".to_string()
                 })?;
                 Ok(Some(Value::Str(n.to_string())))
             }
             "str_to_int_radix" => {
+                validate_args!(args, 2, "str_to_int_radix");
                 // str_to_int_radix(s, radix) -> Option[Int]
                 let s = match &args[0] {
                     Value::Str(s) => s.clone(),
@@ -1410,6 +1510,7 @@ impl Interpreter {
                 }
             }
             "str_replace_all" => {
+                validate_args!(args, 3, "str_replace_all");
                 // str_replace_all(s, pattern, replacement) -> Str
                 let s = match &args[0] {
                     Value::Str(s) => s.clone(),
@@ -1447,6 +1548,7 @@ impl Interpreter {
                 Ok(Some(Value::Str(s.replace(&pattern, &replacement))))
             }
             "str_concat" => {
+                validate_args!(args, 2, "str_concat");
                 let s1 = match &args[0] {
                     Value::Str(s) => s.clone(),
                     Value::Ref(inner) => {
@@ -1474,6 +1576,7 @@ impl Interpreter {
 
             // ===== Char operations =====
             "char_is_digit" => {
+                validate_args!(args, 1, "char_is_digit");
                 let c = match &args[0] {
                     Value::Char(c) => *c,
                     _ => return Err(InterpError { message: "char_is_digit: expected Char".to_string() })
@@ -1481,6 +1584,7 @@ impl Interpreter {
                 Ok(Some(Value::Bool(c.is_ascii_digit())))
             }
             "char_is_alpha" => {
+                validate_args!(args, 1, "char_is_alpha");
                 let c = match &args[0] {
                     Value::Char(c) => *c,
                     _ => return Err(InterpError { message: "char_is_alpha: expected Char".to_string() })
@@ -1488,6 +1592,7 @@ impl Interpreter {
                 Ok(Some(Value::Bool(c.is_alphabetic())))
             }
             "char_is_alphanumeric" => {
+                validate_args!(args, 1, "char_is_alphanumeric");
                 let c = match &args[0] {
                     Value::Char(c) => *c,
                     _ => return Err(InterpError { message: "char_is_alphanumeric: expected Char".to_string() })
@@ -1495,6 +1600,7 @@ impl Interpreter {
                 Ok(Some(Value::Bool(c.is_alphanumeric())))
             }
             "char_is_whitespace" => {
+                validate_args!(args, 1, "char_is_whitespace");
                 let c = match &args[0] {
                     Value::Char(c) => *c,
                     _ => return Err(InterpError { message: "char_is_whitespace: expected Char".to_string() })
@@ -1502,6 +1608,7 @@ impl Interpreter {
                 Ok(Some(Value::Bool(c.is_whitespace())))
             }
             "char_to_int" => {
+                validate_args!(args, 1, "char_to_int");
                 let c = match &args[0] {
                     Value::Char(c) => *c,
                     _ => return Err(InterpError { message: "char_to_int: expected Char".to_string() })
@@ -1509,6 +1616,7 @@ impl Interpreter {
                 Ok(Some(Value::Int(c as i64)))
             }
             "int_to_char" => {
+                validate_args!(args, 1, "int_to_char");
                 let n = args[0].as_int().ok_or_else(|| InterpError {
                     message: "int_to_char: expected Int".to_string()
                 })?;
@@ -1528,6 +1636,7 @@ impl Interpreter {
                 }))
             }
             "char_to_str" => {
+                validate_args!(args, 1, "char_to_str");
                 // Convert a Char to a single-character Str
                 let c = match &args[0] {
                     Value::Char(c) => *c,
@@ -1541,6 +1650,7 @@ impl Interpreter {
                 Ok(Some(Value::Map(HashMap::new())))
             }
             "map_len" => {
+                validate_args!(args, 1, "map_len");
                 let map = match &args[0] {
                     Value::Map(m) => m,
                     Value::Ref(inner) => {
@@ -1555,6 +1665,7 @@ impl Interpreter {
                 Ok(Some(Value::Int(map.len() as i64)))
             }
             "map_get" => {
+                validate_args!(args, 2, "map_get");
                 let map = match &args[0] {
                     Value::Map(m) => m,
                     Value::Ref(inner) => {
@@ -1591,6 +1702,7 @@ impl Interpreter {
                 }
             }
             "map_contains" => {
+                validate_args!(args, 2, "map_contains");
                 let map = match &args[0] {
                     Value::Map(m) => m,
                     Value::Ref(inner) => {
@@ -1616,6 +1728,7 @@ impl Interpreter {
                 Ok(Some(Value::Bool(map.contains_key(&key))))
             }
             "map_keys" => {
+                validate_args!(args, 1, "map_keys");
                 let map = match &args[0] {
                     Value::Map(m) => m,
                     Value::Ref(inner) => {
@@ -1633,6 +1746,7 @@ impl Interpreter {
 
             // ===== Functional mutating operations (return new collections) =====
             "vec_push" => {
+                validate_args!(args, 2, "vec_push");
                 // vec_push(arr, elem) -> new array with elem appended
                 let arr = match &args[0] {
                     Value::Array(arr) => arr.clone(),
@@ -1650,6 +1764,7 @@ impl Interpreter {
                 Ok(Some(Value::Array(new_arr)))
             }
             "vec_pop" => {
+                validate_args!(args, 1, "vec_pop");
                 // vec_pop(arr) -> (new_array, Option<elem>)
                 let arr = match &args[0] {
                     Value::Array(arr) => arr.clone(),
@@ -1679,6 +1794,7 @@ impl Interpreter {
                 Ok(Some(Value::Tuple(vec![Value::Array(new_arr), opt])))
             }
             "vec_set" => {
+                validate_args!(args, 3, "vec_set");
                 // vec_set(arr, index, value) -> new array with element at index replaced
                 let arr = match &args[0] {
                     Value::Array(arr) => arr.clone(),
@@ -1702,6 +1818,7 @@ impl Interpreter {
                 Ok(Some(Value::Array(new_arr)))
             }
             "vec_concat" => {
+                validate_args!(args, 2, "vec_concat");
                 // vec_concat(arr1, arr2) -> combined array
                 let arr1 = match &args[0] {
                     Value::Array(arr) => arr.clone(),
@@ -1730,6 +1847,7 @@ impl Interpreter {
                 Ok(Some(Value::Array(result)))
             }
             "vec_slice" => {
+                validate_args!(args, 3, "vec_slice");
                 // vec_slice(arr, start, end) -> new array containing arr[start..end]
                 let arr = match &args[0] {
                     Value::Array(arr) => arr.clone(),
@@ -1753,6 +1871,7 @@ impl Interpreter {
                 Ok(Some(Value::Array(arr[start..end].to_vec())))
             }
             "vec_reverse" => {
+                validate_args!(args, 1, "vec_reverse");
                 // vec_reverse(arr) -> reversed array
                 let arr = match &args[0] {
                     Value::Array(arr) => arr.clone(),
@@ -1771,6 +1890,7 @@ impl Interpreter {
             }
 
             "map_insert" => {
+                validate_args!(args, 3, "map_insert");
                 // map_insert(map, key, value) -> new map with entry added
                 let map = match &args[0] {
                     Value::Map(m) => m.clone(),
@@ -1799,6 +1919,7 @@ impl Interpreter {
                 Ok(Some(Value::Map(new_map)))
             }
             "map_remove" => {
+                validate_args!(args, 2, "map_remove");
                 // map_remove(map, key) -> (new_map, Option<removed_value>)
                 let map = match &args[0] {
                     Value::Map(m) => m.clone(),
@@ -1899,6 +2020,7 @@ impl Interpreter {
                 Ok(Some(Value::Str(type_name.to_string())))
             }
             "panic" => {
+                validate_args!(args, 1, "panic");
                 let msg = match &args[0] {
                     Value::Str(s) => s.clone(),
                     other => format!("{}", other),
@@ -1906,6 +2028,7 @@ impl Interpreter {
                 Err(InterpError { message: format!("panic: {}", msg) })
             }
             "assert" => {
+                validate_args!(args, 1, "assert");
                 let cond = args[0].as_bool().ok_or_else(|| InterpError {
                     message: "assert: expected Bool".to_string()
                 })?;
@@ -1925,6 +2048,7 @@ impl Interpreter {
 
             // ===== Option/Result unwrapping =====
             "unwrap" => {
+                validate_args!(args, 1, "unwrap");
                 // unwrap(opt) - panic if None, return value if Some
                 match &args[0] {
                     Value::Enum { variant, fields, .. } => {
@@ -1946,6 +2070,7 @@ impl Interpreter {
                 }
             }
             "expect" => {
+                validate_args!(args, 1, "expect");
                 // expect(opt, msg) - like unwrap but with custom error message
                 let msg = if args.len() > 1 {
                     match &args[1] {
@@ -1972,6 +2097,7 @@ impl Interpreter {
                 }
             }
             "unwrap_or" => {
+                validate_args!(args, 2, "unwrap_or");
                 // unwrap_or(opt, default) - return default if None/Err
                 match &args[0] {
                     Value::Enum { variant, fields, .. } => {
@@ -1989,6 +2115,7 @@ impl Interpreter {
                 }
             }
             "is_some" => {
+                validate_args!(args, 1, "is_some");
                 // is_some(opt) - returns true if Some, false if None
                 match &args[0] {
                     Value::Enum { variant, .. } => {
@@ -1998,6 +2125,7 @@ impl Interpreter {
                 }
             }
             "is_none" => {
+                validate_args!(args, 1, "is_none");
                 // is_none(opt) - returns true if None, false if Some
                 match &args[0] {
                     Value::Enum { variant, .. } => {
@@ -2007,6 +2135,7 @@ impl Interpreter {
                 }
             }
             "is_ok" => {
+                validate_args!(args, 1, "is_ok");
                 // is_ok(result) - returns true if Ok, false if Err
                 match &args[0] {
                     Value::Enum { variant, .. } => {
@@ -2016,6 +2145,7 @@ impl Interpreter {
                 }
             }
             "is_err" => {
+                validate_args!(args, 1, "is_err");
                 // is_err(result) - returns true if Err, false if Ok
                 match &args[0] {
                     Value::Enum { variant, .. } => {
@@ -2027,6 +2157,7 @@ impl Interpreter {
 
             // ===== File I/O =====
             "file_read" => {
+                validate_args!(args, 1, "file_read");
                 // file_read(path: Str) -> Result[Str, Str]
                 let path = match &args[0] {
                     Value::Str(s) => s.clone(),
@@ -2046,6 +2177,7 @@ impl Interpreter {
                 }
             }
             "file_write" => {
+                validate_args!(args, 2, "file_write");
                 // file_write(path: Str, content: Str) -> Result[(), Str]
                 let path = match &args[0] {
                     Value::Str(s) => s.clone(),
@@ -2069,6 +2201,7 @@ impl Interpreter {
                 }
             }
             "file_exists" => {
+                validate_args!(args, 1, "file_exists");
                 // file_exists(path: Str) -> Bool
                 let path = match &args[0] {
                     Value::Str(s) => s.clone(),
@@ -2077,6 +2210,7 @@ impl Interpreter {
                 Ok(Some(Value::Bool(std::path::Path::new(&path).exists())))
             }
             "file_append" => {
+                validate_args!(args, 2, "file_append");
                 // file_append(path: Str, content: Str) -> Result[(), Str]
                 use std::io::Write;
                 let path = match &args[0] {
@@ -2115,6 +2249,7 @@ impl Interpreter {
                 Ok(Some(Value::Array(args)))
             }
             "env_get" => {
+                validate_args!(args, 1, "env_get");
                 // env_get(name: Str) -> Option[Str]
                 let name = match &args[0] {
                     Value::Str(s) => s.clone(),
@@ -2134,6 +2269,7 @@ impl Interpreter {
                 }
             }
             "exit" => {
+                validate_args!(args, 1, "exit");
                 // exit(code: Int) -> !
                 let code = match &args[0] {
                     Value::Int(n) => *n as i32,
@@ -2160,6 +2296,7 @@ impl Interpreter {
                 Ok(Some(Value::Float(rng.r#gen::<f64>())))
             }
             "random_int" => {
+                validate_args!(args, 2, "random_int");
                 // random_int(min: Int, max: Int) -> Int
                 let min = match &args[0] {
                     Value::Int(n) => *n,
@@ -2178,6 +2315,7 @@ impl Interpreter {
                 Ok(Some(Value::Bool(rng.r#gen::<bool>())))
             }
             "random_choice" => {
+                validate_args!(args, 1, "random_choice");
                 // random_choice(arr: [T]) -> T
                 let arr = match &args[0] {
                     Value::Array(vals) => vals,
@@ -2193,6 +2331,7 @@ impl Interpreter {
 
             // ===== Float math operations =====
             "sqrt" => {
+                validate_args!(args, 1, "sqrt");
                 // sqrt(x: Float) -> Float
                 let x = match &args[0] {
                     Value::Float(f) => *f,
@@ -2202,6 +2341,7 @@ impl Interpreter {
                 Ok(Some(Value::Float(x.sqrt())))
             }
             "pow" => {
+                validate_args!(args, 2, "pow");
                 // pow(base: Float, exp: Float) -> Float
                 let base = match &args[0] {
                     Value::Float(f) => *f,
@@ -2216,6 +2356,7 @@ impl Interpreter {
                 Ok(Some(Value::Float(base.powf(exp))))
             }
             "sin" => {
+                validate_args!(args, 1, "sin");
                 // sin(x: Float) -> Float
                 let x = match &args[0] {
                     Value::Float(f) => *f,
@@ -2225,6 +2366,7 @@ impl Interpreter {
                 Ok(Some(Value::Float(x.sin())))
             }
             "cos" => {
+                validate_args!(args, 1, "cos");
                 // cos(x: Float) -> Float
                 let x = match &args[0] {
                     Value::Float(f) => *f,
@@ -2234,6 +2376,7 @@ impl Interpreter {
                 Ok(Some(Value::Float(x.cos())))
             }
             "tan" => {
+                validate_args!(args, 1, "tan");
                 // tan(x: Float) -> Float
                 let x = match &args[0] {
                     Value::Float(f) => *f,
@@ -2243,6 +2386,7 @@ impl Interpreter {
                 Ok(Some(Value::Float(x.tan())))
             }
             "log" => {
+                validate_args!(args, 1, "log");
                 // log(x: Float) -> Float (natural log)
                 let x = match &args[0] {
                     Value::Float(f) => *f,
@@ -2252,6 +2396,7 @@ impl Interpreter {
                 Ok(Some(Value::Float(x.ln())))
             }
             "log10" => {
+                validate_args!(args, 1, "log10");
                 // log10(x: Float) -> Float
                 let x = match &args[0] {
                     Value::Float(f) => *f,
@@ -2261,6 +2406,7 @@ impl Interpreter {
                 Ok(Some(Value::Float(x.log10())))
             }
             "exp" => {
+                validate_args!(args, 1, "exp");
                 // exp(x: Float) -> Float (e^x)
                 let x = match &args[0] {
                     Value::Float(f) => *f,
@@ -2270,6 +2416,7 @@ impl Interpreter {
                 Ok(Some(Value::Float(x.exp())))
             }
             "floor" => {
+                validate_args!(args, 1, "floor");
                 // floor(x: Float) -> Int
                 let x = match &args[0] {
                     Value::Float(f) => *f,
@@ -2279,6 +2426,7 @@ impl Interpreter {
                 Ok(Some(Value::Int(x.floor() as i64)))
             }
             "ceil" => {
+                validate_args!(args, 1, "ceil");
                 // ceil(x: Float) -> Int
                 let x = match &args[0] {
                     Value::Float(f) => *f,
@@ -2288,6 +2436,7 @@ impl Interpreter {
                 Ok(Some(Value::Int(x.ceil() as i64)))
             }
             "round" => {
+                validate_args!(args, 1, "round");
                 // round(x: Float) -> Int
                 let x = match &args[0] {
                     Value::Float(f) => *f,
@@ -2297,6 +2446,7 @@ impl Interpreter {
                 Ok(Some(Value::Int(x.round() as i64)))
             }
             "abs_float" => {
+                validate_args!(args, 1, "abs_float");
                 // abs_float(x: Float) -> Float
                 let x = match &args[0] {
                     Value::Float(f) => *f,
@@ -2322,6 +2472,7 @@ impl Interpreter {
                 Ok(Some(Value::Int(now.as_millis() as i64)))
             }
             "time_sleep" => {
+                validate_args!(args, 1, "time_sleep");
                 // time_sleep(ms: Int) -> ()
                 let ms = match &args[0] {
                     Value::Int(n) => *n as u64,
@@ -2333,6 +2484,7 @@ impl Interpreter {
 
             // ===== Duration functions =====
             "duration_seconds" => {
+                validate_args!(args, 1, "duration_seconds");
                 // duration_seconds(secs: Int) -> Int (returns milliseconds)
                 let secs = match &args[0] {
                     Value::Int(n) => *n,
@@ -2341,6 +2493,7 @@ impl Interpreter {
                 Ok(Some(Value::Int(secs * 1000)))
             }
             "duration_minutes" => {
+                validate_args!(args, 1, "duration_minutes");
                 // duration_minutes(mins: Int) -> Int (returns milliseconds)
                 let mins = match &args[0] {
                     Value::Int(n) => *n,
@@ -2349,6 +2502,7 @@ impl Interpreter {
                 Ok(Some(Value::Int(mins * 60 * 1000)))
             }
             "duration_hours" => {
+                validate_args!(args, 1, "duration_hours");
                 // duration_hours(hours: Int) -> Int (returns milliseconds)
                 let hours = match &args[0] {
                     Value::Int(n) => *n,
@@ -2357,6 +2511,7 @@ impl Interpreter {
                 Ok(Some(Value::Int(hours * 60 * 60 * 1000)))
             }
             "duration_days" => {
+                validate_args!(args, 1, "duration_days");
                 // duration_days(days: Int) -> Int (returns milliseconds)
                 let days = match &args[0] {
                     Value::Int(n) => *n,
@@ -2367,6 +2522,7 @@ impl Interpreter {
 
             // ===== Async operations =====
             "sleep_async" => {
+                validate_args!(args, 1, "sleep_async");
                 let ms = match &args[0] {
                     Value::Int(n) => *n as u64,
                     _ => return Err(InterpError { message: "sleep_async: expected Int".to_string() })
@@ -2393,27 +2549,63 @@ impl Interpreter {
             }
 
             "timeout" => {
-                // timeout(ms: Int, task: Task[T]) -> Result[T, Str]
-                // In this simplified implementation, we don't actually timeout
-                // since we execute synchronously. Just return the task result.
-                let _ms = match &args[0] {
+                validate_args!(args, 2, "timeout");
+                // timeout(task: Task[T], ms: Int) -> Option[T]
+                // Returns Some(result) if completed in time, None if timeout
+                let task_id = match &args[0] {
+                    Value::TokioTask(id) => *id,
+                    _ => return Err(InterpError { message: "timeout: expected task".to_string() })
+                };
+                let ms = match &args[1] {
                     Value::Int(n) => *n as u64,
-                    _ => return Err(InterpError { message: "timeout: expected Int".to_string() })
+                    _ => return Err(InterpError { message: "timeout: expected Int for duration".to_string() })
                 };
-                let result = match &args[1] {
-                    Value::Task(inner) => (**inner).clone(),
-                    Value::Future(inner) => (**inner).clone(),
-                    other => other.clone(),
+
+                // Get the task handle
+                let handle = {
+                    let mut tasks = self.spawned_tasks.lock()
+                        .map_err(|_| InterpError { message: "Task registry mutex poisoned".to_string() })?;
+                    tasks.remove(&task_id)
                 };
-                // Return Ok(result) since we completed without timeout
-                Ok(Some(Value::Enum {
-                    type_name: "Result".to_string(),
-                    variant: "Ok".to_string(),
-                    fields: vec![result],
-                }))
+
+                let Some(handle) = handle else {
+                    return Err(InterpError { message: format!("task {} not found", task_id) });
+                };
+
+                // Race the task against a timeout
+                let result = self.runtime.block_on(async {
+                    tokio::time::timeout(
+                        tokio::time::Duration::from_millis(ms),
+                        handle
+                    ).await
+                });
+
+                match result {
+                    Ok(Ok(value)) => {
+                        // Task completed in time
+                        Ok(Some(Value::Enum {
+                            type_name: "Option".to_string(),
+                            variant: "Some".to_string(),
+                            fields: vec![value],
+                        }))
+                    }
+                    Ok(Err(e)) => {
+                        // Task panicked
+                        Err(InterpError { message: format!("task panicked: {}", e) })
+                    }
+                    Err(_elapsed) => {
+                        // Timeout occurred
+                        Ok(Some(Value::Enum {
+                            type_name: "Option".to_string(),
+                            variant: "None".to_string(),
+                            fields: vec![],
+                        }))
+                    }
+                }
             }
 
             "await_all" => {
+                validate_args!(args, 1, "await_all");
                 let tasks = match &args[0] {
                     Value::Array(arr) => arr.clone(),
                     _ => return Err(InterpError { message: "await_all: expected array of tasks".to_string() })
@@ -2445,26 +2637,53 @@ impl Interpreter {
             }
 
             "await_any" => {
+                validate_args!(args, 1, "await_any");
                 // await_any(tasks: [Task[T]]) -> T
-                // Returns the first completed task's result
-                // In synchronous mode, we just return the first task's result
+                // Returns the first completed task's result using true racing
                 let tasks = match &args[0] {
                     Value::Array(arr) => arr.clone(),
                     _ => return Err(InterpError { message: "await_any: expected array of tasks".to_string() })
                 };
-                if tasks.is_empty() {
-                    return Err(InterpError { message: "await_any: empty task array".to_string() });
+
+                // Collect task IDs
+                let task_ids: Vec<u64> = tasks.iter().filter_map(|t| {
+                    match t {
+                        Value::TokioTask(id) => Some(*id),
+                        _ => None,
+                    }
+                }).collect();
+
+                if task_ids.is_empty() {
+                    return Err(InterpError { message: "await_any: no tasks to await".to_string() });
                 }
-                let result = match &tasks[0] {
-                    Value::Task(inner) => (**inner).clone(),
-                    Value::Future(inner) => (**inner).clone(),
-                    other => other.clone(),
+
+                // Get all handles
+                let handles: Vec<_> = {
+                    let mut task_map = self.spawned_tasks.lock()
+                        .map_err(|_| InterpError { message: "Task registry mutex poisoned".to_string() })?;
+                    task_ids.iter().filter_map(|id| task_map.remove(id)).collect()
                 };
-                Ok(Some(result))
+
+                if handles.is_empty() {
+                    return Err(InterpError { message: "await_any: no valid task handles".to_string() });
+                }
+
+                // Race all tasks using select_all
+                let (result, _completed_idx, _remaining) = self.runtime.block_on(async {
+                    futures::future::select_all(handles).await
+                });
+
+                // Return the first completed result
+                let value = result.map_err(|e| InterpError {
+                    message: format!("task panicked: {}", e)
+                })?;
+
+                Ok(Some(value))
             }
 
             // ===== Channel operations =====
             "channel_new" => {
+                validate_args!(args, 1, "channel_new");
                 // channel_new(capacity: Int) -> (Sender[T], Receiver[T])
                 let capacity = match &args[0] {
                     Value::Int(n) => *n as usize,
@@ -2477,6 +2696,7 @@ impl Interpreter {
             }
 
             "channel_send" => {
+                validate_args!(args, 2, "channel_send");
                 // channel_send(sender: Sender[T], value: T) -> Result[(), Str]
                 let id = match &args[0] {
                     Value::Sender(id) => *id,
@@ -2515,6 +2735,7 @@ impl Interpreter {
             }
 
             "channel_recv" => {
+                validate_args!(args, 1, "channel_recv");
                 // channel_recv(receiver: Receiver[T]) -> Result[T, Str]
                 let id = match &args[0] {
                     Value::Receiver(id) => *id,
@@ -2552,6 +2773,7 @@ impl Interpreter {
             }
 
             "channel_try_send" => {
+                validate_args!(args, 2, "channel_try_send");
                 // channel_try_send(sender: Sender[T], value: T) -> Bool
                 let id = match &args[0] {
                     Value::Sender(id) => *id,
@@ -2571,6 +2793,7 @@ impl Interpreter {
             }
 
             "channel_try_recv" => {
+                validate_args!(args, 1, "channel_try_recv");
                 // channel_try_recv(receiver: Receiver[T]) -> T?
                 let id = match &args[0] {
                     Value::Receiver(id) => *id,
@@ -2601,6 +2824,7 @@ impl Interpreter {
             }
 
             "channel_close" => {
+                validate_args!(args, 1, "channel_close");
                 // channel_close(sender: Sender[T]) -> ()
                 let id = match &args[0] {
                     Value::Sender(id) => *id,
@@ -2615,6 +2839,7 @@ impl Interpreter {
 
             // ===== Mutex operations =====
             "mutex_new" => {
+                validate_args!(args, 1, "mutex_new");
                 // mutex_new(value: T) -> Mutex[T]
                 let value = args[0].clone();
                 let id = self.next_mutex_id;
@@ -2624,6 +2849,7 @@ impl Interpreter {
             }
 
             "mutex_lock" => {
+                validate_args!(args, 1, "mutex_lock");
                 // mutex_lock(m: Mutex[T]) -> MutexGuard[T]
                 let id = match &args[0] {
                     Value::Mutex(id) => *id,
@@ -6840,5 +7066,38 @@ f main() -> Int = unwrap(safe_add_one(Some(41)))
         )
         .unwrap();
         assert_eq!(result, Value::Int(42));
+    }
+
+    #[test]
+    fn test_builtin_arg_validation() {
+        use super::*;
+
+        // Create a minimal program for testing
+        let program = Program::new();
+
+        let mut interp = Interpreter::new(program).unwrap();
+
+        // Test vec_len with no args (requires 1)
+        let result = interp.call_builtin("vec_len", &[]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("requires 1 argument"));
+
+        // Test vec_get with 1 arg (requires 2)
+        let result = interp.call_builtin("vec_get", &[Value::Array(vec![])]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("requires 2 argument"));
+
+        // Test str_slice with 2 args (requires 3)
+        let result = interp.call_builtin("str_slice", &[
+            Value::Str("hello".to_string()),
+            Value::Int(0),
+        ]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("requires 3 argument"));
+
+        // Test that valid args work
+        let result = interp.call_builtin("vec_len", &[Value::Array(vec![Value::Int(1), Value::Int(2)])]);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Some(Value::Int(2)));
     }
 }

@@ -17,6 +17,14 @@ use crate::parser::{
 
 use super::types::{Mutability, Substitution, Ty, TypeId, TypeScheme, TypeVar};
 
+/// Reserved TypeVar IDs for method type substitution.
+/// These are used to represent generic parameters in builtin method signatures.
+pub mod reserved_type_vars {
+    pub const ELEM_TYPE: u32 = u32::MAX;      // T (element type)
+    pub const KEY_TYPE: u32 = u32::MAX - 1;   // K (key type)
+    pub const VALUE_TYPE: u32 = u32::MAX - 2; // V (value type)
+}
+
 /// Type error during inference.
 #[derive(Debug, Clone)]
 pub struct TypeError {
@@ -3170,14 +3178,15 @@ impl InferenceEngine {
     }
 
     /// Substitute sentinel type variables with actual element types.
-    /// Sentinel TypeVar ids: 99999 = T (element), 99998 = K (key), 99997 = V (value)
+    /// Uses reserved_type_vars constants for T (element), K (key), V (value)
     fn substitute_elem_types(&self, ty: &Ty, elem_types: &[Ty]) -> Ty {
+        use reserved_type_vars::*;
         match ty {
             Ty::Var(tv) => {
                 match tv.id {
-                    99999 => elem_types.first().cloned().unwrap_or(Ty::Var(*tv)),
-                    99998 => elem_types.first().cloned().unwrap_or(Ty::Var(*tv)), // K for maps
-                    99997 => elem_types.get(1).cloned().unwrap_or(Ty::Var(*tv)),  // V for maps
+                    ELEM_TYPE => elem_types.first().cloned().unwrap_or(Ty::Var(*tv)),
+                    KEY_TYPE => elem_types.first().cloned().unwrap_or(Ty::Var(*tv)), // K for maps
+                    VALUE_TYPE => elem_types.get(1).cloned().unwrap_or(Ty::Var(*tv)),  // V for maps
                     _ => Ty::Var(*tv),
                 }
             }
