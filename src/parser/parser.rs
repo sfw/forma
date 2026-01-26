@@ -73,15 +73,17 @@ impl<'a> Parser<'a> {
         let is_async = self.match_token(TokenKind::As);
         let is_unsafe = self.match_token(TokenKind::Un);
 
-        let mut kind = if self.check(TokenKind::F) {
+        // Use contextual keyword checks for single-letter keywords (f, s, e, t, i)
+        // These are now emitted as Ident tokens and distinguished by lookahead
+        let mut kind = if self.is_function_keyword() {
             self.parse_function(is_async, is_unsafe, vis)?
-        } else if self.check(TokenKind::S) {
+        } else if self.is_struct_keyword() {
             ItemKind::Struct(self.parse_struct(vis)?)
-        } else if self.check(TokenKind::E) {
+        } else if self.is_enum_keyword() {
             ItemKind::Enum(self.parse_enum(vis)?)
-        } else if self.check(TokenKind::T) {
+        } else if self.is_trait_keyword() {
             ItemKind::Trait(self.parse_trait(is_unsafe, vis)?)
-        } else if self.check(TokenKind::I) {
+        } else if self.is_impl_keyword() {
             ItemKind::Impl(self.parse_impl(is_unsafe)?)
         } else if self.check(TokenKind::Type) {
             ItemKind::TypeAlias(self.parse_type_alias()?)
@@ -262,7 +264,7 @@ impl<'a> Parser<'a> {
 
     fn parse_function(&mut self, is_async: bool, is_unsafe: bool, vis: Visibility) -> Result<ItemKind> {
         let start = self.current_span();
-        self.expect(TokenKind::F)?;
+        self.expect_contextual("f")?;  // f is now a contextual keyword
         let name = self.parse_ident()?;
 
         let generics = self.parse_optional_generics()?;
@@ -406,7 +408,7 @@ impl<'a> Parser<'a> {
 
     fn parse_struct(&mut self, vis: Visibility) -> Result<Struct> {
         let start = self.current_span();
-        self.expect(TokenKind::S)?;
+        self.expect_contextual("s")?;  // s is now a contextual keyword
         let name = self.parse_ident()?;
         let generics = self.parse_optional_generics()?;
 
@@ -520,7 +522,7 @@ impl<'a> Parser<'a> {
 
     fn parse_enum(&mut self, vis: Visibility) -> Result<Enum> {
         let start = self.current_span();
-        self.expect(TokenKind::E)?;
+        self.expect_contextual("e")?;  // e is now a contextual keyword
         let name = self.parse_ident()?;
         let generics = self.parse_optional_generics()?;
 
@@ -629,7 +631,7 @@ impl<'a> Parser<'a> {
 
     fn parse_trait(&mut self, is_unsafe: bool, vis: Visibility) -> Result<Trait> {
         let start = self.current_span();
-        self.expect(TokenKind::T)?;
+        self.expect_contextual("t")?;  // t is now a contextual keyword
         let name = self.parse_ident()?;
         let generics = self.parse_optional_generics()?;
 
@@ -699,7 +701,7 @@ impl<'a> Parser<'a> {
     fn parse_trait_item(&mut self) -> Result<TraitItem> {
         if self.check(TokenKind::Type) {
             Ok(TraitItem::TypeAlias(self.parse_type_alias()?))
-        } else if self.check(TokenKind::F) || self.check(TokenKind::As) {
+        } else if self.is_function_keyword() || self.check(TokenKind::As) {
             let is_async = self.match_token(TokenKind::As);
             match self.parse_function(is_async, false, Visibility::Private)? {
                 ItemKind::Function(f) => Ok(TraitItem::Function(f)),
@@ -712,7 +714,7 @@ impl<'a> Parser<'a> {
 
     fn parse_impl(&mut self, is_unsafe: bool) -> Result<Impl> {
         let start = self.current_span();
-        self.expect(TokenKind::I)?;
+        self.expect_contextual("i")?;  // i is now a contextual keyword
 
         let generics = self.parse_optional_generics()?;
 
@@ -790,7 +792,7 @@ impl<'a> Parser<'a> {
     fn parse_impl_item(&mut self) -> Result<ImplItem> {
         if self.check(TokenKind::Type) {
             Ok(ImplItem::TypeAlias(self.parse_type_alias()?))
-        } else if self.check(TokenKind::F) || self.check(TokenKind::As) || self.check(TokenKind::Pub) {
+        } else if self.is_function_keyword() || self.check(TokenKind::As) || self.check(TokenKind::Pub) {
             let vis = self.parse_visibility()?;
             let is_async = self.match_token(TokenKind::As);
             match self.parse_function(is_async, false, vis)? {
@@ -1736,7 +1738,7 @@ impl<'a> Parser<'a> {
             return self.parse_if_expr(start);
         }
 
-        if self.check(TokenKind::M) {
+        if self.is_match_keyword() {
             return self.parse_match_expr();
         }
 
@@ -2161,7 +2163,7 @@ impl<'a> Parser<'a> {
 
     fn parse_match_expr(&mut self) -> Result<Expr> {
         let start = self.current_span();
-        self.expect(TokenKind::M)?;
+        self.expect_contextual("m")?;  // m is now a contextual keyword
         let scrutinee = self.parse_expr()?;
 
         let arms = if self.check(TokenKind::LBrace) {
@@ -2860,19 +2862,10 @@ impl<'a> Parser<'a> {
             || self.check(TokenKind::Us)
             || self.check(TokenKind::Md);
 
-        // Single-letter keywords need lookahead: item if followed by an identifier (the item name)
-        let is_single_letter_keyword = self.check(TokenKind::F)
-            || self.check(TokenKind::S)
-            || self.check(TokenKind::E)
-            || self.check(TokenKind::T)
-            || self.check(TokenKind::I);
-
-        // For single-letter keywords, check if next token is an identifier or type params
-        // f name(...) - function, f<T> - generic function
-        // s Name - struct
-        // But NOT: s := 42, s = 42, s (alone), s + 1
-        let is_item = is_unambiguous_item
-            || (is_single_letter_keyword && self.next_token_is_item_name());
+        // Single-letter keywords (f, s, e, t, i) are now contextual - use lookahead helpers
+        // These return true only when the identifier looks like a keyword in item position
+        // e.g., "f name(" is a function, but "f := 42" is a variable assignment
+        let is_item = is_unambiguous_item || self.is_item_start();
 
         if is_item {
             let item = self.parse_item()?;
@@ -2986,24 +2979,18 @@ impl<'a> Parser<'a> {
         let span = self.current_span();
         let lexeme = self.current().map(|t| t.lexeme.clone());
         match self.current_kind() {
+            // Single-letter keywords (f, s, e, t, i, m) are now emitted as Ident tokens
+            // so they are handled by this case automatically
             Some(TokenKind::Ident(ref name)) => {
                 let name = name.clone();
                 self.advance();
                 Ok(Ident { name, span })
             }
-            // Allow keywords as identifiers in certain contexts
-            // Use the original lexeme to preserve case (T vs t, etc.)
-            Some(TokenKind::I)
-            | Some(TokenKind::T)
-            | Some(TokenKind::S)
-            | Some(TokenKind::E)
-            | Some(TokenKind::M)
-            | Some(TokenKind::F)
             // T and F are also lexed as True/False, but can be type params
-            | Some(TokenKind::True)
+            // Builtin constructors can also be identifiers (enum variants, etc.)
+            Some(TokenKind::True)
             | Some(TokenKind::False)
             | Some(TokenKind::None)
-            // Builtin constructors can also be identifiers (enum variants, etc.)
             | Some(TokenKind::Some)
             | Some(TokenKind::Ok)
             | Some(TokenKind::Err) => {
@@ -3018,15 +3005,11 @@ impl<'a> Parser<'a> {
     }
 
     fn check_ident(&mut self) -> bool {
+        // Single-letter keywords (f, s, e, t, i, m) are now emitted as Ident tokens
+        // so they are handled by the Ident(_) case
         matches!(
             self.current_kind(),
             Some(TokenKind::Ident(_))
-                | Some(TokenKind::I)
-                | Some(TokenKind::T)
-                | Some(TokenKind::S)
-                | Some(TokenKind::E)
-                | Some(TokenKind::M)
-                | Some(TokenKind::F)
                 | Some(TokenKind::True)
                 | Some(TokenKind::False)
                 | Some(TokenKind::None)
@@ -3041,6 +3024,174 @@ impl<'a> Parser<'a> {
             Some(TokenKind::Ident(ref name)) => name == s,
             _ => false,
         }
+    }
+
+    // ========================================================================
+    // Contextual Keyword Helpers
+    // ========================================================================
+    // Single-letter keywords (f, s, e, t, i, m) are now emitted as Ident tokens.
+    // These helpers determine if an Ident should be treated as a keyword based
+    // on lookahead context.
+
+    /// Check if current token is a contextual keyword with the given name
+    fn check_contextual(&self, keyword: &str) -> bool {
+        match self.tokens.get(self.pos).map(|t| &t.kind) {
+            Some(TokenKind::Ident(name)) => name == keyword,
+            _ => false,
+        }
+    }
+
+    /// Check if next token (peek +1) is an identifier
+    fn peek_is_ident(&self) -> bool {
+        matches!(
+            self.tokens.get(self.pos + 1).map(|t| &t.kind),
+            Some(TokenKind::Ident(_))
+        )
+    }
+
+    /// Get the token kind at position pos + offset
+    fn peek_kind(&self, offset: usize) -> Option<&TokenKind> {
+        self.tokens.get(self.pos + offset).map(|t| &t.kind)
+    }
+
+    /// Check if 'f' is being used as the function keyword.
+    /// True when: f <name>( or f <name>[
+    fn is_function_keyword(&self) -> bool {
+        if !self.check_contextual("f") {
+            return false;
+        }
+        // f must be followed by identifier (function name)
+        self.peek_is_ident()
+    }
+
+    /// Check if 's' is being used as the struct keyword.
+    /// True when: s <Name> { or s <Name>[ or s <Name>( or s <Name> (unit struct)
+    fn is_struct_keyword(&self) -> bool {
+        if !self.check_contextual("s") {
+            return false;
+        }
+        // s must be followed by identifier, then { or [ or ( or Newline or EOF
+        if !self.peek_is_ident() {
+            return false;
+        }
+        // Unit struct: s Name followed by nothing or newline or EOF
+        // Struct with body: s Name { or s Name[ or s Name(
+        matches!(
+            self.peek_kind(2),
+            Some(TokenKind::LBrace) | Some(TokenKind::LBracket) | Some(TokenKind::LParen)
+                | Some(TokenKind::Newline) | Some(TokenKind::Eof) | None
+        )
+    }
+
+    /// Check if 'e' is being used as the enum keyword.
+    /// True when: e <Name> { or e <Name>[ or e <Name> = (inline enum)
+    fn is_enum_keyword(&self) -> bool {
+        if !self.check_contextual("e") {
+            return false;
+        }
+        if !self.peek_is_ident() {
+            return false;
+        }
+        // Enum with body: e Name { or e Name[
+        // Inline enum: e Name = Variant | ...
+        matches!(
+            self.peek_kind(2),
+            Some(TokenKind::LBrace) | Some(TokenKind::LBracket) | Some(TokenKind::Newline)
+                | Some(TokenKind::Eq)  // Inline enum: e Bool = True | False
+        )
+    }
+
+    /// Check if 't' is being used as the trait keyword.
+    /// True when: t <Name> { or t <Name>[ or t <Name>:
+    fn is_trait_keyword(&self) -> bool {
+        if !self.check_contextual("t") {
+            return false;
+        }
+        if !self.peek_is_ident() {
+            return false;
+        }
+        matches!(
+            self.peek_kind(2),
+            Some(TokenKind::LBrace) | Some(TokenKind::LBracket) | Some(TokenKind::Colon) | Some(TokenKind::Newline)
+        )
+    }
+
+    /// Check if 'i' is being used as the impl keyword.
+    /// True when: i <TypeName>
+    fn is_impl_keyword(&self) -> bool {
+        if !self.check_contextual("i") {
+            return false;
+        }
+        // i must be followed by identifier (type name)
+        self.peek_is_ident()
+    }
+
+    /// Check if 'm' is being used as the match keyword.
+    /// True when: m <expr> (NOT when followed by operators that suggest 'm' is a variable)
+    fn is_match_keyword(&self) -> bool {
+        if !self.check_contextual("m") {
+            return false;
+        }
+        // If followed by an operator that would make 'm' a variable in an expression,
+        // then it's NOT the match keyword
+        // This includes: assignment, comparison, arithmetic, logical operators
+        !matches!(
+            self.peek_kind(1),
+            // Assignment operators
+            Some(TokenKind::ColonEq)
+                | Some(TokenKind::Eq)
+                | Some(TokenKind::PlusEq)
+                | Some(TokenKind::MinusEq)
+                | Some(TokenKind::StarEq)
+                | Some(TokenKind::SlashEq)
+                | Some(TokenKind::PercentEq)
+                // Comparison operators
+                | Some(TokenKind::EqEq)
+                | Some(TokenKind::BangEq)
+                | Some(TokenKind::Lt)
+                | Some(TokenKind::LtEq)
+                | Some(TokenKind::Gt)
+                | Some(TokenKind::GtEq)
+                // Arithmetic operators
+                | Some(TokenKind::Plus)
+                | Some(TokenKind::Minus)
+                | Some(TokenKind::Star)
+                | Some(TokenKind::Slash)
+                | Some(TokenKind::Percent)
+                // Logical operators
+                | Some(TokenKind::AmpAmp)
+                | Some(TokenKind::PipePipe)
+                // Bitwise operators
+                | Some(TokenKind::Amp)
+                | Some(TokenKind::Pipe)
+                | Some(TokenKind::Caret)
+                | Some(TokenKind::LtLt)
+                | Some(TokenKind::GtGt)
+                // Other expression operators
+                | Some(TokenKind::Dot)
+                | Some(TokenKind::Question)
+                | Some(TokenKind::Bang)
+                | Some(TokenKind::LBracket)  // m[index]
+                | Some(TokenKind::LParen)    // m(args) - function call
+                // Delimiters that indicate end of expression
+                | Some(TokenKind::Colon)
+                | Some(TokenKind::Comma)
+                | Some(TokenKind::RParen)
+                | Some(TokenKind::RBracket)
+                | Some(TokenKind::RBrace)
+                | Some(TokenKind::Semicolon)
+                | Some(TokenKind::Newline)  // m followed by newline = variable, not match
+                | Some(TokenKind::Eof)
+        )
+    }
+
+    /// Check if current position starts an item declaration using contextual keywords
+    fn is_item_start(&self) -> bool {
+        self.is_function_keyword()
+            || self.is_struct_keyword()
+            || self.is_enum_keyword()
+            || self.is_trait_keyword()
+            || self.is_impl_keyword()
     }
 
     /// Check if a name is a castable type and return the corresponding Type AST node.
@@ -3077,6 +3228,7 @@ impl<'a> Parser<'a> {
     }
 
     fn check_expr_start(&mut self) -> bool {
+        // check_ident() now handles Ident tokens including contextual keywords (m, f, s, e, t, i)
         self.check_ident()
             || matches!(
                 self.current_kind(),
@@ -3098,7 +3250,6 @@ impl<'a> Parser<'a> {
                     | Some(TokenKind::Minus)
                     | Some(TokenKind::Bang)
                     | Some(TokenKind::If)
-                    | Some(TokenKind::M)
                     | Some(TokenKind::For)
                     | Some(TokenKind::Wh)
                     | Some(TokenKind::Lp)
@@ -3166,21 +3317,19 @@ impl<'a> Parser<'a> {
             if let Some(prev) = self.tokens.get(self.pos.saturating_sub(1)) {
                 if prev.kind == TokenKind::Newline {
                     // Check if current token starts a new item
-                    if matches!(
-                        self.current_kind(),
-                        Some(TokenKind::F)      // function
-                        | Some(TokenKind::S)   // struct
-                        | Some(TokenKind::E)   // enum
-                        | Some(TokenKind::T)   // trait
-                        | Some(TokenKind::I)   // impl
-                        | Some(TokenKind::Type) // type alias
-                        | Some(TokenKind::Us)  // use
-                        | Some(TokenKind::Md)  // module
-                        | Some(TokenKind::At)  // attribute (starts an item)
-                        | Some(TokenKind::As)  // async modifier
-                        | Some(TokenKind::Un)  // unsafe modifier
-                        | Some(TokenKind::Pub) // pub modifier
-                    ) {
+                    // Single-letter keywords are now contextual (emitted as Ident)
+                    if self.is_item_start()
+                        || matches!(
+                            self.current_kind(),
+                            Some(TokenKind::Type) // type alias
+                            | Some(TokenKind::Us)  // use
+                            | Some(TokenKind::Md)  // module
+                            | Some(TokenKind::At)  // attribute (starts an item)
+                            | Some(TokenKind::As)  // async modifier
+                            | Some(TokenKind::Un)  // unsafe modifier
+                            | Some(TokenKind::Pub) // pub modifier
+                        )
+                    {
                         return;
                     }
                 }
@@ -3199,26 +3348,20 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Expect a contextual keyword (single-letter keywords that are now Ident tokens)
+    fn expect_contextual(&mut self, keyword: &str) -> Result<()> {
+        if self.check_contextual(keyword) {
+            self.advance();
+            Ok(())
+        } else {
+            Err(self.error(format!("expected '{}'", keyword)))
+        }
+    }
+
     fn peek_is(&self, kind: TokenKind) -> bool {
         self.tokens
             .get(self.pos + 1)
             .is_some_and(|t| t.kind == kind)
-    }
-
-    /// Check if the next token (after current) looks like an item name.
-    /// This is used to distinguish:
-    /// - `s MyStruct` (struct declaration) from `s := 42` (variable binding) or `s` (variable ref)
-    /// - `f foo(` (function) from `f := 42` or `f`
-    fn next_token_is_item_name(&self) -> bool {
-        match self.tokens.get(self.pos + 1).map(|t| &t.kind) {
-            // Next token is an identifier - looks like an item name
-            Some(TokenKind::Ident(_)) => true,
-            // Next token is < for generic params like f<T>
-            Some(TokenKind::Lt) => true,
-            // Next token is ( for tuple struct like s Point(x, y) - wait that's not right
-            // Actually `s Point(` would have Point as Ident first, so this is covered
-            _ => false,
-        }
     }
 
     fn skip_newlines(&mut self) {

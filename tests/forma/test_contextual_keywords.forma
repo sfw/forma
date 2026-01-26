@@ -1,0 +1,95 @@
+# Test contextual keywords - single-letter keywords can be used as variable names
+# This verifies Sprint 12 (Pillar 1 alignment)
+
+# Test 'm' as variable name
+f test_m_as_variable() -> Bool
+    m := 42
+    m == 42
+
+# Test 's' as variable name (string parameter)
+f test_s_as_param() -> Bool
+    s := "hello"
+    str_len(s) == 5
+
+f get_length(s: Str) -> Int
+    str_len(s)
+
+f test_s_in_function_param() -> Bool
+    get_length("world") == 5
+
+# Test 'e' as variable name (error)
+f test_e_as_param() -> Bool
+    e := "something went wrong"
+    str_len(e) > 0
+
+f format_error(e: Str) -> Str
+    "Error: " + e
+
+f test_e_in_function_param() -> Bool
+    format_error("test") == "Error: test"
+
+# Test 'i' as variable name (index)
+f test_i_as_index() -> Bool
+    i := 42
+    i == 42
+
+# Test 't' as variable name
+f test_t_as_variable() -> Bool
+    t := 3.14
+    t > 3.0
+
+# Test all letters in tuple destructuring
+f test_tuple_destructure() -> Bool
+    (m, s, e) := (1, "two", 3.0)
+    m == 1 && s == "two" && e > 2.0
+
+# Test match still works with 'm' syntax
+f test_match_syntax() -> Bool
+    x := Some(42)
+    m x
+        Some(v) -> v == 42
+        None -> false
+
+# Test 'm' as pattern binding inside match
+f test_m_in_pattern() -> Bool
+    opt := Some(100)
+    m opt
+        Some(m) -> m == 100
+        None -> false
+
+# Test 'f' as variable name
+f test_f_as_variable() -> Bool
+    f := 100
+    f == 100
+
+# Test that 'm' can be used then match on it
+f test_m_var_then_match() -> Bool
+    m := Some(99)
+    m m
+        Some(v) -> v == 99
+        None -> false
+
+# Main test runner
+f main() -> Int
+    passed := 0
+    total := 12
+
+    if test_m_as_variable() then passed = passed + 1 else print("FAIL: test_m_as_variable")
+    if test_s_as_param() then passed = passed + 1 else print("FAIL: test_s_as_param")
+    if test_s_in_function_param() then passed = passed + 1 else print("FAIL: test_s_in_function_param")
+    if test_e_as_param() then passed = passed + 1 else print("FAIL: test_e_as_param")
+    if test_e_in_function_param() then passed = passed + 1 else print("FAIL: test_e_in_function_param")
+    if test_i_as_index() then passed = passed + 1 else print("FAIL: test_i_as_index")
+    if test_t_as_variable() then passed = passed + 1 else print("FAIL: test_t_as_variable")
+    if test_tuple_destructure() then passed = passed + 1 else print("FAIL: test_tuple_destructure")
+    if test_match_syntax() then passed = passed + 1 else print("FAIL: test_match_syntax")
+    if test_m_in_pattern() then passed = passed + 1 else print("FAIL: test_m_in_pattern")
+    if test_f_as_variable() then passed = passed + 1 else print("FAIL: test_f_as_variable")
+    if test_m_var_then_match() then passed = passed + 1 else print("FAIL: test_m_var_then_match")
+
+    print("Contextual keyword tests passed:")
+    print(passed)
+    print("of")
+    print(total)
+
+    if passed == total then 1 else 0

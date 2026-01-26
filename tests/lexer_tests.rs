@@ -19,7 +19,8 @@ fn test_function_declaration() {
     let source = "f add(a: Int, b: Int) -> Int";
     let toks = tokens(source);
 
-    assert_eq!(toks[0], TokenKind::F);
+    // f is now a contextual keyword - emitted as Ident
+    assert!(matches!(toks[0], TokenKind::Ident(ref s) if s == "f"));
     assert!(matches!(toks[1], TokenKind::Ident(_)));
     assert_eq!(toks[2], TokenKind::LParen);
 }
@@ -29,7 +30,8 @@ fn test_struct_declaration() {
     let source = "s Point\n    x: Float\n    y: Float";
     let toks = tokens(source);
 
-    assert_eq!(toks[0], TokenKind::S);
+    // s is now a contextual keyword - emitted as Ident
+    assert!(matches!(toks[0], TokenKind::Ident(ref s) if s == "s"));
     assert!(matches!(toks[1], TokenKind::Ident(ref s) if s == "Point"));
     assert!(toks.contains(&TokenKind::Indent));
 }
@@ -39,7 +41,8 @@ fn test_enum_declaration() {
     let source = "e Direction\n    North\n    South";
     let toks = tokens(source);
 
-    assert_eq!(toks[0], TokenKind::E);
+    // e is now a contextual keyword - emitted as Ident
+    assert!(matches!(toks[0], TokenKind::Ident(ref s) if s == "e"));
     assert!(matches!(toks[1], TokenKind::Ident(ref s) if s == "Direction"));
 }
 
@@ -48,7 +51,8 @@ fn test_trait_declaration() {
     let source = "t Display\n    f display(&self) -> Str";
     let toks = tokens(source);
 
-    assert_eq!(toks[0], TokenKind::T);
+    // t is now a contextual keyword - emitted as Ident
+    assert!(matches!(toks[0], TokenKind::Ident(ref s) if s == "t"));
     assert!(matches!(toks[1], TokenKind::Ident(ref s) if s == "Display"));
 }
 
@@ -57,7 +61,8 @@ fn test_impl_block() {
     let source = "i Display for Point\n    f display(&self) -> Str";
     let toks = tokens(source);
 
-    assert_eq!(toks[0], TokenKind::I);
+    // i is now a contextual keyword - emitted as Ident
+    assert!(matches!(toks[0], TokenKind::Ident(ref s) if s == "i"));
     assert!(matches!(toks[1], TokenKind::Ident(ref s) if s == "Display"));
 }
 
@@ -66,19 +71,34 @@ fn test_match_expression() {
     let source = "m x\n    0 -> \"zero\"\n    _ -> \"other\"";
     let toks = tokens(source);
 
-    assert_eq!(toks[0], TokenKind::M);
+    // m is now a contextual keyword - emitted as Ident
+    assert!(matches!(toks[0], TokenKind::Ident(ref s) if s == "m"));
     assert!(toks.contains(&TokenKind::Arrow));
 }
 
 #[test]
 fn test_all_keywords() {
+    // Single-letter keywords are now contextual - emitted as Ident tokens
+    let contextual_keywords = vec![
+        ("f", "f"),
+        ("s", "s"),
+        ("e", "e"),
+        ("t", "t"),
+        ("i", "i"),
+        ("m", "m"),
+    ];
+
+    for (source, expected_name) in contextual_keywords {
+        let toks = tokens(source);
+        assert!(
+            matches!(toks[0], TokenKind::Ident(ref s) if s == expected_name),
+            "contextual keyword '{}' should produce Ident(\"{}\")",
+            source, expected_name
+        );
+    }
+
+    // Multi-character keywords remain true keywords
     let keywords = vec![
-        ("f", TokenKind::F),
-        ("s", TokenKind::S),
-        ("e", TokenKind::E),
-        ("t", TokenKind::T),
-        ("i", TokenKind::I),
-        ("m", TokenKind::M),
         ("if", TokenKind::If),
         ("then", TokenKind::Then),
         ("else", TokenKind::Else),
@@ -353,4 +373,17 @@ f main
 "#;
 
     assert!(!has_errors(source), "complete program should have no errors");
+}
+
+// Test that single-letter keywords can be used as variable names
+#[test]
+fn test_contextual_keywords_as_variables() {
+    // m, s, f, e, t, i should all be valid variable names
+    let source = "m s f e t i";
+    let toks = tokens(source);
+
+    // All should be Ident tokens
+    for tok in &toks[..6] {
+        assert!(matches!(tok, TokenKind::Ident(_)), "single-letter should be Ident");
+    }
 }

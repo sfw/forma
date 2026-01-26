@@ -736,6 +736,13 @@ impl<'a> Scanner<'a> {
             return self.scan_fstring();
         }
 
+        // Single-letter keywords are CONTEXTUAL - emit as Ident, parser decides
+        // This allows using m, s, f, e, t, i as variable names
+        // (AI Code Generation First principle - natural names should work)
+        if matches!(lexeme.as_str(), "f" | "s" | "e" | "t" | "i" | "m") {
+            return self.make_token(TokenKind::Ident(lexeme));
+        }
+
         // Check if it's a keyword
         if let Some(kind) = TokenKind::keyword(&lexeme) {
             self.make_token(kind)
@@ -936,8 +943,14 @@ mod tests {
 
     #[test]
     fn test_keywords() {
-        assert_eq!(scan("f"), vec![TokenKind::F, TokenKind::Eof]);
-        assert_eq!(scan("s"), vec![TokenKind::S, TokenKind::Eof]);
+        // Single-letter keywords are now contextual - emitted as Ident
+        assert_eq!(scan("f"), vec![TokenKind::Ident("f".to_string()), TokenKind::Eof]);
+        assert_eq!(scan("s"), vec![TokenKind::Ident("s".to_string()), TokenKind::Eof]);
+        assert_eq!(scan("m"), vec![TokenKind::Ident("m".to_string()), TokenKind::Eof]);
+        assert_eq!(scan("e"), vec![TokenKind::Ident("e".to_string()), TokenKind::Eof]);
+        assert_eq!(scan("t"), vec![TokenKind::Ident("t".to_string()), TokenKind::Eof]);
+        assert_eq!(scan("i"), vec![TokenKind::Ident("i".to_string()), TokenKind::Eof]);
+        // Multi-character keywords are still keywords
         assert_eq!(scan("if"), vec![TokenKind::If, TokenKind::Eof]);
         assert_eq!(scan("then"), vec![TokenKind::Then, TokenKind::Eof]);
         assert_eq!(scan("else"), vec![TokenKind::Else, TokenKind::Eof]);
