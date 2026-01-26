@@ -358,6 +358,22 @@ impl Interpreter {
         self
     }
 
+    /// Get a reference to the current call frame, returning an error if the stack is empty.
+    fn current_frame(&self) -> Result<&Frame, InterpError> {
+        self.call_stack.last()
+            .ok_or_else(|| InterpError {
+                message: "internal error: empty call stack".to_string()
+            })
+    }
+
+    /// Get a mutable reference to the current call frame, returning an error if the stack is empty.
+    fn current_frame_mut(&mut self) -> Result<&mut Frame, InterpError> {
+        self.call_stack.last_mut()
+            .ok_or_else(|| InterpError {
+                message: "internal error: empty call stack".to_string()
+            })
+    }
+
     /// Run the program starting from the given function.
     pub fn run(&mut self, fn_name: &str, args: &[Value]) -> Result<Value, InterpError> {
         let func = self
@@ -434,7 +450,7 @@ impl Interpreter {
 
         // Check postconditions (with 'result' available)
         {
-            let frame = self.call_stack.last_mut().unwrap();
+            let frame = self.current_frame_mut()?;
             frame.contract_result = Some(result.clone());
         }
 
@@ -749,7 +765,7 @@ impl Interpreter {
                 });
             }
 
-            let frame = self.call_stack.last_mut().unwrap();
+            let frame = self.current_frame_mut()?;
             let block = &func.blocks[frame.current_block.0 as usize];
 
             // Execute statements
@@ -757,7 +773,7 @@ impl Interpreter {
                 match &stmt.kind {
                     StatementKind::Assign(local, rvalue) => {
                         let value = self.eval_rvalue(rvalue, func)?;
-                        let frame = self.call_stack.last_mut().unwrap();
+                        let frame = self.current_frame_mut()?;
                         frame.locals.insert(*local, value);
                     }
                     StatementKind::Nop => {}
@@ -783,7 +799,7 @@ impl Interpreter {
                 }
 
                 Terminator::Goto(target) => {
-                    let frame = self.call_stack.last_mut().unwrap();
+                    let frame = self.current_frame_mut()?;
                     frame.current_block = target;
                 }
 
@@ -793,7 +809,7 @@ impl Interpreter {
                     else_block,
                 } => {
                     let cond_val = self.eval_operand(&cond)?;
-                    let frame = self.call_stack.last_mut().unwrap();
+                    let frame = self.current_frame_mut()?;
 
                     let branch = match cond_val {
                         Value::Bool(true) => then_block,
@@ -813,7 +829,7 @@ impl Interpreter {
                     default,
                 } => {
                     let val = self.eval_operand(&operand)?;
-                    let frame = self.call_stack.last_mut().unwrap();
+                    let frame = self.current_frame_mut()?;
 
                     let target = match val {
                         Value::Int(n) => {
@@ -853,7 +869,7 @@ impl Interpreter {
                     };
 
                     // Store result and continue
-                    let frame = self.call_stack.last_mut().unwrap();
+                    let frame = self.current_frame_mut()?;
                     if let Some(d) = dest {
                         frame.locals.insert(d, result);
                     }
@@ -907,7 +923,7 @@ impl Interpreter {
                     };
 
                     // Store result and continue
-                    let frame = self.call_stack.last_mut().unwrap();
+                    let frame = self.current_frame_mut()?;
                     if let Some(d) = dest {
                         frame.locals.insert(d, result);
                     }
@@ -927,7 +943,7 @@ impl Interpreter {
                         other => Value::Task(Box::new(other)),
                     };
 
-                    let frame = self.call_stack.last_mut().unwrap();
+                    let frame = self.current_frame_mut()?;
                     if let Some(d) = dest {
                         frame.locals.insert(d, task_value);
                     }
@@ -947,7 +963,7 @@ impl Interpreter {
                         other => other, // For backwards compatibility
                     };
 
-                    let frame = self.call_stack.last_mut().unwrap();
+                    let frame = self.current_frame_mut()?;
                     if let Some(d) = dest {
                         frame.locals.insert(d, result);
                     }
@@ -5964,7 +5980,7 @@ impl Interpreter {
             }
 
             Rvalue::Ref(local, _mutability) => {
-                let frame = self.call_stack.last().unwrap();
+                let frame = self.current_frame()?;
                 let val = frame
                     .locals
                     .get(local)
@@ -6021,7 +6037,7 @@ impl Interpreter {
             }
 
             Rvalue::Discriminant(local) => {
-                let frame = self.call_stack.last().unwrap();
+                let frame = self.current_frame()?;
                 let val = frame.locals.get(local).cloned().unwrap_or(Value::Unit);
                 match val {
                     Value::Enum { type_name, variant, .. } => {
@@ -6057,7 +6073,7 @@ impl Interpreter {
             }
 
             Rvalue::EnumField(local, idx) => {
-                let frame = self.call_stack.last().unwrap();
+                let frame = self.current_frame()?;
                 let val = frame.locals.get(local).cloned().unwrap_or(Value::Unit);
                 match val {
                     Value::Enum { fields, .. } => {
@@ -6148,7 +6164,7 @@ impl Interpreter {
             Operand::Constant(c) => Ok(self.const_to_value(c)),
 
             Operand::Local(local) | Operand::Copy(local) | Operand::Move(local) => {
-                let frame = self.call_stack.last().unwrap();
+                let frame = self.current_frame()?;
                 frame
                     .locals
                     .get(local)

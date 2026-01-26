@@ -171,6 +171,13 @@ impl BorrowChecker {
         }
     }
 
+    /// Get a mutable reference to the current scope, panicking if the stack is empty.
+    /// This should never fail as the scope_stack is always initialized with at least one scope.
+    fn current_scope_mut(&mut self) -> &mut HashSet<String> {
+        self.scope_stack.last_mut()
+            .expect("internal error: empty scope stack in borrow checker")
+    }
+
     /// Check a complete source file.
     pub fn check(&mut self, file: &SourceFile) -> Result<(), Vec<BorrowError>> {
         for item in &file.items {
@@ -220,7 +227,7 @@ impl BorrowChecker {
                             is_ref_param: is_ref,
                         },
                     );
-                    self.scope_stack.last_mut().unwrap().insert(name);
+                    self.current_scope_mut().insert(name);
                 }
 
                 // Check body
@@ -552,7 +559,7 @@ impl BorrowChecker {
                             is_ref_param: is_ref,
                         },
                     );
-                    self.scope_stack.last_mut().unwrap().insert(param.name.name.clone());
+                    self.current_scope_mut().insert(param.name.name.clone());
                 }
                 self.check_expr(&closure.body);
                 self.pop_scope();
@@ -908,7 +915,7 @@ impl BorrowChecker {
                         is_ref_param: false,
                     },
                 );
-                self.scope_stack.last_mut().unwrap().insert(ident.name.clone());
+                self.current_scope_mut().insert(ident.name.clone());
             }
             PatternKind::Tuple(elems) => {
                 for elem in elems {
@@ -940,7 +947,7 @@ impl BorrowChecker {
                                 is_ref_param: false,
                             },
                         );
-                        self.scope_stack.last_mut().unwrap().insert(field.name.name.clone());
+                        self.current_scope_mut().insert(field.name.name.clone());
                     }
                 }
             }

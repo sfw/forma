@@ -2,7 +2,7 @@
 //!
 //! This module handles loading and resolving external modules from files.
 //! It supports the `us` (use) statement syntax:
-//! - `us stdlib.core` -> looks for `stdlib/core.forma`
+//! - `us std.core` -> looks for `std/core.forma`
 //! - `us my_module` -> looks for `my_module.forma`
 
 use std::collections::{HashMap, HashSet};
@@ -68,7 +68,7 @@ impl ModuleLoader {
 
     /// Resolve a module path to a file path.
     ///
-    /// Module paths like `stdlib.core` are converted to `stdlib/core.forma`.
+    /// Module paths like `std.core` are converted to `std/core.forma`.
     fn resolve_module_path(&self, module_path: &[String]) -> PathBuf {
         let mut path = self.base_dir.clone();
         for segment in module_path {
@@ -214,9 +214,43 @@ impl ModuleLoader {
                                     all_imported_items.push(item);
                                 }
                             }
+                        } else {
+                            // Try std/ directory for stdlib modules (std.core -> std/core.forma)
+                            let std_path = if module_path.first().map(|s| s.as_str()) == Some("std") {
+                                let mut p = PathBuf::from("std");
+                                for segment in module_path.iter().skip(1) {
+                                    p.push(segment);
+                                }
+                                p.set_extension("forma");
+                                p
+                            } else {
+                                PathBuf::new()
+                            };
+
+                            if !std_path.as_os_str().is_empty() && std_path.exists() {
+                                let module = self.load_module_file(&std_path)?;
+                                for item in module.items {
+                                    if !matches!(item.kind, ItemKind::Use(_)) {
+                                        all_imported_items.push(item);
+                                    }
+                                }
+                            } else {
+                                // Module not found - return error with helpful message
+                                let tried_paths = if std_path.as_os_str().is_empty() {
+                                    format!("'{}' and '{}'", file_path.display(), cwd_path.display())
+                                } else {
+                                    format!("'{}', '{}', and '{}'", file_path.display(), cwd_path.display(), std_path.display())
+                                };
+                                return Err(ModuleError {
+                                    message: format!(
+                                        "module not found: '{}' (tried {})",
+                                        module_path.join("."),
+                                        tried_paths
+                                    ),
+                                    path: None,
+                                });
+                            }
                         }
-                        // If neither path exists, we could either error or ignore
-                        // For now, we'll silently ignore missing modules
                     }
                 }
             }

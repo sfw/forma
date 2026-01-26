@@ -1,0 +1,54 @@
+# FORMA Standard Library - I/O Module
+# Basic input/output functions
+# Most I/O is handled by builtins, this provides documentation and wrappers
+
+# ============================================================
+# Output Functions (Builtins)
+# ============================================================
+
+# Print values to stdout with newline
+# print(args...) -> ()
+# Uses builtin: print
+# Note: print adds a newline automatically
+
+# ============================================================
+# Input Functions (Builtins)
+# ============================================================
+
+# Read a line from stdin
+# read_line() -> Str
+# Uses builtin: read_line
+
+# ============================================================
+# File I/O (Builtins)
+# ============================================================
+
+# Read entire file as string
+# file_read(path: Str) -> Result[Str, Str]
+# Uses builtin: file_read
+
+# Write string to file
+# file_write(path: Str, content: Str) -> Result[(), Str]
+# Uses builtin: file_write
+
+# Append string to file
+# file_append(path: Str, content: Str) -> Result[(), Str]
+# Uses builtin: file_append
+
+# Check if file exists
+# file_exists(path: Str) -> Bool
+# Uses builtin: file_exists
+
+# ============================================================
+# Utility Functions
+# ============================================================
+
+# Print string (wrapper, alias for print)
+f puts(s: Str)
+    print(s)
+
+# Read file or return default on error
+f file_read_or(path: Str, default: Str) -> Str
+    m file_read(path)
+        Ok(content) -> content
+        Err(_) -> default

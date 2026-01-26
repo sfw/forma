@@ -1,0 +1,47 @@
+# FORMA Standard Library - Prelude
+# Common functions automatically available
+# Use with: us std.prelude
+
+# This module serves as documentation for what's in the prelude.
+# In practice, these are all builtins and don't need importing.
+
+# ============================================================
+# Core Types (Built-in)
+# ============================================================
+# Int, Float, Bool, Str, Char
+# Option[T] = Some(T) | None
+# Result[T, E] = Ok(T) | Err(E)
+# Vec[T] = [T]
+# Map[K, V] = {K: V}
+
+# ============================================================
+# Core Functions (Builtins)
+# ============================================================
+
+# I/O
+# print(s: Str) -> ()
+# println(s: Str) -> ()
+# read_line() -> Str
+
+# Type conversion
+# int(x) -> Int
+# float(x) -> Float
+# str(x) -> Str
+# bool(x) -> Bool
+
+# Assertions
+# assert(condition: Bool) -> ()
+# assert_eq(a, b) -> ()
+
+# ============================================================
+# Commonly Re-exported
+# ============================================================
+
+# From std.vec
+# vec_new, vec_push, vec_pop, vec_get, vec_len, vec_is_empty
+
+# From std.string
+# str_len, str_concat, str_split, str_trim, str_contains
+
+# From std.map
+# map_new, map_insert, map_get, map_remove, map_keys, map_values

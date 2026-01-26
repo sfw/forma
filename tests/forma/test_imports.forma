@@ -1,0 +1,66 @@
+# Test Import System
+# Verifies that us (use) statements work correctly
+
+# Import stdlib modules
+us std.core
+us std.string
+us std.vec
+us std.io
+
+# Test that imported functions are available
+f test_core_import() -> Bool
+    # min and max should be available from std.core
+    result := min(10, 5)
+    result == 5
+
+f test_string_import() -> Bool
+    # String functions should be available
+    s := "hello world"
+    parts := str_split(s, " ")
+    vec_len(parts) == 2
+
+f test_vec_import() -> Bool
+    # Vec functions should be available
+    v := vec_new()
+    v = vec_push(v, 1)
+    v = vec_push(v, 2)
+    vec_len(v) == 2
+
+f test_io_import() -> Bool
+    # puts should be available from std.io
+    puts("Testing io import")
+    true
+
+f main() -> Int
+    passed := 0
+
+    if test_core_import()
+        print("PASS: test_core_import")
+        passed = passed + 1
+    else
+        print("FAIL: test_core_import")
+
+    if test_string_import()
+        print("PASS: test_string_import")
+        passed = passed + 1
+    else
+        print("FAIL: test_string_import")
+
+    if test_vec_import()
+        print("PASS: test_vec_import")
+        passed = passed + 1
+    else
+        print("FAIL: test_vec_import")
+
+    if test_io_import()
+        print("PASS: test_io_import")
+        passed = passed + 1
+    else
+        print("FAIL: test_io_import")
+
+    print("")
+    print("Import tests passed:")
+    print(passed)
+    print("of 4")
+
+    if passed == 4 then 0 else 1

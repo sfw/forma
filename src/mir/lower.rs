@@ -92,6 +92,30 @@ impl Lowerer {
         }
     }
 
+    /// Get the current block ID, returning an error if none is set.
+    fn current_block_id(&self) -> Result<BlockId, LowerError> {
+        self.current_block.ok_or_else(|| LowerError {
+            message: "internal error: no current block".to_string(),
+            span: Span { start: 0, end: 0, line: 0, column: 0 },
+        })
+    }
+
+    /// Get a reference to the current function, returning an error if none is set.
+    fn current_function(&self) -> Result<&Function, LowerError> {
+        self.current_fn.as_ref().ok_or_else(|| LowerError {
+            message: "internal error: no current function".to_string(),
+            span: Span { start: 0, end: 0, line: 0, column: 0 },
+        })
+    }
+
+    /// Get a mutable reference to the current function, returning an error if none is set.
+    fn current_function_mut(&mut self) -> Result<&mut Function, LowerError> {
+        self.current_fn.as_mut().ok_or_else(|| LowerError {
+            message: "internal error: no current function".to_string(),
+            span: Span { start: 0, end: 0, line: 0, column: 0 },
+        })
+    }
+
     /// Lower a source file to MIR.
     pub fn lower(mut self, source: &SourceFile) -> Result<Program, Vec<LowerError>> {
         // First pass: collect type definitions (enums, structs) so we know about variants
@@ -309,13 +333,13 @@ impl Lowerer {
 
         // Add return
         if let Some(result) = result {
-            let block = self.current_block.unwrap();
-            if self.current_fn.as_ref().unwrap().block(block).terminator.is_none() {
+            let block = self.current_block_id().ok()?;
+            if self.current_function().ok()?.block(block).terminator.is_none() {
                 self.terminate(Terminator::Return(Some(result)));
             }
         } else {
-            let block = self.current_block.unwrap();
-            if self.current_fn.as_ref().unwrap().block(block).terminator.is_none() {
+            let block = self.current_block_id().ok()?;
+            if self.current_function().ok()?.block(block).terminator.is_none() {
                 self.terminate(Terminator::Return(None));
             }
         }
@@ -1274,7 +1298,7 @@ impl Lowerer {
         // This ensures the result variable is always defined on all paths
         let then_operand = then_val.unwrap_or(Operand::Constant(Constant::Unit));
         self.emit(StatementKind::Assign(result, Rvalue::Use(then_operand)));
-        if self.current_fn.as_ref().unwrap().block(self.current_block.unwrap()).terminator.is_none() {
+        if self.current_function().ok()?.block(self.current_block_id().ok()?).terminator.is_none() {
             self.terminate(Terminator::Goto(merge_block));
         }
 
@@ -1292,7 +1316,7 @@ impl Lowerer {
         // Always assign to result, using Unit if the branch produces no value
         let else_operand = else_val.unwrap_or(Operand::Constant(Constant::Unit));
         self.emit(StatementKind::Assign(result, Rvalue::Use(else_operand)));
-        if self.current_fn.as_ref().unwrap().block(self.current_block.unwrap()).terminator.is_none() {
+        if self.current_function().ok()?.block(self.current_block_id().ok()?).terminator.is_none() {
             self.terminate(Terminator::Goto(merge_block));
         }
 
@@ -1419,6 +1443,98 @@ impl Lowerer {
                     });
                 }
 
+                PatternKind::Literal(Literal { kind: LiteralKind::String(s), .. }) => {
+                    // Compare string and branch
+                    let lit_local = self.new_temp(Ty::Str);
+                    self.emit(StatementKind::Assign(
+                        lit_local,
+                        Rvalue::Use(Operand::Constant(Constant::Str(s.clone()))),
+                    ));
+                    let cond_local = self.new_temp(Ty::Bool);
+                    self.emit(StatementKind::Assign(
+                        cond_local,
+                        Rvalue::BinaryOp(
+                            BinOp::Eq,
+                            Operand::Copy(scrut_local),
+                            Operand::Copy(lit_local),
+                        ),
+                    ));
+                    self.terminate(Terminator::If {
+                        cond: Operand::Copy(cond_local),
+                        then_block: body_block,
+                        else_block: next_test,
+                    });
+                }
+
+                PatternKind::Literal(Literal { kind: LiteralKind::Bool(b), .. }) => {
+                    // Compare bool and branch
+                    let lit_local = self.new_temp(Ty::Bool);
+                    self.emit(StatementKind::Assign(
+                        lit_local,
+                        Rvalue::Use(Operand::Constant(Constant::Bool(*b))),
+                    ));
+                    let cond_local = self.new_temp(Ty::Bool);
+                    self.emit(StatementKind::Assign(
+                        cond_local,
+                        Rvalue::BinaryOp(
+                            BinOp::Eq,
+                            Operand::Copy(scrut_local),
+                            Operand::Copy(lit_local),
+                        ),
+                    ));
+                    self.terminate(Terminator::If {
+                        cond: Operand::Copy(cond_local),
+                        then_block: body_block,
+                        else_block: next_test,
+                    });
+                }
+
+                PatternKind::Literal(Literal { kind: LiteralKind::Char(c), .. }) => {
+                    // Compare char and branch
+                    let lit_local = self.new_temp(Ty::Char);
+                    self.emit(StatementKind::Assign(
+                        lit_local,
+                        Rvalue::Use(Operand::Constant(Constant::Char(*c))),
+                    ));
+                    let cond_local = self.new_temp(Ty::Bool);
+                    self.emit(StatementKind::Assign(
+                        cond_local,
+                        Rvalue::BinaryOp(
+                            BinOp::Eq,
+                            Operand::Copy(scrut_local),
+                            Operand::Copy(lit_local),
+                        ),
+                    ));
+                    self.terminate(Terminator::If {
+                        cond: Operand::Copy(cond_local),
+                        then_block: body_block,
+                        else_block: next_test,
+                    });
+                }
+
+                PatternKind::Literal(Literal { kind: LiteralKind::Float(f), .. }) => {
+                    // Compare float and branch
+                    let lit_local = self.new_temp(Ty::Float);
+                    self.emit(StatementKind::Assign(
+                        lit_local,
+                        Rvalue::Use(Operand::Constant(Constant::Float(*f))),
+                    ));
+                    let cond_local = self.new_temp(Ty::Bool);
+                    self.emit(StatementKind::Assign(
+                        cond_local,
+                        Rvalue::BinaryOp(
+                            BinOp::Eq,
+                            Operand::Copy(scrut_local),
+                            Operand::Copy(lit_local),
+                        ),
+                    ));
+                    self.terminate(Terminator::If {
+                        cond: Operand::Copy(cond_local),
+                        then_block: body_block,
+                        else_block: next_test,
+                    });
+                }
+
                 PatternKind::Struct(path, fields, _) => {
                     // Enum variant pattern: Some(x), None, Color::Red, etc.
                     let variant = if path.segments.len() == 2 {
@@ -1516,7 +1632,7 @@ impl Lowerer {
             if let Some(val) = self.lower_expr(&arm.body) {
                 self.emit(StatementKind::Assign(result, Rvalue::Use(val)));
             }
-            if self.current_fn.as_ref().unwrap().block(self.current_block.unwrap()).terminator.is_none() {
+            if self.current_function().ok()?.block(self.current_block_id().ok()?).terminator.is_none() {
                 self.terminate(Terminator::Goto(exit_block));
             }
         }
@@ -1785,7 +1901,7 @@ impl Lowerer {
         self.lower_block(body);
 
         // If body didn't terminate, go to increment
-        if self.current_fn.as_ref().unwrap().block(self.current_block.unwrap()).terminator.is_none() {
+        if self.current_function().ok()?.block(self.current_block_id().ok()?).terminator.is_none() {
             self.terminate(Terminator::Goto(incr_block));
         }
 
@@ -1878,7 +1994,7 @@ impl Lowerer {
         self.lower_block(body);
 
         // If body didn't terminate, go to increment
-        if self.current_fn.as_ref().unwrap().block(self.current_block.unwrap()).terminator.is_none() {
+        if self.current_function().ok()?.block(self.current_block_id().ok()?).terminator.is_none() {
             self.terminate(Terminator::Goto(incr_block));
         }
 
@@ -1931,7 +2047,7 @@ impl Lowerer {
         // Body block
         self.current_block = Some(body_block);
         self.lower_block(body);
-        if self.current_fn.as_ref().unwrap().block(self.current_block.unwrap()).terminator.is_none() {
+        if self.current_function().ok()?.block(self.current_block_id().ok()?).terminator.is_none() {
             self.terminate(Terminator::Goto(cond_block));
         }
 
@@ -1958,7 +2074,7 @@ impl Lowerer {
         // Body block
         self.current_block = Some(body_block);
         self.lower_block(body);
-        if self.current_fn.as_ref().unwrap().block(self.current_block.unwrap()).terminator.is_none() {
+        if self.current_function().ok()?.block(self.current_block_id().ok()?).terminator.is_none() {
             self.terminate(Terminator::Goto(body_block));
         }
 
@@ -2174,14 +2290,16 @@ impl Lowerer {
     // Helper methods
 
     fn new_temp(&mut self, ty: Ty) -> Local {
-        let func = self.current_fn.as_mut().unwrap();
+        let func = self.current_function_mut()
+            .expect("new_temp called without current function");
         let local = func.add_local(ty.clone(), None);
         self.local_types.insert(local, ty);
         local
     }
 
     fn new_local(&mut self, ty: Ty, name: Option<String>) -> Local {
-        let func = self.current_fn.as_mut().unwrap();
+        let func = self.current_function_mut()
+            .expect("new_local called without current function");
         let local = func.add_local(ty.clone(), name.clone());
         self.local_types.insert(local, ty.clone());
         if let Some(n) = name {
@@ -2475,19 +2593,24 @@ impl Lowerer {
     }
 
     fn new_block(&mut self) -> BlockId {
-        let func = self.current_fn.as_mut().unwrap();
+        let func = self.current_function_mut()
+            .expect("new_block called without current function");
         func.add_block()
     }
 
     fn emit(&mut self, kind: StatementKind) {
-        let block = self.current_block.unwrap();
-        let func = self.current_fn.as_mut().unwrap();
+        let block = self.current_block_id()
+            .expect("emit called without current block");
+        let func = self.current_function_mut()
+            .expect("emit called without current function");
         func.block_mut(block).push(Statement { kind });
     }
 
     fn terminate(&mut self, term: Terminator) {
-        let block = self.current_block.unwrap();
-        let func = self.current_fn.as_mut().unwrap();
+        let block = self.current_block_id()
+            .expect("terminate called without current block");
+        let func = self.current_function_mut()
+            .expect("terminate called without current function");
         func.block_mut(block).terminate(term);
     }
 
