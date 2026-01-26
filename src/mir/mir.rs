@@ -69,6 +69,8 @@ pub struct MirContract {
     pub expr_string: String,
     /// Optional error message
     pub message: Option<String>,
+    /// The actual condition expression (for evaluation)
+    pub condition: Option<Box<crate::parser::Expr>>,
 }
 
 /// A function in MIR.
@@ -76,6 +78,8 @@ pub struct MirContract {
 pub struct Function {
     pub name: String,
     pub params: Vec<(Local, Ty)>,
+    /// Parameter names for contract evaluation (parallel to params)
+    pub param_names: Vec<(String, Ty)>,
     pub return_ty: Ty,
     pub locals: Vec<LocalDecl>,
     pub blocks: Vec<BasicBlock>,
@@ -91,6 +95,7 @@ impl Function {
         Self {
             name,
             params,
+            param_names: Vec::new(),
             return_ty,
             locals: Vec::new(),
             blocks: Vec::new(),

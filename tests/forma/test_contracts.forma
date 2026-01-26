@@ -1,0 +1,88 @@
+# Test contract enforcement (pre/post conditions)
+# Sprint 13.1: Contract Enforcement
+# Expected: All tests pass, returns 1
+
+# =============================================================================
+# Basic precondition test
+# =============================================================================
+
+@pre(x > 0)
+f positive_only(x: Int) -> Int
+    x * 2
+
+f test_positive_precondition() -> Bool
+    result := positive_only(5)
+    result == 10
+
+# =============================================================================
+# Precondition with custom message
+# =============================================================================
+
+@pre(b != 0, "divisor cannot be zero")
+f divide(a: Int, b: Int) -> Int
+    a / b
+
+f test_divide_precondition() -> Bool
+    result := divide(10, 2)
+    result == 5
+
+# =============================================================================
+# Postcondition test
+# =============================================================================
+
+@post(result > x)
+f double(x: Int) -> Int
+    x * 2
+
+f test_postcondition() -> Bool
+    result := double(5)
+    result == 10
+
+# =============================================================================
+# Postcondition with arithmetic
+# =============================================================================
+
+@post(result >= 0)
+f safe_abs(x: Int) -> Int
+    if x < 0 then -x else x
+
+f test_safe_abs() -> Bool
+    a := safe_abs(-5)
+    b := safe_abs(5)
+    a == 5 && b == 5
+
+# =============================================================================
+# Multiple contracts
+# =============================================================================
+
+@pre(a > 0)
+@pre(b > 0)
+@post(result > a)
+@post(result > b)
+f constrained_add(a: Int, b: Int) -> Int
+    a + b
+
+f test_multiple_contracts() -> Bool
+    result := constrained_add(3, 5)
+    result == 8
+
+# =============================================================================
+# Main test runner
+# =============================================================================
+
+f main() -> Int
+    passed := 0
+    total := 5
+
+    if test_positive_precondition() then passed = passed + 1 else print("FAIL: test_positive_precondition")
+    if test_divide_precondition() then passed = passed + 1 else print("FAIL: test_divide_precondition")
+    if test_postcondition() then passed = passed + 1 else print("FAIL: test_postcondition")
+    if test_safe_abs() then passed = passed + 1 else print("FAIL: test_safe_abs")
+    if test_multiple_contracts() then passed = passed + 1 else print("FAIL: test_multiple_contracts")
+
+    print("Contract tests passed:")
+    print(passed)
+    print("of")
+    print(total)
+
+    if passed == total then 1 else 0

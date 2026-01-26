@@ -157,7 +157,7 @@ f test_struct_with_keyword_vars() -> Bool
     f := 42
     s := "hello"
     e := true
-    d := DataHolder(f, s, e)
+    d := DataHolder { value_f: f, value_s: s, value_e: e }
     d.value_f == 42 && d.value_s == "hello" && d.value_e
 
 # =============================================================================
@@ -198,7 +198,7 @@ f test_keyword_in_closure() -> Bool
 
 f main() -> Int
     passed := 0
-    total := 28
+    total := 25
 
     # m tests
     if test_m_as_variable() then passed = passed + 1 else print("FAIL: test_m_as_variable")

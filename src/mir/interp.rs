@@ -267,6 +267,8 @@ struct Frame {
     function: String,
     locals: HashMap<Local, Value>,
     current_block: BlockId,
+    /// Result value for postcondition checking (the 'result' keyword)
+    contract_result: Option<Value>,
 }
 
 impl Frame {
@@ -275,6 +277,7 @@ impl Frame {
             function,
             locals: HashMap::new(),
             current_block: entry,
+            contract_result: None,
         }
     }
 }
@@ -395,11 +398,344 @@ impl Interpreter {
 
         self.call_stack.push(frame);
 
+        // Check preconditions
+        for contract in &func.preconditions {
+            if let Some(ref condition) = contract.condition {
+                match self.eval_contract_expr(condition) {
+                    Ok(Value::Bool(true)) => {}
+                    Ok(Value::Bool(false)) => {
+                        self.call_stack.pop();
+                        let msg = contract.message.as_deref().unwrap_or("precondition failed");
+                        return Err(InterpError {
+                            message: format!(
+                                "Contract violation in '{}': {} (condition: {})",
+                                func.name, msg, contract.expr_string
+                            ),
+                        });
+                    }
+                    Ok(other) => {
+                        self.call_stack.pop();
+                        return Err(InterpError {
+                            message: format!(
+                                "Precondition must evaluate to Bool, got {:?}",
+                                other
+                            ),
+                        });
+                    }
+                    Err(e) => {
+                        self.call_stack.pop();
+                        return Err(e);
+                    }
+                }
+            }
+        }
+
         let result = self.execute(&func)?;
+
+        // Check postconditions (with 'result' available)
+        {
+            let frame = self.call_stack.last_mut().unwrap();
+            frame.contract_result = Some(result.clone());
+        }
+
+        for contract in &func.postconditions {
+            if let Some(ref condition) = contract.condition {
+                match self.eval_contract_expr(condition) {
+                    Ok(Value::Bool(true)) => {}
+                    Ok(Value::Bool(false)) => {
+                        self.call_stack.pop();
+                        let msg = contract.message.as_deref().unwrap_or("postcondition failed");
+                        return Err(InterpError {
+                            message: format!(
+                                "Contract violation in '{}': {} (condition: {})",
+                                func.name, msg, contract.expr_string
+                            ),
+                        });
+                    }
+                    Ok(other) => {
+                        self.call_stack.pop();
+                        return Err(InterpError {
+                            message: format!(
+                                "Postcondition must evaluate to Bool, got {:?}",
+                                other
+                            ),
+                        });
+                    }
+                    Err(e) => {
+                        self.call_stack.pop();
+                        return Err(e);
+                    }
+                }
+            }
+        }
 
         self.call_stack.pop();
 
         Ok(result)
+    }
+
+    /// Evaluate an AST expression for contract checking
+    fn eval_contract_expr(&mut self, expr: &crate::parser::Expr) -> Result<Value, InterpError> {
+        use crate::parser::ast::{ExprKind, LiteralKind, BinOp as AstBinOp, UnaryOp as AstUnaryOp};
+
+        match &expr.kind {
+            ExprKind::Literal(lit) => {
+                match &lit.kind {
+                    LiteralKind::Int(n) => Ok(Value::Int(*n as i64)),
+                    LiteralKind::Float(f) => Ok(Value::Float(*f)),
+                    LiteralKind::String(s) => Ok(Value::Str(s.clone())),
+                    LiteralKind::Char(c) => Ok(Value::Char(*c)),
+                    LiteralKind::Bool(b) => Ok(Value::Bool(*b)),
+                    LiteralKind::None => Ok(Value::Enum {
+                        type_name: "Option".to_string(),
+                        variant: "None".to_string(),
+                        fields: vec![],
+                    }),
+                }
+            }
+
+            ExprKind::Ident(ident) => {
+                let name = &ident.name;
+
+                // Special case: 'result' keyword in postconditions
+                if name == "result" {
+                    let frame = self.call_stack.last().ok_or_else(|| InterpError {
+                        message: "no call frame for contract evaluation".to_string(),
+                    })?;
+                    if let Some(ref result) = frame.contract_result {
+                        return Ok(result.clone());
+                    }
+                    return Err(InterpError {
+                        message: "'result' not available (not in postcondition context)".to_string(),
+                    });
+                }
+
+                // Look up variable in current frame's locals
+                let frame = self.call_stack.last().ok_or_else(|| InterpError {
+                    message: "no call frame for contract evaluation".to_string(),
+                })?;
+
+                // We need to find the local by name - check params and locals
+                // The frame stores locals by Local, but we need to find by name
+                // For contracts, parameters are stored by their Local which corresponds to param position
+
+                // First, check if there's a function we can reference for parameter names
+                if let Some(func) = self.program.functions.get(&frame.function) {
+                    for ((local, _ty), (param_name, _)) in func.params.iter().zip(func.param_names.iter()) {
+                        if param_name == name {
+                            if let Some(value) = frame.locals.get(local) {
+                                return Ok(value.clone());
+                            }
+                        }
+                    }
+                }
+
+                Err(InterpError {
+                    message: format!("undefined variable '{}' in contract", name),
+                })
+            }
+
+            ExprKind::Binary(left, op, right) => {
+                let left_val = self.eval_contract_expr(left)?;
+                let right_val = self.eval_contract_expr(right)?;
+
+                match op {
+                    AstBinOp::Eq => Ok(Value::Bool(self.values_equal(&left_val, &right_val))),
+                    AstBinOp::Ne => Ok(Value::Bool(!self.values_equal(&left_val, &right_val))),
+                    AstBinOp::Lt => self.compare_values(&left_val, &right_val, |a, b| a < b),
+                    AstBinOp::Le => self.compare_values(&left_val, &right_val, |a, b| a <= b),
+                    AstBinOp::Gt => self.compare_values(&left_val, &right_val, |a, b| a > b),
+                    AstBinOp::Ge => self.compare_values(&left_val, &right_val, |a, b| a >= b),
+                    AstBinOp::And => {
+                        match (&left_val, &right_val) {
+                            (Value::Bool(a), Value::Bool(b)) => Ok(Value::Bool(*a && *b)),
+                            _ => Err(InterpError {
+                                message: format!("cannot apply && to {:?} and {:?}", left_val, right_val),
+                            }),
+                        }
+                    }
+                    AstBinOp::Or => {
+                        match (&left_val, &right_val) {
+                            (Value::Bool(a), Value::Bool(b)) => Ok(Value::Bool(*a || *b)),
+                            _ => Err(InterpError {
+                                message: format!("cannot apply || to {:?} and {:?}", left_val, right_val),
+                            }),
+                        }
+                    }
+                    AstBinOp::Add => self.arithmetic_op(&left_val, &right_val, |a, b| a + b, |a, b| a + b),
+                    AstBinOp::Sub => self.arithmetic_op(&left_val, &right_val, |a, b| a - b, |a, b| a - b),
+                    AstBinOp::Mul => self.arithmetic_op(&left_val, &right_val, |a, b| a * b, |a, b| a * b),
+                    AstBinOp::Div => self.arithmetic_op(&left_val, &right_val, |a, b| a / b, |a, b| a / b),
+                    AstBinOp::Mod => {
+                        match (&left_val, &right_val) {
+                            (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a % b)),
+                            _ => Err(InterpError {
+                                message: format!("cannot apply % to {:?} and {:?}", left_val, right_val),
+                            }),
+                        }
+                    }
+                    _ => Err(InterpError {
+                        message: format!("unsupported binary operator {:?} in contract", op),
+                    }),
+                }
+            }
+
+            ExprKind::Unary(op, operand) => {
+                let val = self.eval_contract_expr(operand)?;
+                match op {
+                    AstUnaryOp::Not => {
+                        match val {
+                            Value::Bool(b) => Ok(Value::Bool(!b)),
+                            _ => Err(InterpError {
+                                message: format!("cannot apply ! to {:?}", val),
+                            }),
+                        }
+                    }
+                    AstUnaryOp::Neg => {
+                        match val {
+                            Value::Int(n) => Ok(Value::Int(-n)),
+                            Value::Float(f) => Ok(Value::Float(-f)),
+                            _ => Err(InterpError {
+                                message: format!("cannot apply - to {:?}", val),
+                            }),
+                        }
+                    }
+                    _ => Err(InterpError {
+                        message: format!("unsupported unary operator {:?} in contract", op),
+                    }),
+                }
+            }
+
+            ExprKind::Field(receiver, field) => {
+                let receiver_val = self.eval_contract_expr(receiver)?;
+                match receiver_val {
+                    Value::Struct(_, fields) => {
+                        fields.get(&field.name).cloned().ok_or_else(|| InterpError {
+                            message: format!("struct has no field '{}'", field.name),
+                        })
+                    }
+                    _ => Err(InterpError {
+                        message: format!("cannot access field on {:?}", receiver_val),
+                    }),
+                }
+            }
+
+            ExprKind::Call(callee, args) => {
+                // Handle function calls in contracts (e.g., len(arr))
+                if let ExprKind::Ident(ident) = &callee.kind {
+                    let func_name = &ident.name;
+                    let mut arg_vals = Vec::new();
+                    for arg in args {
+                        arg_vals.push(self.eval_contract_expr(&arg.value)?);
+                    }
+
+                    // Handle common builtin functions
+                    match func_name.as_str() {
+                        "len" => {
+                            if arg_vals.len() != 1 {
+                                return Err(InterpError {
+                                    message: "len() takes exactly 1 argument".to_string(),
+                                });
+                            }
+                            match &arg_vals[0] {
+                                Value::Array(arr) => Ok(Value::Int(arr.len() as i64)),
+                                Value::Str(s) => Ok(Value::Int(s.len() as i64)),
+                                _ => Err(InterpError {
+                                    message: format!("len() not supported for {:?}", arg_vals[0]),
+                                }),
+                            }
+                        }
+                        _ => Err(InterpError {
+                            message: format!("function '{}' not supported in contracts", func_name),
+                        }),
+                    }
+                } else {
+                    Err(InterpError {
+                        message: "only simple function calls supported in contracts".to_string(),
+                    })
+                }
+            }
+
+            ExprKind::MethodCall(receiver, method, args) => {
+                let receiver_val = self.eval_contract_expr(receiver)?;
+                let mut arg_vals = Vec::new();
+                for arg in args {
+                    arg_vals.push(self.eval_contract_expr(&arg.value)?);
+                }
+
+                match method.name.as_str() {
+                    "len" => {
+                        match &receiver_val {
+                            Value::Array(arr) => Ok(Value::Int(arr.len() as i64)),
+                            Value::Str(s) => Ok(Value::Int(s.len() as i64)),
+                            _ => Err(InterpError {
+                                message: format!(".len() not supported for {:?}", receiver_val),
+                            }),
+                        }
+                    }
+                    "is_empty" => {
+                        match &receiver_val {
+                            Value::Array(arr) => Ok(Value::Bool(arr.is_empty())),
+                            Value::Str(s) => Ok(Value::Bool(s.is_empty())),
+                            _ => Err(InterpError {
+                                message: format!(".is_empty() not supported for {:?}", receiver_val),
+                            }),
+                        }
+                    }
+                    _ => Err(InterpError {
+                        message: format!("method '{}' not supported in contracts", method.name),
+                    }),
+                }
+            }
+
+            _ => Err(InterpError {
+                message: format!("expression type {:?} not supported in contracts", expr.kind),
+            }),
+        }
+    }
+
+    /// Compare two values with a comparison function
+    fn compare_values<F>(&self, left: &Value, right: &Value, cmp: F) -> Result<Value, InterpError>
+    where
+        F: Fn(i64, i64) -> bool,
+    {
+        match (left, right) {
+            (Value::Int(a), Value::Int(b)) => Ok(Value::Bool(cmp(*a, *b))),
+            _ => Err(InterpError {
+                message: format!("cannot compare {:?} and {:?}", left, right),
+            }),
+        }
+    }
+
+    /// Perform arithmetic operation on values
+    fn arithmetic_op<F, G>(&self, left: &Value, right: &Value, int_op: F, float_op: G) -> Result<Value, InterpError>
+    where
+        F: Fn(i64, i64) -> i64,
+        G: Fn(f64, f64) -> f64,
+    {
+        match (left, right) {
+            (Value::Int(a), Value::Int(b)) => Ok(Value::Int(int_op(*a, *b))),
+            (Value::Float(a), Value::Float(b)) => Ok(Value::Float(float_op(*a, *b))),
+            _ => Err(InterpError {
+                message: format!("cannot perform arithmetic on {:?} and {:?}", left, right),
+            }),
+        }
+    }
+
+    /// Check if two values are equal
+    fn values_equal(&self, left: &Value, right: &Value) -> bool {
+        match (left, right) {
+            (Value::Unit, Value::Unit) => true,
+            (Value::Bool(a), Value::Bool(b)) => a == b,
+            (Value::Int(a), Value::Int(b)) => a == b,
+            (Value::Float(a), Value::Float(b)) => a == b,
+            (Value::Char(a), Value::Char(b)) => a == b,
+            (Value::Str(a), Value::Str(b)) => a == b,
+            (Value::Array(a), Value::Array(b)) => {
+                a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| self.values_equal(x, y))
+            }
+            _ => false,
+        }
     }
 
     fn execute(&mut self, func: &Function) -> Result<Value, InterpError> {
@@ -508,18 +844,8 @@ impl Interpreter {
                     let result = if let Some(builtin_result) = self.call_builtin(&fn_name, &arg_vals)? {
                         builtin_result
                     } else if let Some(callee) = self.program.functions.get(&fn_name).cloned() {
-                        // Regular function call
-                        let mut callee_frame =
-                            Frame::new(fn_name.clone(), callee.entry_block);
-
-                        for ((local, _ty), value) in callee.params.iter().zip(arg_vals.iter()) {
-                            callee_frame.locals.insert(*local, value.clone());
-                        }
-
-                        self.call_stack.push(callee_frame);
-                        let result = self.execute(&callee)?;
-                        self.call_stack.pop();
-                        result
+                        // Regular function call - use call_function_internal for contract checking
+                        self.call_function_internal(&callee, arg_vals)?
                     } else {
                         return Err(InterpError {
                             message: format!("undefined function: {}", fn_name),

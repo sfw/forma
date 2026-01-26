@@ -1,0 +1,77 @@
+# Test trait resolution - same method name on different types
+# Sprint 13.2: Full Trait Resolution
+# Expected: All tests pass, returns 1
+
+# =============================================================================
+# Define two structs with same method names
+# =============================================================================
+
+s Point { x: Int, y: Int }
+
+s Circle { center_x: Int, center_y: Int, radius: Int }
+
+# =============================================================================
+# Impl blocks with same method name (area, describe)
+# =============================================================================
+
+i Point
+    f area(self) -> Int
+        0  # Points have no area
+
+    f describe(self) -> Str
+        "Point"
+
+i Circle
+    f area(self) -> Int
+        # Approximate: 3 * r * r
+        3 * self.radius * self.radius
+
+    f describe(self) -> Str
+        "Circle"
+
+# =============================================================================
+# Test functions
+# =============================================================================
+
+f test_point_area() -> Bool
+    p := Point { x: 5, y: 10 }
+    p.area() == 0
+
+f test_circle_area() -> Bool
+    c := Circle { center_x: 0, center_y: 0, radius: 10 }
+    c.area() == 300  # 3 * 10 * 10
+
+f test_point_describe() -> Bool
+    p := Point { x: 1, y: 2 }
+    p.describe() == "Point"
+
+f test_circle_describe() -> Bool
+    c := Circle { center_x: 0, center_y: 0, radius: 5 }
+    c.describe() == "Circle"
+
+f test_both_structs_same_function() -> Bool
+    p := Point { x: 0, y: 0 }
+    c := Circle { center_x: 0, center_y: 0, radius: 10 }
+    # Both should resolve to their own methods
+    p.area() == 0 && c.area() == 300
+
+# =============================================================================
+# Main test runner
+# =============================================================================
+
+f main() -> Int
+    passed := 0
+    total := 5
+
+    if test_point_area() then passed = passed + 1 else print("FAIL: test_point_area")
+    if test_circle_area() then passed = passed + 1 else print("FAIL: test_circle_area")
+    if test_point_describe() then passed = passed + 1 else print("FAIL: test_point_describe")
+    if test_circle_describe() then passed = passed + 1 else print("FAIL: test_circle_describe")
+    if test_both_structs_same_function() then passed = passed + 1 else print("FAIL: test_both_structs")
+
+    print("Trait resolution tests passed:")
+    print(passed)
+    print("of")
+    print(total)
+
+    if passed == total then 1 else 0

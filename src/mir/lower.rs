@@ -45,6 +45,10 @@ pub struct Lowerer {
     vars: HashMap<String, Local>,
     /// Variable name to type name mapping (for method resolution)
     var_types: HashMap<String, String>,
+    /// Variable name to full Ty mapping (for type propagation)
+    var_full_types: HashMap<String, Ty>,
+    /// Local to Ty mapping (for type propagation)
+    local_types: HashMap<Local, Ty>,
     /// Loop context for break/continue
     loop_stack: Vec<LoopContext>,
     /// Errors accumulated during lowering
@@ -57,6 +61,8 @@ pub struct Lowerer {
     fn_defaults: HashMap<String, Vec<Option<Expr>>>,
     /// Method to qualified name mapping: method_name -> list of qualified names (Type::method)
     impl_methods: HashMap<String, Vec<String>>,
+    /// Function return types for proper call type inference
+    fn_return_types: HashMap<String, Ty>,
 }
 
 #[derive(Debug, Clone)]
@@ -74,12 +80,15 @@ impl Lowerer {
             current_block: None,
             vars: HashMap::new(),
             var_types: HashMap::new(),
+            var_full_types: HashMap::new(),
+            local_types: HashMap::new(),
             loop_stack: Vec::new(),
             errors: Vec::new(),
             enum_variants: HashMap::new(),
             closure_counter: 0,
             fn_defaults: HashMap::new(),
             impl_methods: HashMap::new(),
+            fn_return_types: HashMap::new(),
         }
     }
 
@@ -179,6 +188,74 @@ impl Lowerer {
         }
     }
 
+    /// Pretty-print an expression for contract error messages
+    fn expr_to_string(&self, expr: &Expr) -> String {
+        use crate::parser::ast::{ExprKind, BinOp, UnaryOp};
+
+        match &expr.kind {
+            ExprKind::Literal(lit) => {
+                match &lit.kind {
+                    crate::parser::ast::LiteralKind::Int(n) => n.to_string(),
+                    crate::parser::ast::LiteralKind::Float(f) => f.to_string(),
+                    crate::parser::ast::LiteralKind::String(s) => format!("\"{}\"", s),
+                    crate::parser::ast::LiteralKind::Char(c) => format!("'{}'", c),
+                    crate::parser::ast::LiteralKind::Bool(b) => b.to_string(),
+                    crate::parser::ast::LiteralKind::None => "None".to_string(),
+                }
+            }
+            ExprKind::Ident(ident) => ident.name.clone(),
+            ExprKind::Binary(left, op, right) => {
+                let op_str = match op {
+                    BinOp::Add => "+",
+                    BinOp::Sub => "-",
+                    BinOp::Mul => "*",
+                    BinOp::Div => "/",
+                    BinOp::Mod => "%",
+                    BinOp::Eq => "==",
+                    BinOp::Ne => "!=",
+                    BinOp::Lt => "<",
+                    BinOp::Le => "<=",
+                    BinOp::Gt => ">",
+                    BinOp::Ge => ">=",
+                    BinOp::And => "&&",
+                    BinOp::Or => "||",
+                    BinOp::BitAnd => "&",
+                    BinOp::BitOr => "|",
+                    BinOp::BitXor => "^",
+                    BinOp::Shl => "<<",
+                    BinOp::Shr => ">>",
+                };
+                format!("{} {} {}", self.expr_to_string(left), op_str, self.expr_to_string(right))
+            }
+            ExprKind::Unary(op, operand) => {
+                let op_str = match op {
+                    UnaryOp::Neg => "-",
+                    UnaryOp::Not => "!",
+                    UnaryOp::Ref => "&",
+                    UnaryOp::RefMut => "&mut ",
+                    UnaryOp::Deref => "*",
+                };
+                format!("{}{}", op_str, self.expr_to_string(operand))
+            }
+            ExprKind::Field(receiver, field) => {
+                format!("{}.{}", self.expr_to_string(receiver), field.name)
+            }
+            ExprKind::Call(callee, args) => {
+                let args_str: Vec<String> = args.iter()
+                    .map(|a| self.expr_to_string(&a.value))
+                    .collect();
+                format!("{}({})", self.expr_to_string(callee), args_str.join(", "))
+            }
+            ExprKind::MethodCall(receiver, method, args) => {
+                let args_str: Vec<String> = args.iter()
+                    .map(|a| self.expr_to_string(&a.value))
+                    .collect();
+                format!("{}.{}({})", self.expr_to_string(receiver), method.name, args_str.join(", "))
+            }
+            _ => format!("{:?}", expr.kind),
+        }
+    }
+
     fn lower_function(&mut self, f: &AstFunction) -> Option<Function> {
         // Skip functions without bodies (trait methods)
         let body = f.body.as_ref()?;
@@ -207,7 +284,8 @@ impl Lowerer {
         for param in &f.params {
             let ty = self.lower_type(&param.ty);
             let local = mir_fn.add_local(ty.clone(), Some(param.name.name.clone()));
-            mir_fn.params.push((local, ty));
+            mir_fn.params.push((local, ty.clone()));
+            mir_fn.param_names.push((param.name.name.clone(), ty));
             self.vars.insert(param.name.name.clone(), local);
         }
 
@@ -241,14 +319,16 @@ impl Lowerer {
         let mut mir_fn = self.current_fn.take()?;
         for contract in &f.preconditions {
             mir_fn.preconditions.push(MirContract {
-                expr_string: format!("{:?}", contract.condition), // TODO: pretty print
+                expr_string: self.expr_to_string(&contract.condition),
                 message: contract.message.clone(),
+                condition: Some(contract.condition.clone()),
             });
         }
         for contract in &f.postconditions {
             mir_fn.postconditions.push(MirContract {
-                expr_string: format!("{:?}", contract.condition),
+                expr_string: self.expr_to_string(&contract.condition),
                 message: contract.message.clone(),
+                condition: Some(contract.condition.clone()),
             });
         }
         Some(mir_fn)
@@ -426,7 +506,8 @@ impl Lowerer {
                         let l = self.lower_expr(left)?;
                         let r = self.lower_expr(right)?;
                         let bin_op = self.lower_bin_op(*op);
-                        let result = self.new_temp(Ty::Int); // TODO: proper type
+                        let result_ty = self.binary_op_result_type(bin_op, &l, &r);
+                        let result = self.new_temp(result_ty);
                         self.emit(StatementKind::Assign(result, Rvalue::BinaryOp(bin_op, l, r)));
                         Some(Operand::Local(result))
                     }
@@ -436,8 +517,9 @@ impl Lowerer {
             ExprKind::Unary(op, operand) => {
                 match op {
                     AstUnaryOp::Neg => {
+                        let operand_ty = self.infer_expr_type(operand);
                         let op = self.lower_expr(operand)?;
-                        let result = self.new_temp(Ty::Int);
+                        let result = self.new_temp(operand_ty);
                         self.emit(StatementKind::Assign(result, Rvalue::UnaryOp(UnOp::Neg, op)));
                         Some(Operand::Local(result))
                     }
@@ -450,7 +532,8 @@ impl Lowerer {
                     AstUnaryOp::Ref => {
                         if let ExprKind::Ident(ident) = &operand.kind {
                             if let Some(&local) = self.vars.get(&ident.name) {
-                                let result = self.new_temp(Ty::Unit); // TODO: proper ref type
+                                let inner_ty = self.local_types.get(&local).cloned().unwrap_or(Ty::Unit);
+                                let result = self.new_temp(Ty::Ref(Box::new(inner_ty), crate::types::Mutability::Immutable));
                                 self.emit(StatementKind::Assign(
                                     result,
                                     Rvalue::Ref(local, Mutability::Immutable),
@@ -463,7 +546,8 @@ impl Lowerer {
                     AstUnaryOp::RefMut => {
                         if let ExprKind::Ident(ident) = &operand.kind {
                             if let Some(&local) = self.vars.get(&ident.name) {
-                                let result = self.new_temp(Ty::Unit);
+                                let inner_ty = self.local_types.get(&local).cloned().unwrap_or(Ty::Unit);
+                                let result = self.new_temp(Ty::Ref(Box::new(inner_ty), crate::types::Mutability::Mutable));
                                 self.emit(StatementKind::Assign(
                                     result,
                                     Rvalue::Ref(local, Mutability::Mutable),
@@ -474,8 +558,13 @@ impl Lowerer {
                         self.lower_expr(operand)
                     }
                     AstUnaryOp::Deref => {
+                        let operand_ty = self.infer_expr_type(operand);
+                        let inner_ty = match operand_ty {
+                            Ty::Ref(inner, _) => *inner,
+                            _ => Ty::Unit,
+                        };
                         let op = self.lower_expr(operand)?;
-                        let result = self.new_temp(Ty::Int);
+                        let result = self.new_temp(inner_ty);
                         self.emit(StatementKind::Assign(result, Rvalue::Deref(op)));
                         Some(Operand::Local(result))
                     }
@@ -593,7 +682,13 @@ impl Lowerer {
                     }
                 }
 
-                let result = self.new_temp(Ty::Int); // TODO: proper return type
+                // Get return type for the function
+                let return_ty = if let Some(ref name) = func_name {
+                    self.get_function_return_type(name)
+                } else {
+                    self.infer_expr_type(expr)
+                };
+                let result = self.new_temp(return_ty);
                 let next_block = self.new_block();
 
                 if is_direct {
@@ -637,8 +732,9 @@ impl Lowerer {
                 // Resolve method name to built-in function or qualified name
                 let func_name = self.resolve_method_with_type(&method.name, receiver_type.as_deref());
 
-                // Create call
-                let result = self.new_temp(Ty::Int);
+                // Create call with proper return type
+                let return_ty = self.get_method_return_type(&method.name);
+                let result = self.new_temp(return_ty);
                 let next_block = self.new_block();
                 self.terminate(Terminator::Call {
                     func: func_name,
@@ -701,40 +797,58 @@ impl Lowerer {
             }
 
             ExprKind::Tuple(elements) => {
+                // Collect element types for tuple type
+                let elem_types: Vec<Ty> = elements.iter()
+                    .map(|e| self.infer_expr_type(e))
+                    .collect();
                 let mut ops = Vec::new();
                 for elem in elements {
                     if let Some(op) = self.lower_expr(elem) {
                         ops.push(op);
                     }
                 }
-                let result = self.new_temp(Ty::Unit); // TODO: proper tuple type
+                let result = self.new_temp(Ty::Tuple(elem_types));
                 self.emit(StatementKind::Assign(result, Rvalue::Tuple(ops)));
                 Some(Operand::Local(result))
             }
 
             ExprKind::Array(elements) => {
+                // Get element type from first element
+                let elem_ty = elements.first()
+                    .map(|e| self.infer_expr_type(e))
+                    .unwrap_or(Ty::Unit);
                 let mut ops = Vec::new();
                 for elem in elements {
                     if let Some(op) = self.lower_expr(elem) {
                         ops.push(op);
                     }
                 }
-                let result = self.new_temp(Ty::Unit); // TODO: proper array type
+                let result = self.new_temp(Ty::List(Box::new(elem_ty)));
                 self.emit(StatementKind::Assign(result, Rvalue::Array(ops)));
                 Some(Operand::Local(result))
             }
 
             ExprKind::Index(base, index) => {
+                // Infer element type from base array/string type
+                let base_ty = self.infer_expr_type(base);
+                let elem_ty = match base_ty {
+                    Ty::List(inner) => *inner,
+                    Ty::Str => Ty::Char,
+                    _ => Ty::Unit,
+                };
                 let base_op = self.lower_expr(base)?;
                 let index_op = self.lower_expr(index)?;
-                let result = self.new_temp(Ty::Int); // TODO: proper element type
+                let result = self.new_temp(elem_ty);
                 self.emit(StatementKind::Assign(result, Rvalue::Index(base_op, index_op)));
                 Some(Operand::Local(result))
             }
 
             ExprKind::Field(base, field) => {
+                // For field access, we'd need struct field type info
+                // Use expression type inference as best effort
+                let field_ty = self.infer_expr_type(expr);
                 let base_op = self.lower_expr(base)?;
-                let result = self.new_temp(Ty::Int); // TODO: proper field type
+                let result = self.new_temp(field_ty);
                 self.emit(StatementKind::Assign(
                     result,
                     Rvalue::Field(base_op, field.name.clone()),
@@ -743,8 +857,14 @@ impl Lowerer {
             }
 
             ExprKind::TupleField(base, index) => {
+                // Get tuple element type if possible
+                let base_ty = self.infer_expr_type(base);
+                let elem_ty = match base_ty {
+                    Ty::Tuple(elems) => elems.get(*index).cloned().unwrap_or(Ty::Unit),
+                    _ => Ty::Unit,
+                };
                 let base_op = self.lower_expr(base)?;
-                let result = self.new_temp(Ty::Int);
+                let result = self.new_temp(elem_ty);
                 self.emit(StatementKind::Assign(
                     result,
                     Rvalue::TupleField(base_op, *index),
@@ -753,6 +873,7 @@ impl Lowerer {
             }
 
             ExprKind::Assign(target, value, _mutable) => {
+                let value_ty = self.infer_expr_type(value);
                 let val = self.lower_expr(value)?;
 
                 // Handle assignment target
@@ -761,8 +882,8 @@ impl Lowerer {
                         self.emit(StatementKind::Assign(local, Rvalue::Use(val)));
                         return Some(Operand::Local(local));
                     } else {
-                        // New binding
-                        let local = self.new_local(Ty::Int, Some(ident.name.clone()));
+                        // New binding with inferred type
+                        let local = self.new_local(value_ty, Some(ident.name.clone()));
                         self.vars.insert(ident.name.clone(), local);
                         self.emit(StatementKind::Assign(local, Rvalue::Use(val)));
                         return Some(Operand::Local(local));
@@ -814,7 +935,9 @@ impl Lowerer {
                     // TODO: handle struct update
                 }
 
-                let result = self.new_temp(Ty::Unit); // TODO: proper struct type
+                // Use proper struct type
+                let struct_ty = Ty::Named(crate::types::TypeId::new(&name), vec![]);
+                let result = self.new_temp(struct_ty);
                 self.emit(StatementKind::Assign(result, Rvalue::Struct(name, mir_fields)));
                 Some(Operand::Local(result))
             }
@@ -845,21 +968,30 @@ impl Lowerer {
                 let saved_block = self.current_block.take();
                 let saved_vars = std::mem::take(&mut self.vars);
 
+                // Infer closure parameter and return types
+                let param_types: Vec<Ty> = closure.params.iter()
+                    .map(|p| p.ty.as_ref().map(|t| self.lower_type(t)).unwrap_or(Ty::Unit))
+                    .collect();
+                let return_ty = closure.return_type.as_ref()
+                    .map(|t| self.lower_type(t))
+                    .unwrap_or(Ty::Unit);
+
                 // Create the lifted function with signature: fn(captures..., params...)
                 let mut params: Vec<(Local, Ty)> = Vec::new();
-                let mut new_fn = Function::new(func_name.clone(), vec![], Ty::Int);
+                let mut new_fn = Function::new(func_name.clone(), vec![], return_ty.clone());
 
                 // Add captured variables as parameters first
                 for var_name in &free_vars {
-                    let local = new_fn.add_local(Ty::Int, Some(var_name.clone()));
-                    params.push((local, Ty::Int));
+                    let captured_ty = self.var_full_types.get(var_name).cloned().unwrap_or(Ty::Unit);
+                    let local = new_fn.add_local(captured_ty.clone(), Some(var_name.clone()));
+                    params.push((local, captured_ty));
                     self.vars.insert(var_name.clone(), local);
                 }
 
                 // Add closure parameters
-                for param in &closure.params {
-                    let local = new_fn.add_local(Ty::Int, Some(param.name.name.clone()));
-                    params.push((local, Ty::Int));
+                for (param, param_ty) in closure.params.iter().zip(param_types.iter()) {
+                    let local = new_fn.add_local(param_ty.clone(), Some(param.name.name.clone()));
+                    params.push((local, param_ty.clone()));
                     self.vars.insert(param.name.name.clone(), local);
                 }
 
@@ -887,8 +1019,9 @@ impl Lowerer {
                 self.current_block = saved_block;
                 self.vars = saved_vars;
 
-                // Create closure value with captured variables
-                let result = self.new_temp(Ty::Int); // TODO: proper closure type
+                // Create closure value with proper type
+                let closure_ty = Ty::Fn(param_types, Box::new(return_ty));
+                let result = self.new_temp(closure_ty);
                 self.emit(StatementKind::Assign(result, Rvalue::Closure {
                     func_name,
                     captures,
@@ -902,7 +1035,8 @@ impl Lowerer {
 
                 match &right.kind {
                     ExprKind::Ident(func_name) => {
-                        let result = self.new_temp(Ty::Int);
+                        let return_ty = self.get_function_return_type(&func_name.name);
+                        let result = self.new_temp(return_ty);
                         let next_block = self.new_block();
                         self.terminate(Terminator::Call {
                             func: func_name.name.clone(),
@@ -921,7 +1055,8 @@ impl Lowerer {
                                     args.push(op);
                                 }
                             }
-                            let result = self.new_temp(Ty::Int);
+                            let return_ty = self.get_function_return_type(&func_name.name);
+                            let result = self.new_temp(return_ty);
                             let next_block = self.new_block();
                             self.terminate(Terminator::Call {
                                 func: func_name.name.clone(),
@@ -2035,12 +2170,303 @@ impl Lowerer {
 
     fn new_temp(&mut self, ty: Ty) -> Local {
         let func = self.current_fn.as_mut().unwrap();
-        func.add_local(ty, None)
+        let local = func.add_local(ty.clone(), None);
+        self.local_types.insert(local, ty);
+        local
     }
 
     fn new_local(&mut self, ty: Ty, name: Option<String>) -> Local {
         let func = self.current_fn.as_mut().unwrap();
-        func.add_local(ty, name)
+        let local = func.add_local(ty.clone(), name.clone());
+        self.local_types.insert(local, ty.clone());
+        if let Some(n) = name {
+            self.var_full_types.insert(n, ty);
+        }
+        local
+    }
+
+    // ========================================================================
+    // Type Inference Helpers for MIR Type Propagation
+    // ========================================================================
+
+    /// Infer the type of an expression (for MIR type propagation)
+    fn infer_expr_type(&self, expr: &Expr) -> Ty {
+        match &expr.kind {
+            ExprKind::Literal(lit) => self.literal_type(lit),
+
+            ExprKind::Ident(ident) => {
+                // Check variable types
+                if let Some(ty) = self.var_full_types.get(&ident.name) {
+                    return ty.clone();
+                }
+                // Check for known enum variants
+                if let Some((enum_name, _)) = self.enum_variants.get(&ident.name) {
+                    return Ty::Named(crate::types::TypeId::new(enum_name), vec![]);
+                }
+                // Default to Unit if unknown
+                Ty::Unit
+            }
+
+            ExprKind::Binary(_left, op, right) => {
+                match op {
+                    // Comparison and logical operators return Bool
+                    AstBinOp::Eq | AstBinOp::Ne | AstBinOp::Lt | AstBinOp::Le |
+                    AstBinOp::Gt | AstBinOp::Ge | AstBinOp::And | AstBinOp::Or => Ty::Bool,
+                    // Arithmetic operators return same type as operands
+                    AstBinOp::Add | AstBinOp::Sub | AstBinOp::Mul | AstBinOp::Div |
+                    AstBinOp::Mod | AstBinOp::BitAnd | AstBinOp::BitOr | AstBinOp::BitXor |
+                    AstBinOp::Shl | AstBinOp::Shr => {
+                        // Use right operand type (left and right should match)
+                        self.infer_expr_type(right)
+                    }
+                }
+            }
+
+            ExprKind::Unary(op, operand) => {
+                match op {
+                    AstUnaryOp::Not => Ty::Bool,
+                    AstUnaryOp::Neg => self.infer_expr_type(operand),
+                    AstUnaryOp::Ref => Ty::Ref(Box::new(self.infer_expr_type(operand)), crate::types::Mutability::Immutable),
+                    AstUnaryOp::RefMut => Ty::Ref(Box::new(self.infer_expr_type(operand)), crate::types::Mutability::Mutable),
+                    AstUnaryOp::Deref => {
+                        match self.infer_expr_type(operand) {
+                            Ty::Ref(inner, _) => *inner,
+                            _ => Ty::Unit,
+                        }
+                    }
+                }
+            }
+
+            ExprKind::Call(callee, _args) => {
+                // Try to get function return type
+                if let ExprKind::Ident(ident) = &callee.kind {
+                    return self.get_function_return_type(&ident.name);
+                }
+                if let ExprKind::Path(path) = &callee.kind {
+                    let name = path.segments.iter()
+                        .map(|s| s.name.clone())
+                        .collect::<Vec<_>>()
+                        .join("::");
+                    return self.get_function_return_type(&name);
+                }
+                Ty::Unit
+            }
+
+            ExprKind::MethodCall(_receiver, method, _args) => {
+                self.get_method_return_type(&method.name)
+            }
+
+            ExprKind::Tuple(elements) => {
+                Ty::Tuple(elements.iter().map(|e| self.infer_expr_type(e)).collect())
+            }
+
+            ExprKind::Array(elements) => {
+                let elem_ty = elements.first()
+                    .map(|e| self.infer_expr_type(e))
+                    .unwrap_or(Ty::Unit);
+                Ty::List(Box::new(elem_ty))
+            }
+
+            ExprKind::Index(arr, _idx) => {
+                match self.infer_expr_type(arr) {
+                    Ty::List(elem) => *elem,
+                    Ty::Str => Ty::Char,
+                    _ => Ty::Unit,
+                }
+            }
+
+            ExprKind::Field(expr, _field) => {
+                // For field access, we'd need struct field type info
+                // For now, use Unit and let type checker handle it
+                let _ = self.infer_expr_type(expr);
+                Ty::Unit
+            }
+
+            ExprKind::Struct(path, _fields, _base) => {
+                let name = path.segments.last()
+                    .map(|s| s.name.name.clone())
+                    .unwrap_or_default();
+                Ty::Named(crate::types::TypeId::new(&name), vec![])
+            }
+
+            ExprKind::If(_) | ExprKind::Match(_, _) | ExprKind::Block(_) => {
+                // These need deeper analysis; use Unit for now
+                Ty::Unit
+            }
+
+            ExprKind::Closure(closure) => {
+                let param_types: Vec<Ty> = closure.params.iter()
+                    .map(|p| p.ty.as_ref().map(|t| self.lower_type(t)).unwrap_or(Ty::Unit))
+                    .collect();
+                let return_ty = closure.return_type.as_ref()
+                    .map(|t| self.lower_type(t))
+                    .unwrap_or(Ty::Unit);
+                Ty::Fn(param_types, Box::new(return_ty))
+            }
+
+            ExprKind::Range(start, end, _inclusive) => {
+                // Range produces an iterator/list of elements
+                let elem_ty = start.as_ref()
+                    .or(end.as_ref())
+                    .map(|e| self.infer_expr_type(e))
+                    .unwrap_or(Ty::Int);
+                Ty::List(Box::new(elem_ty))
+            }
+
+            ExprKind::Cast(_expr, target) => self.lower_type(target),
+
+            ExprKind::Try(inner) => {
+                // Result<T, E>? -> T
+                match self.infer_expr_type(inner) {
+                    Ty::Result(ok, _) => *ok,
+                    Ty::Option(inner) => *inner,
+                    other => other,
+                }
+            }
+
+            ExprKind::Await(inner) => {
+                // Task<T>.await -> T
+                match self.infer_expr_type(inner) {
+                    Ty::Task(inner) => *inner,
+                    other => other,
+                }
+            }
+
+            ExprKind::Spawn(_) => Ty::Task(Box::new(Ty::Unit)),
+
+            _ => Ty::Unit,
+        }
+    }
+
+    /// Get the type of a literal
+    fn literal_type(&self, lit: &Literal) -> Ty {
+        match &lit.kind {
+            LiteralKind::Int(_) => Ty::Int,
+            LiteralKind::Float(_) => Ty::Float,
+            LiteralKind::String(_) => Ty::Str,
+            LiteralKind::Char(_) => Ty::Char,
+            LiteralKind::Bool(_) => Ty::Bool,
+            LiteralKind::None => Ty::Option(Box::new(Ty::Unit)),
+        }
+    }
+
+    /// Get the type of an operand
+    fn operand_type(&self, operand: &Operand) -> Ty {
+        match operand {
+            Operand::Constant(c) => self.constant_type(c),
+            Operand::Local(local) | Operand::Copy(local) | Operand::Move(local) => {
+                self.local_types.get(local).cloned().unwrap_or(Ty::Unit)
+            }
+        }
+    }
+
+    /// Get the type of a constant
+    fn constant_type(&self, constant: &Constant) -> Ty {
+        // Use the type method provided by Constant
+        constant.ty()
+    }
+
+    /// Get the return type of a function
+    fn get_function_return_type(&self, name: &str) -> Ty {
+        // Check registered function return types
+        if let Some(ty) = self.fn_return_types.get(name) {
+            return ty.clone();
+        }
+
+        // Check program functions
+        if let Some(func) = self.program.functions.get(name) {
+            return func.return_ty.clone();
+        }
+
+        // Builtin function return types
+        match name {
+            // Vector operations
+            "vec_len" | "str_len" | "map_len" => Ty::Int,
+            "vec_get" => Ty::Option(Box::new(Ty::Unit)),
+            "vec_push" | "vec_pop" | "vec_clear" => Ty::Unit,
+            "vec_is_empty" | "str_contains" | "str_starts_with" | "str_ends_with" => Ty::Bool,
+            "vec_first" | "vec_last" => Ty::Option(Box::new(Ty::Unit)),
+
+            // String operations
+            "str_concat" | "str_trim" | "str_upper" | "str_lower" | "str_replace" |
+            "str_substring" | "str_repeat" | "str_reverse" | "str_pad_left" | "str_pad_right" => Ty::Str,
+            "str_split" | "str_lines" | "str_chars" | "str_bytes" => Ty::List(Box::new(Ty::Str)),
+            "str_find" | "str_rfind" => Ty::Option(Box::new(Ty::Int)),
+            "str_parse_int" => Ty::Option(Box::new(Ty::Int)),
+            "str_parse_float" => Ty::Option(Box::new(Ty::Float)),
+
+            // Map operations
+            "map_get" => Ty::Option(Box::new(Ty::Unit)),
+            "map_insert" | "map_remove" | "map_clear" => Ty::Unit,
+            "map_contains_key" => Ty::Bool,
+            "map_keys" | "map_values" => Ty::List(Box::new(Ty::Unit)),
+
+            // Math operations
+            "abs" | "min" | "max" => Ty::Int,
+            "sqrt" | "sin" | "cos" | "tan" | "log" | "exp" | "pow" | "floor" | "ceil" | "round" => Ty::Float,
+
+            // I/O operations
+            "print" | "println" | "eprint" | "eprintln" => Ty::Unit,
+            "read_line" => Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str)),
+            "read_file" | "write_file" => Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str)),
+
+            // Type conversions
+            "int" | "Int" => Ty::Int,
+            "float" | "Float" => Ty::Float,
+            "str" | "Str" => Ty::Str,
+            "bool" | "Bool" => Ty::Bool,
+
+            // Random
+            "rand_int" => Ty::Int,
+            "rand_float" => Ty::Float,
+            "rand_bool" => Ty::Bool,
+
+            // Time
+            "time_now" => Ty::Int,
+            "time_format" => Ty::Str,
+
+            _ => Ty::Unit,
+        }
+    }
+
+    /// Get the return type of a method
+    fn get_method_return_type(&self, method_name: &str) -> Ty {
+        // Common method return types
+        match method_name {
+            "len" => Ty::Int,
+            "is_empty" => Ty::Bool,
+            "get" | "first" | "last" => Ty::Option(Box::new(Ty::Unit)),
+            "push" | "pop" | "clear" | "insert" | "remove" => Ty::Unit,
+            "contains" | "starts_with" | "ends_with" => Ty::Bool,
+            "to_string" | "display" | "describe" => Ty::Str,
+            "clone" | "copy" => Ty::Unit, // Will be same as receiver
+            "map" | "filter" | "collect" => Ty::List(Box::new(Ty::Unit)),
+            "fold" | "reduce" => Ty::Unit,
+            "sum" | "product" | "count" => Ty::Int,
+            "min" | "max" => Ty::Option(Box::new(Ty::Unit)),
+            "sort" | "reverse" => Ty::Unit,
+            "join" => Ty::Str,
+            "split" | "lines" | "chars" => Ty::List(Box::new(Ty::Str)),
+            "trim" | "upper" | "lower" => Ty::Str,
+            "parse_int" => Ty::Option(Box::new(Ty::Int)),
+            "parse_float" => Ty::Option(Box::new(Ty::Float)),
+            _ => Ty::Unit,
+        }
+    }
+
+    /// Infer result type for binary operations
+    fn binary_op_result_type(&self, op: BinOp, left: &Operand, _right: &Operand) -> Ty {
+        match op {
+            // Comparison operators always return Bool
+            BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => Ty::Bool,
+            // Logical operators return Bool
+            BinOp::And | BinOp::Or => Ty::Bool,
+            // Arithmetic and bitwise operators return same type as operands
+            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem |
+            BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => {
+                self.operand_type(left)
+            }
+        }
     }
 
     fn new_block(&mut self) -> BlockId {
