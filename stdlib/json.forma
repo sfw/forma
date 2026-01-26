@@ -168,6 +168,10 @@ f json_is_empty(json: Json) -> Bool
 
 # Get nested value using dot notation path
 # Example: json_path(obj, "user.profile.name")
+# Helper to return None[Json] explicitly
+f json_none() -> Json?
+    None
+
 f json_path(json: Json, path: Str) -> Json?
     parts := str_split(path, ".")
     json_path_parts(json, parts, 0)
@@ -176,8 +180,10 @@ f json_path_parts(json: Json, parts: [Str], idx: Int) -> Json?
     if idx >= vec_len(parts) then Some(json)
     else
         m vec_get(parts, idx)
-            Some(key) ->
-                m json_get(json, key)
-                    Some(next) -> json_path_parts(next, parts, idx + 1)
-                    None -> None
-            None -> None
+            Some(key) -> json_path_key(json, key, parts, idx)
+            None -> json_none()
+
+f json_path_key(json: Json, key: Str, parts: [Str], idx: Int) -> Json?
+    m json_get(json, key)
+        Some(next) -> json_path_parts(next, parts, idx + 1)
+        None -> json_none()

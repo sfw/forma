@@ -19,9 +19,9 @@ f main() -> Int
 
     # List of URLs to fetch
     urls := vec_new()
-    vec_push(urls, "https://httpbin.org/get")
-    vec_push(urls, "https://httpbin.org/ip")
-    vec_push(urls, "https://httpbin.org/user-agent")
+    urls = vec_push(urls, "https://httpbin.org/get")
+    urls = vec_push(urls, "https://httpbin.org/ip")
+    urls = vec_push(urls, "https://httpbin.org/user-agent")
 
     url_count := vec_len(urls)
     print("Downloading " + int_to_str(url_count) + " URLs in parallel...")
@@ -32,7 +32,7 @@ f main() -> Int
     # Spawn tasks for each URL in parallel
     tasks := vec_new()
     for url in urls
-        vec_push(tasks, sp fetch_url(url))
+        tasks = vec_push(tasks, sp fetch_url(url))
 
     # Wait for all tasks to complete
     results := await_all(tasks)

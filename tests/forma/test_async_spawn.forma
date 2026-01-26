@@ -1,0 +1,84 @@
+# Test async without network dependencies
+# This test should always pass regardless of network availability
+
+as f add_numbers(a: Int, b: Int) -> Int
+    a + b
+
+as f multiply(x: Int) -> Int
+    x * x
+
+as f identity(v: Int) -> Int
+    v
+
+f test_basic_spawn_await() -> Bool
+    # Spawn a simple computation
+    task := sp add_numbers(10, 20)
+    result := aw task
+    result == 30
+
+f test_chained_spawn() -> Bool
+    # Spawn then use result in another spawn
+    t1 := sp add_numbers(5, 5)
+    v1 := aw t1
+
+    t2 := sp multiply(v1)
+    v2 := aw t2
+
+    v2 == 100  # (5+5)^2 = 100
+
+f test_parallel_spawn() -> Bool
+    # Spawn multiple independent tasks
+    t1 := sp add_numbers(1, 1)
+    t2 := sp add_numbers(2, 2)
+    t3 := sp add_numbers(3, 3)
+
+    # Await in different order than spawned
+    r3 := aw t3
+    r1 := aw t1
+    r2 := aw t2
+
+    r1 == 2 && r2 == 4 && r3 == 6
+
+f test_await_all_basic() -> Bool
+    tasks := []
+    tasks = vec_push(tasks, sp identity(1))
+    tasks = vec_push(tasks, sp identity(2))
+    tasks = vec_push(tasks, sp identity(3))
+
+    results := await_all(tasks)
+
+    vec_len(results) == 3
+
+f main() -> Int
+    passed := 0
+
+    if test_basic_spawn_await()
+        print("PASS: test_basic_spawn_await")
+        passed = passed + 1
+    else
+        print("FAIL: test_basic_spawn_await")
+
+    if test_chained_spawn()
+        print("PASS: test_chained_spawn")
+        passed = passed + 1
+    else
+        print("FAIL: test_chained_spawn")
+
+    if test_parallel_spawn()
+        print("PASS: test_parallel_spawn")
+        passed = passed + 1
+    else
+        print("FAIL: test_parallel_spawn")
+
+    if test_await_all_basic()
+        print("PASS: test_await_all_basic")
+        passed = passed + 1
+    else
+        print("FAIL: test_await_all_basic")
+
+    print("")
+    print("Async spawn tests passed:")
+    print(passed)
+    print("of 4")
+
+    if passed == 4 then 1 else 0

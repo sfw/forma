@@ -4644,6 +4644,7 @@ impl InferenceEngine {
                     "Bool" => Ok(Ty::Bool),
                     "Char" => Ok(Ty::Char),
                     "Str" => Ok(Ty::Str),
+                    "Json" => Ok(Ty::Json),
                     _ => Ok(Ty::Named(TypeId::new(name), args)),
                 }
             }
