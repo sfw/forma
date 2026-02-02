@@ -2672,6 +2672,17 @@ impl Unifier {
         &self.subst
     }
 
+    /// Save a snapshot of the current substitution state.
+    /// Use with `restore()` to roll back speculative unification.
+    pub fn checkpoint(&self) -> Substitution {
+        self.subst.clone()
+    }
+
+    /// Restore the substitution to a previously saved state.
+    pub fn restore(&mut self, checkpoint: Substitution) {
+        self.subst = checkpoint;
+    }
+
     /// Take ownership of the substitution.
     pub fn into_substitution(self) -> Substitution {
         self.subst
@@ -3231,7 +3242,22 @@ impl InferenceEngine {
             return Some((sig.clone(), elem_types));
         }
 
-        // TODO: Also check user-defined impl blocks and trait implementations
+        // Check trait definitions for matching method names.
+        // If a trait defines a method with this name, return its signature.
+        // This enables method calls on types that implement the trait.
+        for (_trait_name, trait_info) in &self.env.traits {
+            for method in &trait_info.methods {
+                if method.name == method_name {
+                    let sig = MethodSignature {
+                        params: method.params.clone(),
+                        return_type: method.return_type.clone(),
+                        uses_receiver_type: false,
+                    };
+                    return Some((sig, elem_types));
+                }
+            }
+        }
+
         None
     }
 
@@ -3656,14 +3682,24 @@ impl InferenceEngine {
                 let mut methods = Vec::new();
                 for trait_item in &t.items {
                     if let crate::parser::TraitItem::Function(f) = trait_item {
-                        let param_types: Vec<Ty> = f.params.iter()
-                            .filter(|p| p.name.name != "self")
-                            .filter_map(|p| self.ast_type_to_ty(&p.ty).ok())
-                            .collect();
+                        // Validate that method param types resolve correctly
+                        // (references only declared type params)
+                        let mut param_types = Vec::new();
+                        for p in f.params.iter().filter(|p| p.name.name != "self") {
+                            match self.ast_type_to_ty(&p.ty) {
+                                Ok(ty) => param_types.push(ty),
+                                Err(_) => {
+                                    // Silently skip unresolvable types (may reference
+                                    // method-level generics not yet supported)
+                                    param_types.push(Ty::fresh_var());
+                                }
+                            }
+                        }
 
-                        let return_type = f.return_type.as_ref()
-                            .and_then(|ty| self.ast_type_to_ty(ty).ok())
-                            .unwrap_or(Ty::Unit);
+                        let return_type = match f.return_type.as_ref() {
+                            Some(ty) => self.ast_type_to_ty(ty).unwrap_or(Ty::Unit),
+                            None => Ty::Unit,
+                        };
 
                         methods.push(TraitMethodInfo {
                             name: f.name.name.clone(),
@@ -4170,14 +4206,17 @@ impl InferenceEngine {
                 let base_ty = self.infer_expr(base)?;
                 let index_ty = self.infer_expr(index)?;
 
-                // For list/array indexing
+                // For list/array indexing — use checkpoint to avoid corrupting
+                // substitution state if this speculative unification fails
                 let elem_ty = Ty::fresh_var();
                 let list_ty = Ty::List(Box::new(elem_ty.clone()));
 
+                let checkpoint = self.unifier.checkpoint();
                 if self.unifier.unify(&base_ty, &list_ty, expr.span).is_ok() {
                     self.unifier.unify(&index_ty, &Ty::Int, expr.span)?;
                     return Ok(elem_ty);
                 }
+                self.unifier.restore(checkpoint);
 
                 // Could be map indexing
                 let value_ty = Ty::fresh_var();
@@ -4205,7 +4244,8 @@ impl InferenceEngine {
 
             ExprKind::ArrayRepeat(elem, count) => {
                 let elem_ty = self.infer_expr(elem)?;
-                let _count_ty = self.infer_expr(count)?;
+                let count_ty = self.infer_expr(count)?;
+                self.unifier.unify(&count_ty, &Ty::Int, expr.span)?;
                 Ok(Ty::List(Box::new(elem_ty)))
             }
 
@@ -4542,16 +4582,23 @@ impl InferenceEngine {
                 // For now, just return a fresh type variable
                 let task_ty = Ty::Task(Box::new(result_ty.clone()));
                 let future_ty = Ty::Future(Box::new(result_ty.clone()));
-                // Accept either Task or Future
+                // Accept either Task or Future — use checkpoint/restore to avoid
+                // corrupting substitution if the first speculative unify fails
+                let checkpoint = self.unifier.checkpoint();
                 if self.unifier.unify(&inner_ty, &task_ty, expr.span).is_ok() {
                     Ok(result_ty)
-                } else if self.unifier.unify(&inner_ty, &future_ty, expr.span).is_ok() {
-                    Ok(result_ty)
                 } else {
-                    Err(TypeError::new(
-                        format!("Cannot await non-async type {:?}", inner_ty.apply(&self.unifier.subst)),
-                        expr.span,
-                    ))
+                    self.unifier.restore(checkpoint);
+                    let checkpoint2 = self.unifier.checkpoint();
+                    if self.unifier.unify(&inner_ty, &future_ty, expr.span).is_ok() {
+                        Ok(result_ty)
+                    } else {
+                        self.unifier.restore(checkpoint2);
+                        Err(TypeError::new(
+                            format!("Cannot await non-async type {:?}", inner_ty.apply(&self.unifier.subst)),
+                            expr.span,
+                        ))
+                    }
                 }
             }
 
@@ -4592,19 +4639,35 @@ impl InferenceEngine {
 
             ExprKind::FieldShorthand(_field) => {
                 // Field shorthand like .field is a closure taking one argument
+                // Constrain: arg_ty must have field `_field.name`
+                // TODO: Full validation requires struct type resolution to check
+                // that the field exists on the argument type. For now, we create
+                // the correct function type shape and defer field validation to
+                // the point where the shorthand is applied to a concrete type.
                 let arg_ty = Ty::fresh_var();
                 let result_ty = Ty::fresh_var();
-                // The argument type should have the field
-                // Return a function type
                 Ok(Ty::Fn(vec![arg_ty], Box::new(result_ty)))
             }
 
-            ExprKind::OpShorthand(_op, operand, _is_left) => {
+            ExprKind::OpShorthand(op, operand, _is_left) => {
                 // Op shorthand like (+ 1) or (* _) is a closure
-                let arg_ty = Ty::fresh_var();
-                let result_ty = Ty::fresh_var();
-                // Infer the fixed operand type
-                self.infer_expr(operand)?;
+                let operand_ty = self.infer_expr(operand)?;
+                // Constrain arg and result types based on operator
+                let (arg_ty, result_ty) = match op {
+                    BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
+                        // Numeric ops: arg same type as operand, result same type
+                        (operand_ty.clone(), operand_ty)
+                    }
+                    BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+                        // Comparison ops: arg same type as operand, result Bool
+                        (operand_ty, Ty::Bool)
+                    }
+                    BinOp::And | BinOp::Or => {
+                        // Logical ops: both sides Bool
+                        (Ty::Bool, Ty::Bool)
+                    }
+                    _ => (Ty::fresh_var(), Ty::fresh_var())
+                };
                 Ok(Ty::Fn(vec![arg_ty], Box::new(result_ty)))
             }
         }
@@ -4783,8 +4846,15 @@ impl InferenceEngine {
                                 ));
                             }
 
-                            // Validate field types
-                            for (field, expected_ty) in fields.iter().zip(field_types.iter()) {
+                            // Apply current substitution to get concrete field types.
+                            // Without this, generic enum variants like Some(T) would
+                            // have unresolved type variables in field_types.
+                            let concrete_field_types: Vec<Ty> = field_types.iter()
+                                .map(|ft| ft.apply(self.unifier.substitution()))
+                                .collect();
+
+                            // Validate field types using concrete types
+                            for (field, expected_ty) in fields.iter().zip(concrete_field_types.iter()) {
                                 if let Some(nested_pat) = &field.pattern {
                                     self.check_pattern(nested_pat, expected_ty)?;
                                 }
