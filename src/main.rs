@@ -1000,6 +1000,53 @@ fn typeof_at(file: &PathBuf, position: &str, error_format: ErrorFormat) -> Resul
     Ok(())
 }
 
+/// Find the FORMA runtime library directory containing libforma_runtime.a.
+/// Searches in order:
+/// 1. Next to the forma binary: <exe_dir>/../runtime/target/release/
+/// 2. Next to the forma binary: <exe_dir>/runtime/target/release/
+/// 3. Current working directory: ./runtime/target/release/
+/// 4. FORMA_RUNTIME_LIB environment variable
+#[cfg(feature = "llvm")]
+fn find_runtime_lib() -> Option<PathBuf> {
+    let lib_name = "libforma_runtime.a";
+
+    // Check FORMA_RUNTIME_LIB env var first
+    if let Ok(path) = std::env::var("FORMA_RUNTIME_LIB") {
+        let p = PathBuf::from(&path);
+        if p.join(lib_name).exists() {
+            return Some(p);
+        }
+        // Maybe they pointed directly at the file
+        if p.exists() && p.ends_with(lib_name) {
+            return p.parent().map(|p| p.to_path_buf());
+        }
+    }
+
+    // Get the executable path
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            // <exe_dir>/../runtime/target/release/
+            let candidate = exe_dir.join("../runtime/target/release");
+            if candidate.join(lib_name).exists() {
+                return Some(candidate);
+            }
+            // <exe_dir>/runtime/target/release/
+            let candidate = exe_dir.join("runtime/target/release");
+            if candidate.join(lib_name).exists() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    // CWD: ./runtime/target/release/
+    let candidate = PathBuf::from("runtime/target/release");
+    if candidate.join(lib_name).exists() {
+        return Some(candidate);
+    }
+
+    None
+}
+
 /// Build native executable using LLVM
 #[allow(unused_variables)] // output_path and program are used only when LLVM feature is enabled
 #[allow(unreachable_code)] // Ok(()) is reachable only when LLVM feature is enabled
@@ -1123,6 +1170,25 @@ fn build(file: &PathBuf, output: Option<&PathBuf>, opt_level: u8, error_format: 
         let mut codegen = LLVMCodegen::new(&context, &filename);
         codegen.set_opt_level(opt_level);
 
+        // Dump MIR for debugging (if FORMA_DEBUG is set)
+        if std::env::var("FORMA_DEBUG").is_ok() {
+            for (name, func) in &program.functions {
+                eprintln!("--- MIR function: {} ---", name);
+                for (i, local) in func.locals.iter().enumerate() {
+                    eprintln!("  local_{}: {:?}", i, local.ty);
+                }
+                for (i, block) in func.blocks.iter().enumerate() {
+                    eprintln!("  block_{}:", i);
+                    for stmt in &block.stmts {
+                        eprintln!("    {:?}", stmt.kind);
+                    }
+                    if let Some(ref term) = block.terminator {
+                        eprintln!("    terminator: {:?}", term);
+                    }
+                }
+            }
+        }
+
         if let Err(e) = codegen.compile(&program) {
             match error_format {
                 ErrorFormat::Human => {
@@ -1152,9 +1218,15 @@ fn build(file: &PathBuf, output: Option<&PathBuf>, opt_level: u8, error_format: 
             return Err(format!("Failed to write object file: {}", e));
         }
 
-        // Link to executable
+        // Find the runtime library
+        let runtime_lib_path = find_runtime_lib()
+            .ok_or_else(|| "Cannot find libforma_runtime.a - build the runtime first: cd runtime && cargo build --release".to_string())?;
+
+        // Link to executable with the FORMA runtime
         let status = std::process::Command::new("cc")
             .arg(&obj_path)
+            .arg("-L").arg(&runtime_lib_path)
+            .arg("-lforma_runtime")
             .arg("-o")
             .arg(&output_path)
             .status()

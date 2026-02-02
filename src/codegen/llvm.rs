@@ -265,10 +265,25 @@ impl<'ctx> LLVMCodegen<'ctx> {
                 let target_ty = self.local_types.get(&idx).copied();
 
                 if let Some(alloca) = alloca {
-                    // Coerce value if needed (e.g., i1 to i64 for comparison results)
-                    let coerced_value = self.coerce_value(value, target_ty)?;
-                    self.builder.build_store(alloca, coerced_value)
-                        .map_err(|e| CodegenError { message: format!("store failed: {:?}", e) })?;
+                    // Check if we need to re-type the local (e.g., MIR said Unit/Int but
+                    // we actually got a pointer or float from a runtime call result)
+                    let needs_retype = target_ty.map_or(false, |t| {
+                        value.get_type() != t && !matches!(
+                            (value, t),
+                            // Allow int width coercion (handled by coerce_value)
+                            (BasicValueEnum::IntValue(_), BasicTypeEnum::IntType(_))
+                        )
+                    });
+
+                    if needs_retype {
+                        // Re-allocate with the correct type
+                        self.store_builtin_result(value, &Some(*local))?;
+                    } else {
+                        // Coerce value if needed (e.g., i1 to i64 for comparison results)
+                        let coerced_value = self.coerce_value(value, target_ty)?;
+                        self.builder.build_store(alloca, coerced_value)
+                            .map_err(|e| CodegenError { message: format!("store failed: {:?}", e) })?;
+                    }
                 }
             }
             StatementKind::Nop => {}
@@ -933,6 +948,353 @@ impl<'ctx> LLVMCodegen<'ctx> {
         }
     }
 
+    /// Check if a function name is a FORMA builtin that should be routed to the runtime.
+    fn is_builtin(&self, name: &str) -> bool {
+        matches!(name,
+            "print" | "eprintln" |
+            "str" | "str_len" | "str_concat" | "str_contains" | "str_starts_with" |
+            "str_ends_with" | "str_split" | "str_trim" | "str_to_int" | "str_replace_all" |
+            "str_char_at" | "str_slice" |
+            "int_to_str" | "char_to_str" |
+            "type_of" | "panic" | "assert" | "exit" |
+            "unwrap" | "expect" | "unwrap_or" | "is_some" | "is_none" | "is_ok" | "is_err" |
+            "sqrt" | "pow" | "sin" | "cos" | "tan" | "log" | "log10" | "exp" |
+            "floor" | "ceil" | "round" | "abs_float" |
+            "vec_new" | "vec_len" | "vec_push" | "vec_pop" | "vec_get" |
+            "vec_set" | "vec_first" | "vec_last" | "vec_concat" |
+            "time_now" | "time_now_ms" | "time_sleep" |
+            "random" | "random_int" | "random_bool" |
+            "args" |
+            "alloc" | "alloc_zeroed" | "dealloc" | "mem_copy" | "mem_set" |
+            "file_read" | "file_write" | "file_exists"
+        )
+    }
+
+    /// Declare a runtime function as an external C symbol and return its FunctionValue.
+    /// This lazily declares functions so they appear in the LLVM module only when needed.
+    fn get_or_declare_runtime_function(
+        &self,
+        name: &str,
+    ) -> Result<FunctionValue<'ctx>, CodegenError> {
+        // Check if already declared
+        if let Some(f) = self.module.get_function(name) {
+            return Ok(f);
+        }
+
+        let i64_type = self.context.i64_type();
+        let f64_type = self.context.f64_type();
+        let bool_type = self.context.bool_type();
+        let void_type = self.context.void_type();
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
+
+        let fn_type = match name {
+            // I/O - void functions taking a pointer (C string)
+            "forma_println" | "forma_print" => void_type.fn_type(&[ptr_type.into()], false),
+            "forma_println_int" | "forma_print_int" => void_type.fn_type(&[i64_type.into()], false),
+            "forma_println_float" | "forma_print_float" => void_type.fn_type(&[f64_type.into()], false),
+            "forma_print_bool" | "forma_println_bool" => void_type.fn_type(&[bool_type.into()], false),
+            "forma_read_line" => ptr_type.fn_type(&[], false),
+
+            // String operations
+            "forma_str_len" => i64_type.fn_type(&[ptr_type.into()], false),
+            "forma_str_concat" => ptr_type.fn_type(&[ptr_type.into(), ptr_type.into()], false),
+            "forma_str_eq" => bool_type.fn_type(&[ptr_type.into(), ptr_type.into()], false),
+            "forma_str_contains" => bool_type.fn_type(&[ptr_type.into(), ptr_type.into()], false),
+            "forma_str_find" => i64_type.fn_type(&[ptr_type.into(), ptr_type.into()], false),
+            "forma_str_substr" => ptr_type.fn_type(&[ptr_type.into(), i64_type.into(), i64_type.into()], false),
+            "forma_str_dup" => ptr_type.fn_type(&[ptr_type.into()], false),
+            "forma_str_free" => void_type.fn_type(&[ptr_type.into()], false),
+            "forma_int_to_str" => ptr_type.fn_type(&[i64_type.into()], false),
+            "forma_float_to_str" => ptr_type.fn_type(&[f64_type.into()], false),
+            "forma_bool_to_str" => ptr_type.fn_type(&[bool_type.into()], false),
+            "forma_str_to_int" => i64_type.fn_type(&[ptr_type.into()], false),
+            "forma_str_to_float" => f64_type.fn_type(&[ptr_type.into()], false),
+
+            // Math
+            "forma_abs_int" => i64_type.fn_type(&[i64_type.into()], false),
+            "forma_abs_float" => f64_type.fn_type(&[f64_type.into()], false),
+            "forma_min_int" | "forma_max_int" | "forma_pow_int" => {
+                i64_type.fn_type(&[i64_type.into(), i64_type.into()], false)
+            }
+            "forma_sqrt" | "forma_floor" | "forma_ceil" | "forma_round" |
+            "forma_sin" | "forma_cos" | "forma_tan" |
+            "forma_log" | "forma_log10" | "forma_exp" |
+            "forma_asin" | "forma_acos" | "forma_atan" => {
+                f64_type.fn_type(&[f64_type.into()], false)
+            }
+            "forma_pow_float" | "forma_atan2" | "forma_fmod" => {
+                f64_type.fn_type(&[f64_type.into(), f64_type.into()], false)
+            }
+            "forma_pi" | "forma_e" => f64_type.fn_type(&[], false),
+
+            // Memory
+            "forma_alloc" => ptr_type.fn_type(&[i64_type.into()], false),
+            "forma_alloc_zeroed" => ptr_type.fn_type(&[i64_type.into()], false),
+            "forma_dealloc" => void_type.fn_type(&[ptr_type.into()], false),
+            "forma_memcpy" | "forma_memmove" => {
+                void_type.fn_type(&[ptr_type.into(), ptr_type.into(), i64_type.into()], false)
+            }
+            "forma_memset" => {
+                void_type.fn_type(&[ptr_type.into(), self.context.i32_type().into(), i64_type.into()], false)
+            }
+
+            // Panic / error handling
+            "forma_panic" => void_type.fn_type(&[ptr_type.into()], false),
+            "forma_assert" => void_type.fn_type(&[bool_type.into(), ptr_type.into()], false),
+            "forma_unreachable" => void_type.fn_type(&[], false),
+            "forma_bounds_check" => void_type.fn_type(&[i64_type.into(), i64_type.into()], false),
+            "forma_div_check" => void_type.fn_type(&[i64_type.into()], false),
+
+            _ => {
+                return Err(CodegenError {
+                    message: format!("Unknown runtime function: {}", name),
+                });
+            }
+        };
+
+        Ok(self.module.add_function(name, fn_type, Some(inkwell::module::Linkage::External)))
+    }
+
+    /// Store the result of a builtin call into a destination local.
+    /// If the result type doesn't match the local's alloca type, re-allocates
+    /// the local with the correct type so subsequent loads get the right type.
+    fn store_builtin_result(
+        &mut self,
+        result: BasicValueEnum<'ctx>,
+        dest: &Option<crate::mir::Local>,
+    ) -> Result<(), CodegenError> {
+        let Some(local) = dest else { return Ok(()) };
+        let idx = local.0 as usize;
+        let target_ty = self.local_types.get(&idx).copied();
+
+        // Check if the result type matches the local's declared type
+        let needs_realloc = target_ty.map_or(false, |t| result.get_type() != t);
+
+        if needs_realloc {
+            // Re-create the alloca with the actual result type
+            // We need to position at the entry block temporarily
+            let current_fn = self.current_function.ok_or_else(|| CodegenError {
+                message: "No current function".to_string(),
+            })?;
+            let entry = current_fn.get_first_basic_block().ok_or_else(|| CodegenError {
+                message: "No entry block".to_string(),
+            })?;
+
+            // Save current position
+            let current_block = self.builder.get_insert_block().ok_or_else(|| CodegenError {
+                message: "No current block".to_string(),
+            })?;
+
+            // Insert alloca at the start of the entry block
+            if let Some(first_inst) = entry.get_first_instruction() {
+                self.builder.position_before(&first_inst);
+            } else {
+                self.builder.position_at_end(entry);
+            }
+
+            let new_alloca = self.builder.build_alloca(result.get_type(), &format!("local_{}_retyped", idx))
+                .map_err(|e| CodegenError { message: format!("alloca failed: {:?}", e) })?;
+
+            // Update the local
+            self.locals.insert(idx, new_alloca);
+            self.local_types.insert(idx, result.get_type());
+
+            // Restore position
+            self.builder.position_at_end(current_block);
+
+            // Store the result
+            self.builder.build_store(new_alloca, result)
+                .map_err(|e| CodegenError { message: format!("store failed: {:?}", e) })?;
+        } else if let Some(alloca) = self.locals.get(&idx).copied() {
+            self.builder.build_store(alloca, result)
+                .map_err(|e| CodegenError { message: format!("store failed: {:?}", e) })?;
+        }
+
+        Ok(())
+    }
+
+    /// Helper: call a runtime function with given args, store result in dest using store_builtin_result.
+    fn call_runtime_and_store(
+        &mut self,
+        runtime_name: &str,
+        call_args: &[BasicValueEnum<'ctx>],
+        label: &str,
+        dest: &Option<crate::mir::Local>,
+    ) -> Result<(), CodegenError> {
+        let f = self.get_or_declare_runtime_function(runtime_name)?;
+        let args_meta: Vec<BasicMetadataValueEnum> = call_args.iter().map(|a| (*a).into()).collect();
+        let call = self.builder.build_call(f, &args_meta, label)
+            .map_err(|e| CodegenError { message: format!("call failed: {:?}", e) })?;
+        if let Some(result) = call.try_as_basic_value().left() {
+            self.store_builtin_result(result, dest)?;
+        }
+        Ok(())
+    }
+
+    /// Dispatch a print call for a single value based on its LLVM type.
+    fn emit_print_value(&mut self, val: BasicValueEnum<'ctx>) -> Result<(), CodegenError> {
+        match val {
+            BasicValueEnum::PointerValue(_) => {
+                let f = self.get_or_declare_runtime_function("forma_println")?;
+                self.builder.build_call(f, &[val.into()], "").map_err(|e| CodegenError { message: format!("call failed: {:?}", e) })?;
+            }
+            BasicValueEnum::IntValue(iv) => {
+                if iv.get_type().get_bit_width() == 1 {
+                    let f = self.get_or_declare_runtime_function("forma_println_bool")?;
+                    self.builder.build_call(f, &[val.into()], "").map_err(|e| CodegenError { message: format!("call failed: {:?}", e) })?;
+                } else {
+                    let f = self.get_or_declare_runtime_function("forma_println_int")?;
+                    self.builder.build_call(f, &[val.into()], "").map_err(|e| CodegenError { message: format!("call failed: {:?}", e) })?;
+                }
+            }
+            BasicValueEnum::FloatValue(_) => {
+                let f = self.get_or_declare_runtime_function("forma_println_float")?;
+                self.builder.build_call(f, &[val.into()], "").map_err(|e| CodegenError { message: format!("call failed: {:?}", e) })?;
+            }
+            _ => {
+                let f = self.get_or_declare_runtime_function("forma_println_int")?;
+                let zero = self.context.i64_type().const_zero();
+                self.builder.build_call(f, &[zero.into()], "").map_err(|e| CodegenError { message: format!("call failed: {:?}", e) })?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Compile a builtin function call by dispatching to the appropriate runtime function(s).
+    fn compile_builtin_call(
+        &mut self,
+        func_name: &str,
+        args: &[Operand],
+        dest: &Option<crate::mir::Local>,
+        blocks: &HashMap<usize, inkwell::basic_block::BasicBlock>,
+        next: &crate::mir::BlockId,
+    ) -> Result<(), CodegenError> {
+        match func_name {
+            "print" | "eprintln" => {
+                for arg in args {
+                    let val = self.compile_operand(arg)?;
+                    self.emit_print_value(val)?;
+                }
+            }
+            "str_len" => {
+                let val = self.compile_operand(&args[0])?;
+                self.call_runtime_and_store("forma_str_len", &[val], "str_len", dest)?;
+            }
+            "str_concat" => {
+                let a = self.compile_operand(&args[0])?;
+                let b = self.compile_operand(&args[1])?;
+                self.call_runtime_and_store("forma_str_concat", &[a, b], "str_concat", dest)?;
+            }
+            "str_contains" => {
+                let a = self.compile_operand(&args[0])?;
+                let b = self.compile_operand(&args[1])?;
+                self.call_runtime_and_store("forma_str_contains", &[a, b], "str_contains", dest)?;
+            }
+            "int_to_str" => {
+                let val = self.compile_operand(&args[0])?;
+                self.call_runtime_and_store("forma_int_to_str", &[val], "int_to_str", dest)?;
+            }
+            "str_to_int" => {
+                let val = self.compile_operand(&args[0])?;
+                self.call_runtime_and_store("forma_str_to_int", &[val], "str_to_int", dest)?;
+            }
+            "str" => {
+                // str(value) - convert any value to string
+                let val = self.compile_operand(&args[0])?;
+                let runtime_fn = match val {
+                    BasicValueEnum::IntValue(iv) if iv.get_type().get_bit_width() == 1 => "forma_bool_to_str",
+                    BasicValueEnum::IntValue(_) => "forma_int_to_str",
+                    BasicValueEnum::FloatValue(_) => "forma_float_to_str",
+                    BasicValueEnum::PointerValue(_) => "forma_str_dup",
+                    _ => "forma_int_to_str",
+                };
+                self.call_runtime_and_store(runtime_fn, &[val], "to_str", dest)?;
+            }
+            "panic" => {
+                let val = self.compile_operand(&args[0])?;
+                let f = self.get_or_declare_runtime_function("forma_panic")?;
+                self.builder.build_call(f, &[val.into()], "")
+                    .map_err(|e| CodegenError { message: format!("call failed: {:?}", e) })?;
+                self.builder.build_unreachable()
+                    .map_err(|e| CodegenError { message: format!("unreachable failed: {:?}", e) })?;
+                return Ok(()); // Don't branch after noreturn
+            }
+            "assert" => {
+                let cond = self.compile_operand(&args[0])?;
+                let msg_ptr = if args.len() > 1 {
+                    self.compile_operand(&args[1])?
+                } else {
+                    let msg = self.context.const_string(b"assertion failed", true);
+                    let global = self.module.add_global(msg.get_type(), None, "assert_msg");
+                    global.set_constant(true);
+                    global.set_initializer(&msg);
+                    global.as_pointer_value().into()
+                };
+                let f = self.get_or_declare_runtime_function("forma_assert")?;
+                self.builder.build_call(f, &[cond.into(), msg_ptr.into()], "")
+                    .map_err(|e| CodegenError { message: format!("call failed: {:?}", e) })?;
+            }
+            "exit" => {
+                let code = self.compile_operand(&args[0])?;
+                let exit_fn = self.module.get_function("exit").unwrap_or_else(|| {
+                    let exit_type = self.context.void_type().fn_type(
+                        &[self.context.i32_type().into()], false
+                    );
+                    self.module.add_function("exit", exit_type, Some(inkwell::module::Linkage::External))
+                });
+                let code_i32 = if let BasicValueEnum::IntValue(iv) = code {
+                    if iv.get_type().get_bit_width() != 32 {
+                        self.builder.build_int_truncate(iv, self.context.i32_type(), "trunc")
+                            .map_err(|e| CodegenError { message: format!("trunc failed: {:?}", e) })?
+                            .into()
+                    } else { code }
+                } else { code };
+                self.builder.build_call(exit_fn, &[code_i32.into()], "")
+                    .map_err(|e| CodegenError { message: format!("call failed: {:?}", e) })?;
+                self.builder.build_unreachable()
+                    .map_err(|e| CodegenError { message: format!("unreachable failed: {:?}", e) })?;
+                return Ok(());
+            }
+            // Math f64->f64
+            "sqrt" | "sin" | "cos" | "tan" | "log" | "log10" | "exp" |
+            "floor" | "ceil" | "round" | "abs_float" => {
+                let val = self.compile_operand(&args[0])?;
+                let runtime_name = format!("forma_{}", func_name);
+                self.call_runtime_and_store(&runtime_name, &[val], func_name, dest)?;
+            }
+            // Math (f64, f64)->f64
+            "pow" => {
+                let base = self.compile_operand(&args[0])?;
+                let exp = self.compile_operand(&args[1])?;
+                self.call_runtime_and_store("forma_pow_float", &[base, exp], "pow", dest)?;
+            }
+            // Memory
+            "alloc" => {
+                let size = self.compile_operand(&args[0])?;
+                self.call_runtime_and_store("forma_alloc", &[size], "alloc", dest)?;
+            }
+            "dealloc" => {
+                let ptr = self.compile_operand(&args[0])?;
+                let f = self.get_or_declare_runtime_function("forma_dealloc")?;
+                self.builder.build_call(f, &[ptr.into()], "")
+                    .map_err(|e| CodegenError { message: format!("call failed: {:?}", e) })?;
+            }
+            _ => {
+                return Err(CodegenError {
+                    message: format!("Builtin '{}' not yet implemented in LLVM codegen", func_name),
+                });
+            }
+        }
+
+        // Branch to next block (unless we already returned for noreturn functions)
+        if let Some(&bb) = blocks.get(&(next.0 as usize)) {
+            self.builder.build_unconditional_branch(bb)
+                .map_err(|e| CodegenError { message: format!("branch failed: {:?}", e) })?;
+        }
+
+        Ok(())
+    }
+
     /// Compile a block terminator.
     fn compile_terminator(
         &mut self,
@@ -1001,6 +1363,11 @@ impl<'ctx> LLVMCodegen<'ctx> {
                     .map_err(|e| CodegenError { message: format!("switch failed: {:?}", e) })?;
             }
             Terminator::Call { func, args, dest, next } => {
+                // Check if this is a builtin function that should go to the runtime
+                if self.is_builtin(func) {
+                    return self.compile_builtin_call(func, args, dest, blocks, next);
+                }
+
                 let fn_value = self
                     .functions
                     .get(func)
@@ -1174,7 +1541,9 @@ impl<'ctx> LLVMCodegen<'ctx> {
             // Other
             Ty::Bool => Ok(self.context.bool_type().into()),
             Ty::Char => Ok(self.context.i32_type().into()),
-            Ty::Unit => Ok(self.context.i8_type().into()),
+            // Unit is used as a placeholder type for temporaries in MIR;
+            // use i64 so it can hold any integer/pointer-sized value without truncation
+            Ty::Unit => Ok(self.context.i64_type().into()),
             Ty::Str => Ok(self.context.ptr_type(AddressSpace::default()).into()),
             _ => {
                 // Default to i64 for complex types

@@ -1,0 +1,16 @@
+[package]
+name = "forma_runtime"
+version = "0.1.0"
+edition = "2021"
+description = "Runtime library for FORMA compiled binaries"
+
+[lib]
+name = "forma_runtime"
+crate-type = ["staticlib"]
+
+[dependencies]
+libc = "0.2"
+
+[profile.release]
+opt-level = 3
+lto = true
