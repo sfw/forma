@@ -1510,8 +1510,9 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_bitor(&mut self) -> Result<Expr> {
-        // Note: single | is used for pipeline, not bitor in expressions
-        // Bitor would need special handling if needed
+        // Note: | is used for pipeline (higher in precedence chain).
+        // Consuming | here as BitOr would prevent pipeline from ever seeing it.
+        // BitOr requires a different syntax (e.g., |> for pipeline) to be enabled.
         self.parse_bitxor()
     }
 
@@ -1549,8 +1550,38 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_bitand(&mut self) -> Result<Expr> {
-        // Note: single & is used for references, not bitand in most contexts
-        self.parse_shift()
+        let start = self.current_span();
+        let mut expr = self.parse_shift()?;
+        let mut total_indent_count = 0;
+
+        // & in binary position (after left operand) is BitAnd.
+        // & in unary/prefix position is Ref, handled in parse_unary.
+        while self.match_token(TokenKind::Amp) {
+            // Skip newlines and indentation after binary operator to allow continuation
+            while self.check(TokenKind::Newline) || self.check(TokenKind::Indent) {
+                if self.check(TokenKind::Indent) {
+                    total_indent_count += 1;
+                }
+                self.advance();
+            }
+            let right = self.parse_shift()?;
+            expr = Expr {
+                kind: ExprKind::Binary(Box::new(expr), BinOp::BitAnd, Box::new(right)),
+                span: start.merge(self.previous_span()),
+            };
+        }
+
+        // Skip matching dedents at the end of expression
+        for _ in 0..total_indent_count {
+            while self.check(TokenKind::Newline) {
+                self.advance();
+            }
+            if self.check(TokenKind::Dedent) {
+                self.advance();
+            }
+        }
+
+        Ok(expr)
     }
 
     fn parse_shift(&mut self) -> Result<Expr> {
@@ -1870,6 +1901,35 @@ impl<'a> Parser<'a> {
 
         if self.is_match_keyword() {
             return self.parse_match_expr();
+        }
+
+        // Check for labeled loops: 'label: for/wh/lp
+        if let Some(TokenKind::Ident(name)) = self.current().map(|t| &t.kind) {
+            if name.starts_with('\'') {
+                let label_name = name.clone();
+                // Peek ahead: is the next token a colon followed by a loop keyword?
+                if self.pos + 1 < self.tokens.len() {
+                    if let TokenKind::Colon = &self.tokens[self.pos + 1].kind {
+                        // Check what follows the colon
+                        let has_loop_keyword = self.pos + 2 < self.tokens.len() && matches!(
+                            &self.tokens[self.pos + 2].kind,
+                            TokenKind::For | TokenKind::Wh | TokenKind::Lp
+                        );
+                        if has_loop_keyword {
+                            let label = Ident { name: label_name, span: self.current_span() };
+                            self.advance(); // skip label
+                            self.advance(); // skip colon
+                            if self.match_token(TokenKind::For) {
+                                return self.parse_for_expr_with_label(start, Some(label));
+                            } else if self.check(TokenKind::Wh) {
+                                return self.parse_while_expr_with_label(Some(label));
+                            } else if self.check(TokenKind::Lp) {
+                                return self.parse_loop_expr_with_label(Some(label));
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         if self.match_token(TokenKind::For) {
@@ -2422,39 +2482,71 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_for_expr(&mut self, start: Span) -> Result<Expr> {
+        self.parse_for_expr_with_label(start, None)
+    }
+
+    fn parse_for_expr_with_label(&mut self, start: Span, label: Option<Ident>) -> Result<Expr> {
         let pattern = self.parse_pattern()?;
         self.expect(TokenKind::In)?;
         let iter = self.parse_expr()?;
         let block = self.parse_block()?;
 
         Ok(Expr {
-            kind: ExprKind::For(None, pattern, Box::new(iter), block),
+            kind: ExprKind::For(label, pattern, Box::new(iter), block),
             span: start.merge(self.previous_span()),
         })
     }
 
     fn parse_while_expr(&mut self) -> Result<Expr> {
+        self.parse_while_expr_with_label(None)
+    }
+
+    fn parse_while_expr_with_label(&mut self, label: Option<Ident>) -> Result<Expr> {
         let start = self.current_span();
         self.expect(TokenKind::Wh)?;
 
-        // Check for while-let: wh Some(x) = iter.next
-        // This is tricky to detect, so for now just parse condition
-        let condition = self.parse_expr()?;
-        let block = self.parse_block()?;
+        // Try to detect while-let: wh Some(x) = iter.next
+        // Save position, try parsing pattern + `=`, restore if it fails
+        let saved_pos = self.pos;
+        let is_while_let = (|| -> Option<(Pattern, Expr)> {
+            let pattern = self.parse_pattern().ok()?;
+            // Check for single `=` (not `==`)
+            if !self.match_token(TokenKind::Eq) {
+                return None;
+            }
+            let expr = self.parse_expr().ok()?;
+            Some((pattern, expr))
+        })();
 
-        Ok(Expr {
-            kind: ExprKind::While(None, Box::new(condition), block),
-            span: start.merge(self.previous_span()),
-        })
+        if let Some((pattern, value_expr)) = is_while_let {
+            let block = self.parse_block()?;
+            Ok(Expr {
+                kind: ExprKind::WhileLet(label, pattern, Box::new(value_expr), block),
+                span: start.merge(self.previous_span()),
+            })
+        } else {
+            // Restore position and parse as normal while condition
+            self.pos = saved_pos;
+            let condition = self.parse_expr()?;
+            let block = self.parse_block()?;
+            Ok(Expr {
+                kind: ExprKind::While(label, Box::new(condition), block),
+                span: start.merge(self.previous_span()),
+            })
+        }
     }
 
     fn parse_loop_expr(&mut self) -> Result<Expr> {
+        self.parse_loop_expr_with_label(None)
+    }
+
+    fn parse_loop_expr_with_label(&mut self, label: Option<Ident>) -> Result<Expr> {
         let start = self.current_span();
         self.expect(TokenKind::Lp)?;
         let block = self.parse_block()?;
 
         Ok(Expr {
-            kind: ExprKind::Loop(None, block),
+            kind: ExprKind::Loop(label, block),
             span: start.merge(self.previous_span()),
         })
     }
@@ -2842,6 +2934,9 @@ impl<'a> Parser<'a> {
             if self.check(TokenKind::LParen) {
                 return self.parse_struct_pattern(name, start);
             }
+            if self.check(TokenKind::LBrace) {
+                return self.parse_brace_struct_pattern(name, start);
+            }
 
             // Check for @ binding
             let binding = if self.match_token(TokenKind::At) {
@@ -2936,6 +3031,61 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn parse_brace_struct_pattern(&mut self, name: Ident, start: Span) -> Result<Pattern> {
+        self.expect(TokenKind::LBrace)?;
+
+        let mut fields = Vec::new();
+        let mut has_rest = false;
+
+        if !self.check(TokenKind::RBrace) {
+            loop {
+                self.skip_newlines();
+                if self.check(TokenKind::RBrace) {
+                    break;
+                }
+                if self.match_token(TokenKind::DotDot) {
+                    has_rest = true;
+                    break;
+                }
+
+                let field_start = self.current_span();
+                let field_name = self.parse_ident()?;
+                let pattern = if self.match_token(TokenKind::Colon) {
+                    Some(self.parse_pattern()?)
+                } else {
+                    None
+                };
+
+                fields.push(PatternField {
+                    name: field_name,
+                    pattern,
+                    span: field_start.merge(self.previous_span()),
+                });
+
+                if !self.match_token(TokenKind::Comma) {
+                    break;
+                }
+            }
+        }
+
+        self.skip_newlines();
+        self.expect(TokenKind::RBrace)?;
+
+        let path = TypePath {
+            segments: vec![TypePathSegment {
+                name,
+                args: None,
+                span: start,
+            }],
+            span: start,
+        };
+
+        Ok(Pattern {
+            kind: PatternKind::Struct(path, fields, has_rest),
+            span: start.merge(self.previous_span()),
+        })
+    }
+
     // ========================================================================
     // Blocks
     // ========================================================================
@@ -2999,7 +3149,19 @@ impl<'a> Parser<'a> {
             if self.check(TokenKind::Dedent) {
                 break;
             }
-            stmts.push(self.parse_stmt()?);
+            match self.parse_stmt() {
+                Ok(stmt) => stmts.push(stmt),
+                Err(e) => {
+                    self.errors.push(e);
+                    // Skip to next newline or dedent to recover
+                    while !self.at_end()
+                        && !self.check(TokenKind::Newline)
+                        && !self.check(TokenKind::Dedent)
+                    {
+                        self.advance();
+                    }
+                }
+            }
             self.skip_newlines();
         }
 
