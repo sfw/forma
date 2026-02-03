@@ -323,6 +323,15 @@ impl<'a> Scanner<'a> {
                 self.pending_dedents += 1;
             }
 
+            // Verify indent matches the new stack top (detect misalignment)
+            let new_top = self.indent_stack.last().copied().unwrap_or(0);
+            if indent != new_top {
+                return Some(self.error_token(format!(
+                    "indentation of {} spaces does not match any outer level (expected {})",
+                    indent, new_top
+                )));
+            }
+
             if self.pending_dedents > 0 {
                 self.pending_dedents -= 1;
                 return Some(self.make_token(TokenKind::Dedent));
@@ -429,6 +438,62 @@ impl<'a> Scanner<'a> {
                 Some('`') => {
                     self.advance();
                     break;
+                }
+                Some('\n') => {
+                    self.advance();
+                    self.line += 1;
+                    self.column = 1;
+                    value.push('\n');
+                }
+                Some(c) => {
+                    self.advance();
+                    value.push(c);
+                }
+            }
+        }
+
+        self.make_token(TokenKind::String(value))
+    }
+
+    /// Scan a delimited raw string: r#`...`# or r##`...`## etc.
+    fn scan_delimited_raw_string(&mut self) -> Token {
+        // Count opening # characters
+        let mut hash_count = 0;
+        while self.peek() == Some('#') {
+            self.advance();
+            hash_count += 1;
+        }
+
+        // Expect opening backtick
+        if self.peek() != Some('`') {
+            return self.error_token("expected '`' after r# in raw string");
+        }
+        self.advance(); // consume opening backtick
+
+        let mut value = String::new();
+
+        loop {
+            match self.peek() {
+                None => {
+                    return self.error_token("unterminated delimited raw string");
+                }
+                Some('`') => {
+                    self.advance();
+                    // Check if followed by the right number of # characters
+                    let mut found_hashes = 0;
+                    while found_hashes < hash_count && self.peek() == Some('#') {
+                        self.advance();
+                        found_hashes += 1;
+                    }
+                    if found_hashes == hash_count {
+                        // End of delimited raw string
+                        break;
+                    }
+                    // Not enough hashes — include the backtick and hashes as content
+                    value.push('`');
+                    for _ in 0..found_hashes {
+                        value.push('#');
+                    }
                 }
                 Some('\n') => {
                     self.advance();
@@ -738,6 +803,17 @@ impl<'a> Scanner<'a> {
             return self.scan_fstring();
         }
 
+        // Check for raw string with prefix: r`...` or r#`...`#
+        if lexeme == "r" {
+            if self.peek() == Some('`') {
+                self.advance(); // consume the opening backtick
+                return self.scan_raw_string();
+            }
+            if self.peek() == Some('#') {
+                return self.scan_delimited_raw_string();
+            }
+        }
+
         // Single-letter keywords are CONTEXTUAL - emit as Ident, parser decides
         // This allows using m, s, f, e, t, i as variable names
         // (AI Code Generation First principle - natural names should work)
@@ -782,6 +858,24 @@ impl<'a> Scanner<'a> {
                         Some('"') => current_text.push('"'),
                         Some('{') => current_text.push('{'),
                         Some('}') => current_text.push('}'),
+                        Some('0') => current_text.push('\0'),
+                        Some('x') => {
+                            if let Some(ch) = self.scan_hex_escape(2) {
+                                current_text.push(ch);
+                            } else {
+                                return self.error_token("invalid hex escape in f-string");
+                            }
+                        }
+                        Some('u') => {
+                            if !self.match_char('{') {
+                                return self.error_token("expected '{' in unicode escape in f-string");
+                            }
+                            if let Some(ch) = self.scan_unicode_escape() {
+                                current_text.push(ch);
+                            } else {
+                                return self.error_token("invalid unicode escape in f-string");
+                            }
+                        }
                         Some(c) => {
                             return self.error_token(format!("invalid escape in f-string: \\{}", c));
                         }
@@ -805,7 +899,7 @@ impl<'a> Scanner<'a> {
                         current_text = String::new();
                     }
 
-                    // Parse expression until }
+                    // Parse expression until }, tracking string literals and nested braces
                     let mut expr = String::new();
                     let mut brace_depth = 1;
 
@@ -828,6 +922,68 @@ impl<'a> Scanner<'a> {
                                 brace_depth += 1;
                                 if let Some(c) = self.advance() {
                                     expr.push(c);
+                                }
+                            }
+                            Some('"') => {
+                                // String literal inside expression — skip until closing quote
+                                if let Some(c) = self.advance() {
+                                    expr.push(c);
+                                }
+                                loop {
+                                    match self.peek() {
+                                        None | Some('\n') => break,
+                                        Some('\\') => {
+                                            if let Some(c) = self.advance() { expr.push(c); }
+                                            if let Some(c) = self.advance() { expr.push(c); }
+                                        }
+                                        Some('"') => {
+                                            if let Some(c) = self.advance() { expr.push(c); }
+                                            break;
+                                        }
+                                        Some(_) => {
+                                            if let Some(c) = self.advance() { expr.push(c); }
+                                        }
+                                    }
+                                }
+                            }
+                            Some('\'') => {
+                                // Char literal inside expression — skip until closing quote
+                                if let Some(c) = self.advance() {
+                                    expr.push(c);
+                                }
+                                loop {
+                                    match self.peek() {
+                                        None | Some('\n') => break,
+                                        Some('\\') => {
+                                            if let Some(c) = self.advance() { expr.push(c); }
+                                            if let Some(c) = self.advance() { expr.push(c); }
+                                        }
+                                        Some('\'') => {
+                                            if let Some(c) = self.advance() { expr.push(c); }
+                                            break;
+                                        }
+                                        Some(_) => {
+                                            if let Some(c) = self.advance() { expr.push(c); }
+                                        }
+                                    }
+                                }
+                            }
+                            Some('`') => {
+                                // Raw string literal inside expression
+                                if let Some(c) = self.advance() {
+                                    expr.push(c);
+                                }
+                                loop {
+                                    match self.peek() {
+                                        None => break,
+                                        Some('`') => {
+                                            if let Some(c) = self.advance() { expr.push(c); }
+                                            break;
+                                        }
+                                        Some(_) => {
+                                            if let Some(c) = self.advance() { expr.push(c); }
+                                        }
+                                    }
                                 }
                             }
                             Some(_) => {
@@ -932,11 +1088,11 @@ impl<'a> Scanner<'a> {
 }
 
 fn is_ident_start(c: char) -> bool {
-    c.is_ascii_alphabetic() || c == '_'
+    c.is_alphabetic() || c == '_'
 }
 
 fn is_ident_continue(c: char) -> bool {
-    c.is_ascii_alphanumeric() || c == '_'
+    c.is_alphanumeric() || c == '_'
 }
 
 #[cfg(test)]
