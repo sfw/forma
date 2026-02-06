@@ -833,8 +833,7 @@ impl Lowerer {
                     }
                     self.terminate(Terminator::Goto(ctx.break_block));
                 } else if let Some(label_ident) = label {
-                    // Label not found - this would be caught by type checker ideally
-                    eprintln!("Warning: break label '{}' not found", label_ident.name);
+                    self.error(format!("break label '{}' not found", label_ident.name), expr.span);
                 }
                 None
             }
@@ -852,7 +851,7 @@ impl Lowerer {
                 if let Some(ctx) = target_ctx {
                     self.terminate(Terminator::Goto(ctx.continue_block));
                 } else if let Some(label_ident) = label {
-                    eprintln!("Warning: continue label '{}' not found", label_ident.name);
+                    self.error(format!("continue label '{}' not found", label_ident.name), expr.span);
                 }
                 None
             }
@@ -1048,6 +1047,7 @@ impl Lowerer {
                 let saved_fn = self.current_fn.take();
                 let saved_block = self.current_block.take();
                 let saved_vars = std::mem::take(&mut self.vars);
+                let saved_local_types = std::mem::take(&mut self.local_types);
 
                 // Infer closure parameter and return types
                 let param_types: Vec<Ty> = closure.params.iter()
@@ -1078,8 +1078,9 @@ impl Lowerer {
 
                 new_fn.params = params;
 
-                // Create entry block
+                // Create entry block and set it
                 let entry = new_fn.add_block();
+                new_fn.entry_block = entry;
                 self.current_fn = Some(new_fn);
                 self.current_block = Some(entry);
 
@@ -1099,6 +1100,7 @@ impl Lowerer {
                 self.current_fn = saved_fn;
                 self.current_block = saved_block;
                 self.vars = saved_vars;
+                self.local_types = saved_local_types;
 
                 // Create closure value with proper type
                 let closure_ty = Ty::Fn(param_types, Box::new(return_ty));
@@ -1368,10 +1370,179 @@ impl Lowerer {
                 Some(Operand::Local(result))
             }
 
-            // Not yet implemented
-            _ => {
-                self.error(format!("unsupported expression: {:?}", expr.kind), expr.span);
+            ExprKind::WhileLet(label, pattern, value, body) => {
+                // while-let: wh Some(x) = expr { ... }
+                // Similar to while, but condition is pattern match
+                let cond_block = self.new_block();
+                let body_block = self.new_block();
+                let exit_block = self.new_block();
+
+                self.loop_stack.push(LoopContext {
+                    label: label.as_ref().map(|l| l.name.clone()),
+                    continue_block: cond_block,
+                    break_block: exit_block,
+                    result_local: None,
+                });
+
+                self.terminate(Terminator::Goto(cond_block));
+                self.current_block = Some(cond_block);
+
+                // Evaluate the value expression
+                let val = self.lower_expr(value)?;
+                let scrut_local = if let Operand::Local(l) = val {
+                    l
+                } else {
+                    let temp = self.new_temp(Ty::fresh_var());
+                    self.emit(StatementKind::Assign(temp, Rvalue::Use(val)));
+                    temp
+                };
+
+                // Check if pattern matches (simplified: only Some(x) supported)
+                match &pattern.kind {
+                    PatternKind::Struct(path, fields, _) => {
+                        let variant_name = path.segments.last().map(|s| s.name.name.as_str()).unwrap_or("");
+                        let disc = self.new_temp(Ty::Int);
+                        self.emit(StatementKind::Assign(disc, Rvalue::Discriminant(scrut_local)));
+                        let expected = self.get_variant_discriminant(variant_name);
+                        let exp_local = self.new_temp(Ty::Int);
+                        self.emit(StatementKind::Assign(exp_local, Rvalue::Use(Operand::Constant(Constant::Int(expected)))));
+                        let cond = self.new_temp(Ty::Bool);
+                        self.emit(StatementKind::Assign(cond, Rvalue::BinaryOp(BinOp::Eq, Operand::Copy(disc), Operand::Copy(exp_local))));
+                        self.terminate(Terminator::If { cond: Operand::Copy(cond), then_block: body_block, else_block: exit_block });
+
+                        // Bind fields in body block
+                        self.current_block = Some(body_block);
+                        for (idx, field) in fields.iter().enumerate() {
+                            let field_local = self.new_local(Ty::Unit, Some(field.name.name.clone()));
+                            self.vars.insert(field.name.name.clone(), field_local);
+                            self.emit(StatementKind::Assign(field_local, Rvalue::EnumField(scrut_local, idx)));
+                        }
+                    }
+                    PatternKind::Ident(ident, _, _) if ident.name == "Some" || self.enum_variants.contains_key(&ident.name) => {
+                        let disc = self.new_temp(Ty::Int);
+                        self.emit(StatementKind::Assign(disc, Rvalue::Discriminant(scrut_local)));
+                        let expected = self.get_variant_discriminant(&ident.name);
+                        let exp_local = self.new_temp(Ty::Int);
+                        self.emit(StatementKind::Assign(exp_local, Rvalue::Use(Operand::Constant(Constant::Int(expected)))));
+                        let cond = self.new_temp(Ty::Bool);
+                        self.emit(StatementKind::Assign(cond, Rvalue::BinaryOp(BinOp::Eq, Operand::Copy(disc), Operand::Copy(exp_local))));
+                        self.terminate(Terminator::If { cond: Operand::Copy(cond), then_block: body_block, else_block: exit_block });
+                        self.current_block = Some(body_block);
+                    }
+                    _ => {
+                        self.terminate(Terminator::Goto(body_block));
+                        self.current_block = Some(body_block);
+                    }
+                }
+
+                self.lower_block(body);
+                if self.current_function().ok()
+                    .and_then(|f| self.current_block_id().ok().map(|b| f.block(b).terminator.is_none()))
+                    .unwrap_or(false)
+                {
+                    self.terminate(Terminator::Goto(cond_block));
+                }
+
+                self.loop_stack.pop();
+                self.current_block = Some(exit_block);
+                Some(Operand::Constant(Constant::Unit))
+            }
+
+            ExprKind::Range(start, end, inclusive) => {
+                // Range expression - create a Range struct/tuple
+                // For now, create as a tuple (start, end, inclusive)
+                let start_val = if let Some(s) = start {
+                    self.lower_expr(s)?
+                } else {
+                    Operand::Constant(Constant::Int(0))
+                };
+                let end_val = if let Some(e) = end {
+                    self.lower_expr(e)?
+                } else {
+                    Operand::Constant(Constant::Int(i64::MAX))
+                };
+                let incl_val = Operand::Constant(Constant::Bool(*inclusive));
+
+                let result = self.new_temp(Ty::Tuple(vec![Ty::Int, Ty::Int, Ty::Bool]));
+                self.emit(StatementKind::Assign(
+                    result,
+                    Rvalue::Tuple(vec![start_val, end_val, incl_val]),
+                ));
+                Some(Operand::Local(result))
+            }
+
+            ExprKind::ArrayRepeat(value, count) => {
+                // [value; count] - array with repeated value
+                // Lower as a call to a builtin that creates repeated arrays
+                let val = self.lower_expr(value)?;
+                let cnt = self.lower_expr(count)?;
+                let result = self.new_temp(Ty::List(Box::new(Ty::fresh_var())));
+                let next_block = self.new_block();
+                self.terminate(Terminator::Call {
+                    func: "array_repeat".to_string(),
+                    args: vec![val, cnt],
+                    dest: Some(result),
+                    next: next_block,
+                });
+                self.current_block = Some(next_block);
+                Some(Operand::Local(result))
+            }
+
+            ExprKind::MapOrSet(entries) => {
+                // Map or set literal { k: v, ... } or { a, b, ... }
+                // Build as a series of map_set calls
+                let result = self.new_temp(Ty::Map(Box::new(Ty::fresh_var()), Box::new(Ty::fresh_var())));
+
+                // First create an empty map
+                let init_block = self.new_block();
+                self.terminate(Terminator::Call {
+                    func: "map_new".to_string(),
+                    args: vec![],
+                    dest: Some(result),
+                    next: init_block,
+                });
+                self.current_block = Some(init_block);
+
+                // Then insert each entry
+                for entry in entries {
+                    let key = self.lower_expr(&entry.key)?;
+                    let val = if let Some(v) = &entry.value {
+                        self.lower_expr(v)?
+                    } else {
+                        // Set literal - value is unit
+                        Operand::Constant(Constant::Bool(true))
+                    };
+                    let next = self.new_block();
+                    self.terminate(Terminator::Call {
+                        func: "map_set".to_string(),
+                        args: vec![Operand::Copy(result), key, val],
+                        dest: None,
+                        next,
+                    });
+                    self.current_block = Some(next);
+                }
+
+                Some(Operand::Local(result))
+            }
+
+            ExprKind::FieldShorthand(field) => {
+                // .field shorthand closure - desugar to |x| x.field
+                // For now, error - this should be desugared earlier
+                self.error(format!("field shorthand '.{}' should be desugared before MIR lowering", field.name), expr.span);
                 None
+            }
+
+            ExprKind::OpShorthand(op, operand, left) => {
+                // Operator shorthand like (+ 10) - desugar to |x| x + 10
+                // For now, error - this should be desugared earlier
+                let _ = (op, operand, left);
+                self.error("operator shorthand should be desugared before MIR lowering".to_string(), expr.span);
+                None
+            }
+
+            ExprKind::Unsafe(block) => {
+                // Unsafe block - lower as regular block (safety checking done elsewhere)
+                self.lower_block(block)
             }
         }
     }
@@ -1731,8 +1902,143 @@ impl Lowerer {
                     }
                 }
 
+                PatternKind::Or(patterns) => {
+                    // Or pattern: try each alternative, if any matches go to body
+                    // Create a block for each alternative and chain them
+                    let mut alt_blocks = Vec::new();
+                    for _ in 0..patterns.len() {
+                        alt_blocks.push(self.new_block());
+                    }
+
+                    // Start with the first alternative
+                    self.terminate(Terminator::Goto(alt_blocks[0]));
+
+                    for (i, pat) in patterns.iter().enumerate() {
+                        self.current_block = Some(alt_blocks[i]);
+                        let next_alt = if i + 1 < alt_blocks.len() {
+                            alt_blocks[i + 1]
+                        } else {
+                            next_test
+                        };
+
+                        // For simple patterns (literal, ident), inline the check
+                        match &pat.kind {
+                            PatternKind::Literal(Literal { kind: LiteralKind::Int(n), .. }) => {
+                                let lit_local = self.new_temp(Ty::Int);
+                                self.emit(StatementKind::Assign(
+                                    lit_local,
+                                    Rvalue::Use(Operand::Constant(Constant::Int(*n as i64))),
+                                ));
+                                let cond_local = self.new_temp(Ty::Bool);
+                                self.emit(StatementKind::Assign(
+                                    cond_local,
+                                    Rvalue::BinaryOp(BinOp::Eq, Operand::Copy(scrut_local), Operand::Copy(lit_local)),
+                                ));
+                                self.terminate(Terminator::If {
+                                    cond: Operand::Copy(cond_local),
+                                    then_block: body_block,
+                                    else_block: next_alt,
+                                });
+                            }
+                            PatternKind::Ident(ident, _, _) => {
+                                // Check if enum variant
+                                let is_variant = self.enum_variants.get(&ident.name)
+                                    .map(|(_, c)| *c == 0)
+                                    .unwrap_or(false) || ident.name == "None";
+                                if is_variant {
+                                    let disc = self.new_temp(Ty::Int);
+                                    self.emit(StatementKind::Assign(disc, Rvalue::Discriminant(scrut_local)));
+                                    let exp_disc = self.get_variant_discriminant(&ident.name);
+                                    let exp = self.new_temp(Ty::Int);
+                                    self.emit(StatementKind::Assign(exp, Rvalue::Use(Operand::Constant(Constant::Int(exp_disc)))));
+                                    let cond = self.new_temp(Ty::Bool);
+                                    self.emit(StatementKind::Assign(cond, Rvalue::BinaryOp(BinOp::Eq, Operand::Copy(disc), Operand::Copy(exp))));
+                                    self.terminate(Terminator::If { cond: Operand::Copy(cond), then_block: body_block, else_block: next_alt });
+                                } else {
+                                    // Bind variable and match
+                                    let local = self.new_local(Ty::Unit, Some(ident.name.clone()));
+                                    self.vars.insert(ident.name.clone(), local);
+                                    self.emit(StatementKind::Assign(local, Rvalue::Use(Operand::Copy(scrut_local))));
+                                    self.terminate(Terminator::Goto(body_block));
+                                }
+                            }
+                            PatternKind::Wildcard => {
+                                self.terminate(Terminator::Goto(body_block));
+                            }
+                            _ => {
+                                // Complex nested or-pattern alternatives not yet supported
+                                self.terminate(Terminator::Goto(next_alt));
+                            }
+                        }
+                    }
+                    // Don't fall through to body_block setup - handled above
+                    continue;
+                }
+
+                PatternKind::Range(start, end, inclusive) => {
+                    // Range pattern: check if scrutinee is within range
+                    let mut conditions = Vec::new();
+
+                    if let Some(start_pat) = start {
+                        if let PatternKind::Literal(Literal { kind: LiteralKind::Int(n), .. }) = &start_pat.kind {
+                            let start_val = self.new_temp(Ty::Int);
+                            self.emit(StatementKind::Assign(start_val, Rvalue::Use(Operand::Constant(Constant::Int(*n as i64)))));
+                            let ge_cond = self.new_temp(Ty::Bool);
+                            self.emit(StatementKind::Assign(ge_cond, Rvalue::BinaryOp(BinOp::Ge, Operand::Copy(scrut_local), Operand::Copy(start_val))));
+                            conditions.push(ge_cond);
+                        }
+                    }
+
+                    if let Some(end_pat) = end {
+                        if let PatternKind::Literal(Literal { kind: LiteralKind::Int(n), .. }) = &end_pat.kind {
+                            let end_val = self.new_temp(Ty::Int);
+                            self.emit(StatementKind::Assign(end_val, Rvalue::Use(Operand::Constant(Constant::Int(*n as i64)))));
+                            let cmp_op = if *inclusive { BinOp::Le } else { BinOp::Lt };
+                            let le_cond = self.new_temp(Ty::Bool);
+                            self.emit(StatementKind::Assign(le_cond, Rvalue::BinaryOp(cmp_op, Operand::Copy(scrut_local), Operand::Copy(end_val))));
+                            conditions.push(le_cond);
+                        }
+                    }
+
+                    // Combine conditions with AND
+                    let final_cond = if conditions.is_empty() {
+                        let t = self.new_temp(Ty::Bool);
+                        self.emit(StatementKind::Assign(t, Rvalue::Use(Operand::Constant(Constant::Bool(true)))));
+                        t
+                    } else if conditions.len() == 1 {
+                        conditions[0]
+                    } else {
+                        let combined = self.new_temp(Ty::Bool);
+                        self.emit(StatementKind::Assign(combined, Rvalue::BinaryOp(BinOp::And, Operand::Copy(conditions[0]), Operand::Copy(conditions[1]))));
+                        combined
+                    };
+
+                    self.terminate(Terminator::If {
+                        cond: Operand::Copy(final_cond),
+                        then_block: body_block,
+                        else_block: next_test,
+                    });
+                }
+
+                PatternKind::Ref(inner, _is_mut) => {
+                    // Reference pattern: dereference and match inner
+                    // For now, just bind the value directly (simplified)
+                    if let PatternKind::Ident(ident, _, _) = &inner.kind {
+                        let local = self.new_local(Ty::Unit, Some(ident.name.clone()));
+                        self.vars.insert(ident.name.clone(), local);
+                        self.emit(StatementKind::Assign(local, Rvalue::Use(Operand::Copy(scrut_local))));
+                    }
+                    self.terminate(Terminator::Goto(body_block));
+                }
+
+                PatternKind::Rest => {
+                    // Rest pattern (used in list/tuple patterns) - matches anything
+                    self.terminate(Terminator::Goto(body_block));
+                }
+
                 _ => {
-                    // Unsupported pattern, skip to next
+                    // Remaining unsupported patterns - emit error and skip
+                    self.error(format!("unsupported pattern: {:?}", arm.pattern.kind), arm.pattern.span);
                     self.terminate(Terminator::Goto(next_test));
                     continue;
                 }
@@ -1766,8 +2072,17 @@ impl Lowerer {
             "Some" => 1,
             "Ok" => 0,
             "Err" => 1,
-            // For user-defined enums, use a simple hash
-            _ => variant.bytes().fold(0i64, |acc, b| acc + b as i64),
+            // For user-defined enums, use FNV-1a hash to avoid collisions
+            // (ASCII sum would collide e.g., "ab" == "ba")
+            _ => {
+                const FNV_OFFSET: u64 = 14695981039346656037;
+                const FNV_PRIME: u64 = 1099511628211;
+                let hash = variant.bytes().fold(FNV_OFFSET, |acc, b| {
+                    (acc ^ b as u64).wrapping_mul(FNV_PRIME)
+                });
+                // Map to i64, keeping lower 63 bits positive
+                (hash & 0x7FFFFFFFFFFFFFFF) as i64
+            }
         }
     }
 
