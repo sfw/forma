@@ -101,10 +101,10 @@ f gcd(a: Int, b: Int) -> Int
     if b == 0 then abs(a)
     else gcd(b, a % b)
 
-# LCM using GCD
+# LCM using GCD (divide before multiply to prevent overflow)
 f lcm(a: Int, b: Int) -> Int
     if a == 0 || b == 0 then 0
-    else abs(a * b) / gcd(a, b)
+    else abs(a / gcd(a, b)) * abs(b)
 
 # Check if a number is even
 f is_even(n: Int) -> Bool

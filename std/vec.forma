@@ -37,8 +37,18 @@ f vec_head[T](v: Vec[T]) -> T?
     vec_first(v.data)
 
 # Get last element
-f vec_tail[T](v: Vec[T]) -> T?
+f vec_last_elem[T](v: Vec[T]) -> T?
     vec_last(v.data)
+
+# Get all elements except first (tail of list)
+f vec_tail[T](v: Vec[T]) -> Vec[T]
+    Vec { data: vec_slice(v.data, 1, vec_len(v.data)) }
+
+# Get all elements except last (init of list)
+f vec_init[T](v: Vec[T]) -> Vec[T]
+    len := vec_len(v.data)
+    if len == 0 then Vec { data: [] }
+    else Vec { data: vec_slice(v.data, 0, len - 1) }
 
 # Append element (returns new vec)
 f vec_append[T](v: Vec[T], item: T) -> Vec[T]

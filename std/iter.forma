@@ -101,9 +101,13 @@ s StepRange
     step: Int
     current: Int
 
-# Create a range with custom step
+# Create a range with custom step (step=0 returns empty range)
 f range_step(start: Int, end: Int, step: Int) -> StepRange
-    StepRange { start: start, end: end, step: step, current: start }
+    if step == 0 then
+        # Empty range: current >= end so step_has_next returns false
+        StepRange { start: 0, end: 0, step: 1, current: 1 }
+    else
+        StepRange { start: start, end: end, step: step, current: start }
 
 # Check if step range has next
 f step_has_next(r: StepRange) -> Bool

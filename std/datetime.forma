@@ -125,9 +125,10 @@
 f is_leap_year(year: Int) -> Bool
     (year % 4 == 0) && ((year % 100 != 0) || (year % 400 == 0))
 
-# Get number of days in a month
+# Get number of days in a month (returns 0 for invalid month)
 f days_in_month(year: Int, month: Int) -> Int
-    if month == 2 then
+    if month < 1 || month > 12 then 0
+    else if month == 2 then
         if is_leap_year(year) then 29 else 28
     else if (month == 4) || (month == 6) || (month == 9) || (month == 11) then
         30

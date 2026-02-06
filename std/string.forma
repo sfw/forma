@@ -125,11 +125,10 @@ f str_from_char(c: Char) -> Str
     char_to_str(c)
 
 # Get character at index as string (single char)
-# Note: Commented out due to type inference issue with match arms
-# f str_char_at_str(s: Str, idx: Int) -> Option[Str]
-#     m str_char_at(s, idx)
-#         Some(c) -> Some(str_from_char(c))
-#         None -> None
+f str_char_at_str(s: Str, idx: Int) -> Option[Str]
+    m str_char_at(s, idx)
+        Some(c) -> Some(str_from_char(c))
+        None -> None
 
 # Check if character is a digit
 f is_digit(c: Char) -> Bool
