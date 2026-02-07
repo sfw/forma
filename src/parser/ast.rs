@@ -87,8 +87,10 @@ pub enum FnBody {
 
 /// How a parameter is passed: by value (owned), by shared reference, or by mutable reference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum PassMode {
     /// Pass by value (default)
+    #[default]
     Owned,
     /// Pass by shared reference (`ref`)
     Ref,
@@ -96,11 +98,6 @@ pub enum PassMode {
     RefMut,
 }
 
-impl Default for PassMode {
-    fn default() -> Self {
-        PassMode::Owned
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct Param {

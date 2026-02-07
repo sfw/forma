@@ -61,7 +61,7 @@ impl TypeChecker {
 
     /// Check a single item.
     pub fn check_item(&mut self, item: &Item) -> Result<(), TypeError> {
-        self.engine.infer_items(&[item.clone()])
+        self.engine.infer_items(std::slice::from_ref(item))
     }
 
     /// Get the type of an identifier.

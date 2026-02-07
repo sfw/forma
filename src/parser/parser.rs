@@ -99,15 +99,14 @@ impl<'a> Parser<'a> {
         // Extract @pre/@post contracts and add them to the function
         if let ItemKind::Function(ref mut func) = kind {
             for attr in &attrs {
-                if attr.name.name == "pre" || attr.name.name == "post" {
-                    if let Some(contract) = Self::extract_contract(attr) {
+                if (attr.name.name == "pre" || attr.name.name == "post")
+                    && let Some(contract) = Self::extract_contract(attr) {
                         if attr.name.name == "pre" {
                             func.preconditions.push(contract);
                         } else {
                             func.postconditions.push(contract);
                         }
                     }
-                }
             }
         }
 
@@ -135,11 +134,10 @@ impl<'a> Parser<'a> {
         let message = attr.args.iter()
             .find(|a| a.name.name == "message")
             .and_then(|a| {
-                if let Some(lit) = &a.value {
-                    if let LiteralKind::String(s) = &lit.kind {
+                if let Some(lit) = &a.value
+                    && let LiteralKind::String(s) = &lit.kind {
                         return Some(s.clone());
                     }
-                }
                 None
             });
 
@@ -1823,8 +1821,8 @@ impl<'a> Parser<'a> {
                     break;
                 }
                 // Check if this is a type cast like i32(x) or f64(x)
-                if let ExprKind::Ident(ref name) = expr.kind {
-                    if let Some(target_ty) = self.type_name_to_type(&name.name, start) {
+                if let ExprKind::Ident(ref name) = expr.kind
+                    && let Some(target_ty) = self.type_name_to_type(&name.name, start) {
                         // This is a cast expression
                         self.expect(TokenKind::LParen)?;
                         let inner = self.parse_expr()?;
@@ -1835,7 +1833,6 @@ impl<'a> Parser<'a> {
                         };
                         continue;
                     }
-                }
                 // Regular function call
                 let args = self.parse_call_args()?;
                 expr = Expr {
@@ -1967,12 +1964,12 @@ impl<'a> Parser<'a> {
         }
 
         // Check for labeled loops: 'label: for/wh/lp
-        if let Some(TokenKind::Ident(name)) = self.current().map(|t| &t.kind) {
-            if name.starts_with('\'') {
+        if let Some(TokenKind::Ident(name)) = self.current().map(|t| &t.kind)
+            && name.starts_with('\'') {
                 let label_name = name.clone();
                 // Peek ahead: is the next token a colon followed by a loop keyword?
-                if self.pos + 1 < self.tokens.len() {
-                    if let TokenKind::Colon = &self.tokens[self.pos + 1].kind {
+                if self.pos + 1 < self.tokens.len()
+                    && let TokenKind::Colon = &self.tokens[self.pos + 1].kind {
                         // Check what follows the colon
                         let has_loop_keyword = self.pos + 2 < self.tokens.len() && matches!(
                             &self.tokens[self.pos + 2].kind,
@@ -1991,9 +1988,7 @@ impl<'a> Parser<'a> {
                             }
                         }
                     }
-                }
             }
-        }
 
         if self.match_token(TokenKind::For) {
             return self.parse_for_expr(start);
@@ -3730,8 +3725,8 @@ impl<'a> Parser<'a> {
 
         while !self.at_end() {
             // If we just passed a newline at column 0, we might be at a new item
-            if let Some(prev) = self.tokens.get(self.pos.saturating_sub(1)) {
-                if prev.kind == TokenKind::Newline {
+            if let Some(prev) = self.tokens.get(self.pos.saturating_sub(1))
+                && prev.kind == TokenKind::Newline {
                     // Check if current token starts a new item
                     // Single-letter keywords are now contextual (emitted as Ident)
                     if self.is_item_start()
@@ -3749,7 +3744,6 @@ impl<'a> Parser<'a> {
                         return;
                     }
                 }
-            }
 
             self.advance();
         }

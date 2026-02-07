@@ -702,9 +702,7 @@ impl Substitution {
 
         // Add all bindings from self that aren't in other
         for (&var, ty) in &self.map {
-            if !result.map.contains_key(&var) {
-                result.map.insert(var, ty.clone());
-            }
+            result.map.entry(var).or_insert_with(|| ty.clone());
         }
 
         result

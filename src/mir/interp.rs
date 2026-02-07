@@ -422,8 +422,6 @@ pub struct Interpreter {
     env_vars: Arc<RwLock<HashMap<String, String>>>,
     /// Granted capabilities for FFI operations
     capabilities: HashSet<String>,
-    /// Memory arena for safe pointer tracking
-    memory_arena: crate::ffi::MemoryArena,
 }
 
 impl Interpreter {
@@ -455,7 +453,6 @@ impl Interpreter {
             next_task_id: 0,
             env_vars: Arc::new(RwLock::new(HashMap::new())),
             capabilities: HashSet::new(),
-            memory_arena: crate::ffi::MemoryArena::new(),
         })
     }
 
@@ -521,7 +518,6 @@ impl Interpreter {
             next_task_id: 0,
             env_vars: Arc::new(RwLock::new(HashMap::new())),
             capabilities: HashSet::new(),
-            memory_arena: crate::ffi::MemoryArena::new(),
         })
     }
 
@@ -631,7 +627,7 @@ impl Interpreter {
             }
         }
 
-        let result = self.execute(&func)?;
+        let result = self.execute(func)?;
 
         // Check postconditions (with 'result' available)
         {
@@ -724,6 +720,12 @@ impl Interpreter {
                 if let Some(func) = self.program.functions.get(&frame.function) {
                     for ((local, _ty), (param_name, _)) in func.params.iter().zip(func.param_names.iter()) {
                         if param_name == name {
+                            // Check ref_bindings first (for ref/ref mut params)
+                            if let Some(rb) = frame.ref_bindings.get(local)
+                                && let Some(target_frame) = self.call_stack.get(rb.frame_index)
+                                    && let Some(value) = target_frame.locals.get(&rb.local) {
+                                        return Ok(value.clone());
+                                    }
                             if let Some(value) = frame.locals.get(local) {
                                 return Ok(value.clone());
                             }
@@ -963,9 +965,11 @@ impl Interpreter {
                         if let Some(rb) = ref_binding {
                             if rb.mutable {
                                 // Write through to the target frame
-                                if let Some(target_frame) = self.call_stack.get_mut(rb.frame_index) {
-                                    target_frame.locals.insert(rb.local, value);
-                                }
+                                let target_frame = self.call_stack.get_mut(rb.frame_index)
+                                    .ok_or_else(|| InterpError {
+                                        message: format!("ref binding points to invalid frame {}", rb.frame_index),
+                                    })?;
+                                target_frame.locals.insert(rb.local, value);
                             } else {
                                 return Err(InterpError {
                                     message: "cannot assign through immutable reference".to_string(),
@@ -980,7 +984,10 @@ impl Interpreter {
                         let index = self.eval_operand(index_op)?;
                         let value = self.eval_operand(value_op)?;
                         let idx = match &index {
-                            Value::Int(n) => *n as usize,
+                            Value::Int(n) if *n >= 0 => *n as usize,
+                            Value::Int(n) => return Err(InterpError {
+                                message: format!("negative index: {}", n),
+                            }),
                             _ => return Err(InterpError {
                                 message: "index must be integer".to_string(),
                             }),
@@ -997,23 +1004,27 @@ impl Interpreter {
                         } else {
                             (self.call_stack.len() - 1, *local)
                         };
-                        if let Some(target_frame) = self.call_stack.get_mut(target_frame_idx) {
-                            if let Some(arr_val) = target_frame.locals.get_mut(&target_local) {
-                                match arr_val {
-                                    Value::Array(arr) => {
-                                        if idx < arr.len() {
-                                            arr[idx] = value;
-                                        } else {
-                                            return Err(InterpError {
-                                                message: format!("index {} out of bounds for array of length {}", idx, arr.len()),
-                                            });
-                                        }
-                                    }
-                                    _ => return Err(InterpError {
-                                        message: "index assignment on non-array".to_string(),
-                                    }),
+                        let target_frame = self.call_stack.get_mut(target_frame_idx)
+                            .ok_or_else(|| InterpError {
+                                message: format!("index-assign: invalid frame {}", target_frame_idx),
+                            })?;
+                        let arr_val = target_frame.locals.get_mut(&target_local)
+                            .ok_or_else(|| InterpError {
+                                message: format!("index-assign: undefined local {:?}", target_local),
+                            })?;
+                        match arr_val {
+                            Value::Array(arr) => {
+                                if idx < arr.len() {
+                                    arr[idx] = value;
+                                } else {
+                                    return Err(InterpError {
+                                        message: format!("index {} out of bounds for array of length {}", idx, arr.len()),
+                                    });
                                 }
                             }
+                            _ => return Err(InterpError {
+                                message: "index assignment on non-array".to_string(),
+                            }),
                         }
                     }
                     StatementKind::Nop => {}
@@ -1141,11 +1152,11 @@ impl Interpreter {
                         }
                     }
 
-                    // Handle built-in functions
-                    let result = if let Some(builtin_result) = self.call_builtin(&fn_name, &arg_vals)? {
-                        builtin_result
-                    } else if let Some(callee) = callee_fn {
+                    // User-defined functions take priority over builtins
+                    let result = if let Some(callee) = callee_fn {
                         self.call_function_with_refs(&callee, arg_vals, ref_binding_list)?
+                    } else if let Some(builtin_result) = self.call_builtin(&fn_name, &arg_vals)? {
+                        builtin_result
                     } else {
                         return Err(InterpError {
                             message: format!("undefined function: {}", fn_name),
@@ -1163,7 +1174,7 @@ impl Interpreter {
                 Terminator::CallIndirect {
                     callee,
                     args,
-                    arg_pass_modes: _,
+                    arg_pass_modes,
                     dest,
                     next,
                 } => {
@@ -1180,20 +1191,54 @@ impl Interpreter {
                         Value::Closure { func_name, captures } => {
                             // Get the closure's implementation function
                             if let Some(callee_fn) = self.program.functions.get(&func_name).cloned() {
-                                let mut callee_frame = Frame::new(func_name.clone(), callee_fn.entry_block);
-
                                 // First bind captured values, then regular arguments
                                 // The lifted function has signature: fn(captures..., args...)
-                                let all_args: Vec<Value> = captures.into_iter().chain(arg_vals.into_iter()).collect();
+                                let num_captures = captures.len();
+                                let all_args: Vec<Value> = captures.into_iter().chain(arg_vals).collect();
 
-                                for ((local, _ty), value) in callee_fn.params.iter().zip(all_args.iter()) {
-                                    callee_frame.locals.insert(*local, value.clone());
+                                // Build ref_binding_list: captures are always owned,
+                                // arg_pass_modes apply to the user-visible args (after captures)
+                                let effective_modes: Vec<super::mir::PassMode> = if !arg_pass_modes.is_empty() {
+                                    arg_pass_modes.clone()
+                                } else {
+                                    callee_fn.param_pass_modes[num_captures..].to_vec()
+                                };
+
+                                let has_refs = effective_modes.iter().any(|m| *m != super::mir::PassMode::Owned);
+                                let caller_frame_idx = self.call_stack.len() - 1;
+
+                                let mut ref_binding_list: Vec<Option<RefBinding>> = Vec::new();
+                                // Captures are always owned
+                                for _ in 0..num_captures {
+                                    ref_binding_list.push(None);
+                                }
+                                // Build ref bindings for user-visible args
+                                if has_refs {
+                                    for (i, arg) in args.iter().enumerate() {
+                                        let mode = effective_modes.get(i).copied().unwrap_or(super::mir::PassMode::Owned);
+                                        if mode == super::mir::PassMode::Ref || mode == super::mir::PassMode::RefMut {
+                                            if let Operand::Local(caller_local) | Operand::Copy(caller_local) | Operand::Move(caller_local) = arg {
+                                                let caller_frame = &self.call_stack[caller_frame_idx];
+                                                let (ultimate_frame_idx, ultimate_local) = if let Some(existing_rb) = caller_frame.ref_bindings.get(caller_local) {
+                                                    (existing_rb.frame_index, existing_rb.local)
+                                                } else {
+                                                    (caller_frame_idx, *caller_local)
+                                                };
+                                                ref_binding_list.push(Some(RefBinding {
+                                                    frame_index: ultimate_frame_idx,
+                                                    local: ultimate_local,
+                                                    mutable: mode == super::mir::PassMode::RefMut,
+                                                }));
+                                            } else {
+                                                ref_binding_list.push(None);
+                                            }
+                                        } else {
+                                            ref_binding_list.push(None);
+                                        }
+                                    }
                                 }
 
-                                self.call_stack.push(callee_frame);
-                                let result = self.execute(&callee_fn)?;
-                                self.call_stack.pop();
-                                result
+                                self.call_function_with_refs(&callee_fn, all_args, ref_binding_list)?
                             } else {
                                 return Err(InterpError {
                                     message: format!("undefined closure function: {}", func_name),
@@ -1372,7 +1417,10 @@ impl Interpreter {
                     if i > 0 {
                         print!(" ");
                     }
-                    print!("{}", val);
+                    match val {
+                        Value::Str(s) => print!("{}", s),
+                        _ => print!("{}", val),
+                    }
                 }
                 println!();
                 Ok(Some(Value::Unit))
@@ -1889,15 +1937,14 @@ impl Interpreter {
                 let n = args[0].as_int().ok_or_else(|| InterpError {
                     message: "int_to_char: expected Int".to_string()
                 })?;
-                if n >= 0 && n <= 0x10FFFF {
-                    if let Some(c) = char::from_u32(n as u32) {
+                if (0..=0x10FFFF).contains(&n)
+                    && let Some(c) = char::from_u32(n as u32) {
                         return Ok(Some(Value::Enum {
                             type_name: "Option".to_string(),
                             variant: "Some".to_string(),
                             fields: vec![Value::Char(c)],
                         }));
                     }
-                }
                 Ok(Some(Value::Enum {
                     type_name: "Option".to_string(),
                     variant: "None".to_string(),
@@ -2325,13 +2372,13 @@ impl Interpreter {
                     Value::Enum { variant, fields, .. } => {
                         match variant.as_str() {
                             "Some" | "Ok" => {
-                                Ok(Some(fields.get(0).cloned().unwrap_or(Value::Unit)))
+                                Ok(Some(fields.first().cloned().unwrap_or(Value::Unit)))
                             }
                             "None" => {
                                 Err(InterpError { message: "unwrap called on None".to_string() })
                             }
                             "Err" => {
-                                let err_val = fields.get(0).map(|v| format!("{}", v)).unwrap_or_default();
+                                let err_val = fields.first().map(|v| format!("{}", v)).unwrap_or_default();
                                 Err(InterpError { message: format!("unwrap called on Err: {}", err_val) })
                             }
                             _ => Err(InterpError { message: "unwrap: expected Option or Result".to_string() })
@@ -2356,7 +2403,7 @@ impl Interpreter {
                     Value::Enum { variant, fields, .. } => {
                         match variant.as_str() {
                             "Some" | "Ok" => {
-                                Ok(Some(fields.get(0).cloned().unwrap_or(Value::Unit)))
+                                Ok(Some(fields.first().cloned().unwrap_or(Value::Unit)))
                             }
                             "None" | "Err" => {
                                 Err(InterpError { message: msg })
@@ -2374,7 +2421,7 @@ impl Interpreter {
                     Value::Enum { variant, fields, .. } => {
                         match variant.as_str() {
                             "Some" | "Ok" => {
-                                Ok(Some(fields.get(0).cloned().unwrap_or(Value::Unit)))
+                                Ok(Some(fields.first().cloned().unwrap_or(Value::Unit)))
                             }
                             "None" | "Err" => {
                                 Ok(Some(args.get(1).cloned().unwrap_or(Value::Unit)))
@@ -2517,7 +2564,7 @@ impl Interpreter {
             "args" => {
                 // args() -> [Str] - command line arguments
                 let args: Vec<Value> = std::env::args()
-                    .map(|s| Value::Str(s))
+                    .map(Value::Str)
                     .collect();
                 Ok(Some(Value::Array(args)))
             }
@@ -4385,15 +4432,14 @@ impl Interpreter {
                 // Case-insensitive header lookup
                 let header_lower = header_name.to_lowercase();
                 for (k, v) in &headers {
-                    if k.to_lowercase() == header_lower {
-                        if let Value::Str(s) = v {
+                    if k.to_lowercase() == header_lower
+                        && let Value::Str(s) = v {
                             return Ok(Some(Value::Enum {
                                 type_name: "Option".to_string(),
                                 variant: "Some".to_string(),
                                 fields: vec![Value::Str(s.clone())],
                             }));
                         }
-                    }
                 }
                 Ok(Some(Value::Enum {
                     type_name: "Option".to_string(),
@@ -4456,7 +4502,7 @@ impl Interpreter {
                     }
 
                     // Parse request line: "GET /path HTTP/1.1"
-                    let parts: Vec<&str> = request_line.trim().split_whitespace().collect();
+                    let parts: Vec<&str> = request_line.split_whitespace().collect();
                     if parts.len() < 2 {
                         continue;
                     }
@@ -6776,12 +6822,7 @@ impl Interpreter {
             }
 
             Rvalue::Ref(local, _mutability) => {
-                let frame = self.current_frame()?;
-                let val = frame
-                    .locals
-                    .get(local)
-                    .cloned()
-                    .unwrap_or(Value::Unit);
+                let val = self.resolve_local(local)?;
                 Ok(Value::Ref(Box::new(val)))
             }
 
@@ -6833,11 +6874,7 @@ impl Interpreter {
             }
 
             Rvalue::Discriminant(local) => {
-                let frame = self.current_frame()?;
-                let val = frame.locals.get(local).cloned()
-                    .ok_or_else(|| InterpError {
-                        message: format!("Internal error: undefined local {:?}", local),
-                    })?;
+                let val = self.resolve_local(local)?;
                 match val {
                     Value::Enum { type_name, variant, .. } => {
                         let disc = match (type_name.as_str(), variant.as_str()) {
@@ -6857,9 +6894,11 @@ impl Interpreter {
                                     .get(&key)
                                     .map(|&idx| idx as i64)
                                     .unwrap_or_else(|| {
-                                        // Fallback: use simple index based on variant name
+                                        // Fallback: use FNV-like hash for variant name
                                         // This handles enums not registered at lowering time
-                                        variant.bytes().fold(0i64, |acc, b| acc.wrapping_add(b as i64))
+                                        variant.bytes().fold(0x811c9dc5i64, |acc, b| {
+                                            (acc ^ (b as i64)).wrapping_mul(0x01000193)
+                                        })
                                     })
                             }
                         };
@@ -6872,11 +6911,7 @@ impl Interpreter {
             }
 
             Rvalue::EnumField(local, idx) => {
-                let frame = self.current_frame()?;
-                let val = frame.locals.get(local).cloned()
-                    .ok_or_else(|| InterpError {
-                        message: format!("Internal error: undefined local {:?}", local),
-                    })?;
+                let val = self.resolve_local(local)?;
                 match val {
                     Value::Enum { fields, .. } => {
                         fields.get(*idx).cloned().ok_or_else(|| InterpError {
@@ -6920,7 +6955,12 @@ impl Interpreter {
                 let idx_val = self.eval_operand(idx)?;
 
                 let index = match idx_val {
-                    Value::Int(n) => n as usize,
+                    Value::Int(n) if n >= 0 => n as usize,
+                    Value::Int(n) => {
+                        return Err(InterpError {
+                            message: format!("negative index: {}", n),
+                        })
+                    }
                     _ => {
                         return Err(InterpError {
                             message: "index must be integer".to_string(),
@@ -6991,6 +7031,32 @@ impl Interpreter {
                     })
             }
         }
+    }
+
+    /// Resolve a local through ref_bindings, returning the value.
+    /// Checks ref_bindings first, then falls back to locals.
+    fn resolve_local(&self, local: &Local) -> Result<Value, InterpError> {
+        let frame = self.current_frame()?;
+        if let Some(ref_binding) = frame.ref_bindings.get(local) {
+            let target_frame = self.call_stack.get(ref_binding.frame_index)
+                .ok_or_else(|| InterpError {
+                    message: format!("ref binding points to invalid frame {}", ref_binding.frame_index),
+                })?;
+            return target_frame
+                .locals
+                .get(&ref_binding.local)
+                .cloned()
+                .ok_or_else(|| InterpError {
+                    message: format!("ref binding points to undefined local: {}", ref_binding.local),
+                });
+        }
+        frame
+            .locals
+            .get(local)
+            .cloned()
+            .ok_or_else(|| InterpError {
+                message: format!("undefined local: {:?}", local),
+            })
     }
 
     fn const_to_value(&self, c: &Constant) -> Value {
@@ -7080,7 +7146,8 @@ impl Interpreter {
 
             // String repetition: Str * Int -> Str
             (BinOp::Mul, Value::Str(s), Value::Int(n)) => {
-                Ok(Value::Str(s.repeat(*n as usize)))
+                let count = if *n < 0 { 0 } else { (*n as usize).min(1_000_000) };
+                Ok(Value::Str(s.repeat(count)))
             }
 
             // Float arithmetic

@@ -78,8 +78,10 @@ pub struct MirContract {
 
 /// How a parameter is passed at the MIR level.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum PassMode {
     /// Pass by value (default)
+    #[default]
     Owned,
     /// Pass by shared reference
     Ref,
@@ -87,11 +89,6 @@ pub enum PassMode {
     RefMut,
 }
 
-impl Default for PassMode {
-    fn default() -> Self {
-        PassMode::Owned
-    }
-}
 
 /// A function in MIR.
 #[derive(Debug, Clone)]

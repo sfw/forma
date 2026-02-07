@@ -398,7 +398,7 @@ fn test_type_relations_size_of() {
 
 #[test]
 fn test_unification_basic() {
-    use forma::types::{Unifier, reset_type_var_counter, TypeVar};
+    use forma::types::{Unifier, reset_type_var_counter};
     use forma::lexer::Span;
 
     reset_type_var_counter();

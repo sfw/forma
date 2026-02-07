@@ -240,167 +240,151 @@ fn test_binary_expressions() {
 #[test]
 fn test_comparison_expressions() {
     let ast = parse_ok("f test -> Bool = x > 10");
-    if let ItemKind::Function(f) = &ast.items[0].kind {
-        if let Some(FnBody::Expr(e)) = &f.body {
+    if let ItemKind::Function(f) = &ast.items[0].kind
+        && let Some(FnBody::Expr(e)) = &f.body {
             assert!(matches!(e.kind, ExprKind::Binary(_, BinOp::Gt, _)));
         }
-    }
 }
 
 #[test]
 fn test_logical_expressions() {
     let ast = parse_ok("f test -> Bool = a && b || c");
-    if let ItemKind::Function(f) = &ast.items[0].kind {
-        if let Some(FnBody::Expr(e)) = &f.body {
+    if let ItemKind::Function(f) = &ast.items[0].kind
+        && let Some(FnBody::Expr(e)) = &f.body {
             // Should parse as (a && b) || c
             assert!(matches!(e.kind, ExprKind::Binary(_, BinOp::Or, _)));
         }
-    }
 }
 
 #[test]
 fn test_unary_expressions() {
     let ast = parse_ok("f test -> Int = -x");
-    if let ItemKind::Function(f) = &ast.items[0].kind {
-        if let Some(FnBody::Expr(e)) = &f.body {
+    if let ItemKind::Function(f) = &ast.items[0].kind
+        && let Some(FnBody::Expr(e)) = &f.body {
             assert!(matches!(e.kind, ExprKind::Unary(UnaryOp::Neg, _)));
         }
-    }
 }
 
 #[test]
 fn test_function_call() {
     let ast = parse_ok("f test -> Int = add(1, 2)");
-    if let ItemKind::Function(f) = &ast.items[0].kind {
-        if let Some(FnBody::Expr(e)) = &f.body {
+    if let ItemKind::Function(f) = &ast.items[0].kind
+        && let Some(FnBody::Expr(e)) = &f.body {
             assert!(matches!(e.kind, ExprKind::Call(_, _)));
         }
-    }
 }
 
 #[test]
 fn test_method_call() {
     let ast = parse_ok("f test -> Int = obj.method(arg)");
-    if let ItemKind::Function(f) = &ast.items[0].kind {
-        if let Some(FnBody::Expr(e)) = &f.body {
+    if let ItemKind::Function(f) = &ast.items[0].kind
+        && let Some(FnBody::Expr(e)) = &f.body {
             assert!(matches!(e.kind, ExprKind::MethodCall(_, _, _)));
         }
-    }
 }
 
 #[test]
 fn test_field_access() {
     let ast = parse_ok("f test -> Int = point.x");
-    if let ItemKind::Function(f) = &ast.items[0].kind {
-        if let Some(FnBody::Expr(e)) = &f.body {
+    if let ItemKind::Function(f) = &ast.items[0].kind
+        && let Some(FnBody::Expr(e)) = &f.body {
             assert!(matches!(e.kind, ExprKind::Field(_, _)));
         }
-    }
 }
 
 #[test]
 fn test_index_expression() {
     let ast = parse_ok("f test -> Int = arr[0]");
-    if let ItemKind::Function(f) = &ast.items[0].kind {
-        if let Some(FnBody::Expr(e)) = &f.body {
+    if let ItemKind::Function(f) = &ast.items[0].kind
+        && let Some(FnBody::Expr(e)) = &f.body {
             assert!(matches!(e.kind, ExprKind::Index(_, _)));
         }
-    }
 }
 
 #[test]
 fn test_array_literal() {
     let ast = parse_ok("f test -> [Int] = [1, 2, 3]");
-    if let ItemKind::Function(f) = &ast.items[0].kind {
-        if let Some(FnBody::Expr(e)) = &f.body {
+    if let ItemKind::Function(f) = &ast.items[0].kind
+        && let Some(FnBody::Expr(e)) = &f.body {
             if let ExprKind::Array(elements) = &e.kind {
                 assert_eq!(elements.len(), 3);
             } else {
                 panic!("expected array");
             }
         }
-    }
 }
 
 #[test]
 fn test_tuple_expression() {
     let ast = parse_ok("f test -> (Int, Int) = (1, 2)");
-    if let ItemKind::Function(f) = &ast.items[0].kind {
-        if let Some(FnBody::Expr(e)) = &f.body {
+    if let ItemKind::Function(f) = &ast.items[0].kind
+        && let Some(FnBody::Expr(e)) = &f.body {
             assert!(matches!(e.kind, ExprKind::Tuple(_)));
         }
-    }
 }
 
 #[test]
 fn test_struct_literal() {
     let ast = parse_ok("f test -> Point = Point { x: 1.0, y: 2.0 }");
-    if let ItemKind::Function(f) = &ast.items[0].kind {
-        if let Some(FnBody::Expr(e)) = &f.body {
+    if let ItemKind::Function(f) = &ast.items[0].kind
+        && let Some(FnBody::Expr(e)) = &f.body {
             assert!(matches!(e.kind, ExprKind::Struct(_, _, _)));
         }
-    }
 }
 
 #[test]
 fn test_if_then_else() {
     let ast = parse_ok("f test -> Int = if x > 0 then 1 else 0");
-    if let ItemKind::Function(f) = &ast.items[0].kind {
-        if let Some(FnBody::Expr(e)) = &f.body {
+    if let ItemKind::Function(f) = &ast.items[0].kind
+        && let Some(FnBody::Expr(e)) = &f.body {
             assert!(matches!(e.kind, ExprKind::If(_)));
         }
-    }
 }
 
 #[test]
 fn test_pipeline() {
     let ast = parse_ok("f test -> Int = x | double | add(1)");
-    if let ItemKind::Function(f) = &ast.items[0].kind {
-        if let Some(FnBody::Expr(e)) = &f.body {
+    if let ItemKind::Function(f) = &ast.items[0].kind
+        && let Some(FnBody::Expr(e)) = &f.body {
             assert!(matches!(e.kind, ExprKind::Pipeline(_, _)));
         }
-    }
 }
 
 #[test]
 fn test_try_operator() {
     let ast = parse_ok("f test -> Int! = get_value()?");
-    if let ItemKind::Function(f) = &ast.items[0].kind {
-        if let Some(FnBody::Expr(e)) = &f.body {
+    if let ItemKind::Function(f) = &ast.items[0].kind
+        && let Some(FnBody::Expr(e)) = &f.body {
             assert!(matches!(e.kind, ExprKind::Try(_)));
         }
-    }
 }
 
 #[test]
 fn test_closure() {
     let ast = parse_ok("f test -> (Int) -> Int = |x| x * 2");
-    if let ItemKind::Function(f) = &ast.items[0].kind {
-        if let Some(FnBody::Expr(e)) = &f.body {
+    if let ItemKind::Function(f) = &ast.items[0].kind
+        && let Some(FnBody::Expr(e)) = &f.body {
             assert!(matches!(e.kind, ExprKind::Closure(_)));
         }
-    }
 }
 
 #[test]
 fn test_cast_expression() {
     // Test T(x) cast syntax
     let ast = parse_ok("f test -> i32 = i32(255)");
-    if let ItemKind::Function(f) = &ast.items[0].kind {
-        if let Some(FnBody::Expr(e)) = &f.body {
+    if let ItemKind::Function(f) = &ast.items[0].kind
+        && let Some(FnBody::Expr(e)) = &f.body {
             assert!(matches!(e.kind, ExprKind::Cast(_, _)));
         }
-    }
 }
 
 #[test]
 fn test_cast_float_to_int() {
     let ast = parse_ok("f test -> i32 = i32(3.14)");
-    if let ItemKind::Function(f) = &ast.items[0].kind {
-        if let Some(FnBody::Expr(e)) = &f.body {
+    if let ItemKind::Function(f) = &ast.items[0].kind
+        && let Some(FnBody::Expr(e)) = &f.body {
             assert!(matches!(e.kind, ExprKind::Cast(_, _)));
         }
-    }
 }
 
 // ============================================================================
@@ -417,11 +401,10 @@ fn test_match_patterns() {
         _ -> "other""#;
 
     let ast = parse_ok(source);
-    if let ItemKind::Function(f) = &ast.items[0].kind {
-        if let Some(FnBody::Block(block)) = &f.body {
+    if let ItemKind::Function(f) = &ast.items[0].kind
+        && let Some(FnBody::Block(block)) = &f.body {
             assert!(!block.stmts.is_empty());
         }
-    }
 }
 
 #[test]
@@ -438,51 +421,46 @@ fn test_tuple_pattern() {
 #[test]
 fn test_optional_type() {
     let ast = parse_ok("f test -> Int?\n    N");
-    if let ItemKind::Function(f) = &ast.items[0].kind {
-        if let Some(ref ty) = f.return_type {
+    if let ItemKind::Function(f) = &ast.items[0].kind
+        && let Some(ref ty) = f.return_type {
             assert!(matches!(ty.kind, TypeKind::Option(_)));
         }
-    }
 }
 
 #[test]
 fn test_result_type() {
     let ast = parse_ok("f test -> Int!\n    ok(42)");
-    if let ItemKind::Function(f) = &ast.items[0].kind {
-        if let Some(ref ty) = f.return_type {
+    if let ItemKind::Function(f) = &ast.items[0].kind
+        && let Some(ref ty) = f.return_type {
             assert!(matches!(ty.kind, TypeKind::Result(_, _)));
         }
-    }
 }
 
 #[test]
 fn test_list_type() {
     let ast = parse_ok("f test -> [Int]\n    []");
-    if let ItemKind::Function(f) = &ast.items[0].kind {
-        if let Some(ref ty) = f.return_type {
+    if let ItemKind::Function(f) = &ast.items[0].kind
+        && let Some(ref ty) = f.return_type {
             assert!(matches!(ty.kind, TypeKind::List(_)));
         }
-    }
 }
 
 #[test]
 fn test_map_type() {
     let ast = parse_ok("f test -> {Str: Int}\n    {}");
-    if let ItemKind::Function(f) = &ast.items[0].kind {
-        if let Some(ref ty) = f.return_type {
+    if let ItemKind::Function(f) = &ast.items[0].kind
+        && let Some(ref ty) = f.return_type {
             assert!(matches!(ty.kind, TypeKind::Map(_, _)));
         }
-    }
 }
 
 #[test]
 fn test_function_type() {
     let ast = parse_ok("f test -> (Int, Int) -> Int\n    add");
-    if let ItemKind::Function(f) = &ast.items[0].kind {
-        if let Some(ref ty) = f.return_type {
+    if let ItemKind::Function(f) = &ast.items[0].kind
+        && let Some(ref ty) = f.return_type {
             assert!(matches!(ty.kind, TypeKind::Fn(_, _)));
         }
-    }
 }
 
 #[test]
@@ -508,8 +486,8 @@ fn test_mutable_reference_type() {
 #[test]
 fn test_let_statement() {
     let ast = parse_ok("f test\n    x = 42\n    y := 0\n    x");
-    if let ItemKind::Function(f) = &ast.items[0].kind {
-        if let Some(FnBody::Block(block)) = &f.body {
+    if let ItemKind::Function(f) = &ast.items[0].kind
+        && let Some(FnBody::Block(block)) = &f.body {
             assert_eq!(block.stmts.len(), 3);
             // First is immutable let
             if let StmtKind::Let(let_stmt) = &block.stmts[0].kind {
@@ -520,7 +498,6 @@ fn test_let_statement() {
                 assert!(let_stmt.mutable);
             }
         }
-    }
 }
 
 // ============================================================================
@@ -530,34 +507,31 @@ fn test_let_statement() {
 #[test]
 fn test_use_statement() {
     let ast = parse_ok("us std.io");
-    if let ItemKind::Use(u) = &ast.items[0].kind {
-        if let UseTree::Path(segments, _) = &u.tree {
+    if let ItemKind::Use(u) = &ast.items[0].kind
+        && let UseTree::Path(segments, _) = &u.tree {
             assert_eq!(segments.len(), 2);
         }
-    }
 }
 
 #[test]
 fn test_use_with_groups() {
     let ast = parse_ok("us std.{io, fs}");
-    if let ItemKind::Use(u) = &ast.items[0].kind {
-        if let UseTree::Path(segments, Some(tree)) = &u.tree {
+    if let ItemKind::Use(u) = &ast.items[0].kind
+        && let UseTree::Path(segments, Some(tree)) = &u.tree {
             assert_eq!(segments.len(), 1);
             if let UseTree::Group(trees) = tree.as_ref() {
                 assert_eq!(trees.len(), 2);
             }
         }
-    }
 }
 
 #[test]
 fn test_use_glob() {
     let ast = parse_ok("us std.*");
-    if let ItemKind::Use(u) = &ast.items[0].kind {
-        if let UseTree::Path(_, Some(tree)) = &u.tree {
+    if let ItemKind::Use(u) = &ast.items[0].kind
+        && let UseTree::Path(_, Some(tree)) = &u.tree {
             assert!(matches!(tree.as_ref(), UseTree::Glob));
         }
-    }
 }
 
 // ============================================================================

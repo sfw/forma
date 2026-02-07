@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+#![allow(clippy::module_inception)]
 //! FORMA v2 Compiler Library
 //!
 //! FORMA is an AI-optimized systems programming language with Rust-like

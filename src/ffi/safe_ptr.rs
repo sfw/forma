@@ -112,14 +112,10 @@ pub struct MemoryArena {
 
 #[derive(Debug)]
 struct AllocationInfo {
-    /// Generation when this allocation was created
-    generation: u64,
     /// Whether this allocation is still live
     is_live: bool,
     /// Generation when freed (0 if still live)
     freed_generation: u64,
-    /// Size of the allocation in elements
-    size: usize,
 }
 
 impl MemoryArena {
@@ -139,10 +135,8 @@ impl MemoryArena {
         let generation = self.current_generation;
 
         self.allocations.insert(id, AllocationInfo {
-            generation,
             is_live: true,
             freed_generation: 0,
-            size: data.len(),
         });
 
         SafePtr { id, generation, data }

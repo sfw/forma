@@ -83,11 +83,10 @@ impl<'a> Scanner<'a> {
         }
 
         // Handle indentation at line start
-        if self.at_line_start {
-            if let Some(token) = self.handle_indentation() {
+        if self.at_line_start
+            && let Some(token) = self.handle_indentation() {
                 return token;
             }
-        }
 
         self.skip_whitespace_and_comments();
 
@@ -131,21 +130,18 @@ impl<'a> Scanner<'a> {
                 self.make_token(TokenKind::RBracket)
             }
             '{' => {
-                if self.interpolation_depth > 0 {
-                    if let Some(depth) = self.brace_depth_stack.last_mut() {
+                if self.interpolation_depth > 0
+                    && let Some(depth) = self.brace_depth_stack.last_mut() {
                         *depth += 1;
                     }
-                }
                 self.make_token(TokenKind::LBrace)
             }
             '}' => {
-                if self.interpolation_depth > 0 {
-                    if let Some(depth) = self.brace_depth_stack.last_mut() {
-                        if *depth > 0 {
+                if self.interpolation_depth > 0
+                    && let Some(depth) = self.brace_depth_stack.last_mut()
+                        && *depth > 0 {
                             *depth -= 1;
                         }
-                    }
-                }
                 self.make_token(TokenKind::RBrace)
             }
             ',' => self.make_token(TokenKind::Comma),
@@ -345,9 +341,7 @@ impl<'a> Scanner<'a> {
         self.at_line_start = false;
 
         // Check if at EOF
-        if self.chars.peek().is_none() {
-            return None;
-        }
+        self.chars.peek()?;
 
         // Suppress INDENT/DEDENT inside brackets (like Python)
         if self.bracket_depth > 0 {
@@ -838,7 +832,7 @@ impl<'a> Scanner<'a> {
     }
 
     fn scan_identifier(&mut self) -> Token {
-        while self.peek().is_some_and(|c| is_ident_continue(c)) {
+        while self.peek().is_some_and(is_ident_continue) {
             self.advance();
         }
 

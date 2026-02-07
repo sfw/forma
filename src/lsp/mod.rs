@@ -420,15 +420,14 @@ impl LanguageServer for FormaLanguageServer {
                 let parser = crate::parser::Parser::new(&tokens);
                 if let Ok(ast) = parser.parse() {
                     let mut type_checker = crate::types::TypeChecker::new();
-                    if type_checker.check(&ast).is_ok() {
-                        if let Some((def_span, _)) = type_checker.get_definition_location(&name) {
+                    if type_checker.check(&ast).is_ok()
+                        && let Some((def_span, _)) = type_checker.get_definition_location(&name) {
                             let location = Location {
                                 uri: uri.clone(),
                                 range: span_to_range(def_span),
                             };
                             return Ok(Some(GotoDefinitionResponse::Scalar(location)));
                         }
-                    }
                 }
             }
         }
@@ -496,6 +495,6 @@ pub async fn run_server() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::new(|client| FormaLanguageServer::new(client));
+    let (service, socket) = LspService::new(FormaLanguageServer::new);
     Server::new(stdin, stdout, socket).serve(service).await;
 }

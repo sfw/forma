@@ -178,8 +178,8 @@ impl Lowerer {
             ItemKind::Impl(impl_block) => {
                 // Lower methods in impl block
                 for impl_item in &impl_block.items {
-                    if let crate::parser::ImplItem::Function(f) = impl_item {
-                        if let Some(mir_fn) = self.lower_function(f) {
+                    if let crate::parser::ImplItem::Function(f) = impl_item
+                        && let Some(mir_fn) = self.lower_function(f) {
                             // Use qualified name for methods
                             let qualified_name = format!("{}::{}",
                                 self.type_to_string(&impl_block.self_type),
@@ -188,11 +188,10 @@ impl Lowerer {
                             // Track method -> qualified name mapping for method resolution
                             self.impl_methods
                                 .entry(mir_fn.name.clone())
-                                .or_insert_with(Vec::new)
+                                .or_default()
                                 .push(qualified_name.clone());
                             self.program.functions.insert(qualified_name, mir_fn);
                         }
-                    }
                 }
             }
             ItemKind::Enum(e) => {
@@ -388,11 +387,10 @@ impl Lowerer {
                     let init = self.lower_expr(&let_stmt.init);
                     if let Some(op) = init {
                         // Record the type if we inferred one and the pattern is an identifier
-                        if let Some(type_name) = inferred_type {
-                            if let PatternKind::Ident(ident, _, _) = &let_stmt.pattern.kind {
+                        if let Some(type_name) = inferred_type
+                            && let PatternKind::Ident(ident, _, _) = &let_stmt.pattern.kind {
                                 self.var_types.insert(ident.name.clone(), type_name);
                             }
-                        }
                         self.bind_pattern(&let_stmt.pattern, op);
                     }
                     last_value = None;
@@ -438,12 +436,12 @@ impl Lowerer {
                                     fields: vec![],
                                 },
                             ));
-                            return Some(Operand::Local(result));
+                            Some(Operand::Local(result))
                         }
                         _ => {
                             // Check for user-defined unit enum variants
-                            if let Some((enum_name, field_count)) = self.enum_variants.get(&ident.name).cloned() {
-                                if field_count == 0 {
+                            if let Some((enum_name, field_count)) = self.enum_variants.get(&ident.name).cloned()
+                                && field_count == 0 {
                                     // Unit variant
                                     let result = self.new_temp(Ty::Named(
                                         crate::types::TypeId::new(&enum_name),
@@ -459,7 +457,6 @@ impl Lowerer {
                                     ));
                                     return Some(Operand::Local(result));
                                 }
-                            }
 
                             // Check for similar variable names to provide helpful suggestions
                             let similar = self.find_similar_name(&ident.name);
@@ -570,8 +567,8 @@ impl Lowerer {
                         Some(Operand::Local(result))
                     }
                     AstUnaryOp::Ref => {
-                        if let ExprKind::Ident(ident) = &operand.kind {
-                            if let Some(&local) = self.vars.get(&ident.name) {
+                        if let ExprKind::Ident(ident) = &operand.kind
+                            && let Some(&local) = self.vars.get(&ident.name) {
                                 let inner_ty = self.local_types.get(&local).cloned().unwrap_or(Ty::Unit);
                                 let result = self.new_temp(Ty::Ref(Box::new(inner_ty), crate::types::Mutability::Immutable));
                                 self.emit(StatementKind::Assign(
@@ -580,12 +577,11 @@ impl Lowerer {
                                 ));
                                 return Some(Operand::Local(result));
                             }
-                        }
                         self.lower_expr(operand)
                     }
                     AstUnaryOp::RefMut => {
-                        if let ExprKind::Ident(ident) = &operand.kind {
-                            if let Some(&local) = self.vars.get(&ident.name) {
+                        if let ExprKind::Ident(ident) = &operand.kind
+                            && let Some(&local) = self.vars.get(&ident.name) {
                                 let inner_ty = self.local_types.get(&local).cloned().unwrap_or(Ty::Unit);
                                 let result = self.new_temp(Ty::Ref(Box::new(inner_ty), crate::types::Mutability::Mutable));
                                 self.emit(StatementKind::Assign(
@@ -594,7 +590,6 @@ impl Lowerer {
                                 ));
                                 return Some(Operand::Local(result));
                             }
-                        }
                         self.lower_expr(operand)
                     }
                     AstUnaryOp::Deref => {
@@ -645,8 +640,8 @@ impl Lowerer {
                 }
 
                 // Check if callee is a path like EnumType::Variant(args)
-                if let ExprKind::Path(path) = &callee.kind {
-                    if path.segments.len() == 2 {
+                if let ExprKind::Path(path) = &callee.kind
+                    && path.segments.len() == 2 {
                         let type_name = &path.segments[0].name;
                         let variant = &path.segments[1].name;
 
@@ -670,7 +665,6 @@ impl Lowerer {
                         ));
                         return Some(Operand::Local(result));
                     }
-                }
 
                 // Determine if this is a direct function call or an indirect call (closure/HOF)
                 let (is_direct, func_name) = match &callee.kind {
@@ -709,20 +703,17 @@ impl Lowerer {
                 }
 
                 // Fill in default arguments if needed
-                if is_direct {
-                    if let Some(fn_name_ref) = &func_name {
-                        if let Some(defaults) = self.fn_defaults.get(fn_name_ref).cloned() {
+                if is_direct
+                    && let Some(fn_name_ref) = &func_name
+                        && let Some(defaults) = self.fn_defaults.get(fn_name_ref).cloned() {
                             // Add default values for missing arguments
                             for i in mir_args.len()..defaults.len() {
-                                if let Some(Some(default_expr)) = defaults.get(i) {
-                                    if let Some(op) = self.lower_expr(default_expr) {
+                                if let Some(Some(default_expr)) = defaults.get(i)
+                                    && let Some(op) = self.lower_expr(default_expr) {
                                         mir_args.push(op);
                                     }
-                                }
                             }
                         }
-                    }
-                }
 
                 // Get return type for the function
                 let return_ty = if let Some(ref name) = func_name {
@@ -841,11 +832,10 @@ impl Lowerer {
                 };
 
                 if let Some(ctx) = target_ctx {
-                    if let Some(val) = value.as_ref().and_then(|v| self.lower_expr(v)) {
-                        if let Some(result_local) = ctx.result_local {
+                    if let Some(val) = value.as_ref().and_then(|v| self.lower_expr(v))
+                        && let Some(result_local) = ctx.result_local {
                             self.emit(StatementKind::Assign(result_local, Rvalue::Use(val)));
                         }
-                    }
                     self.terminate(Terminator::Goto(ctx.break_block));
                 } else if let Some(label_ident) = label {
                     self.error(format!("break label '{}' not found", label_ident.name), expr.span);
@@ -966,15 +956,13 @@ impl Lowerer {
                 }
 
                 // Handle index assignment: arr[i] := value
-                if let ExprKind::Index(base, idx) = &target.kind {
-                    if let ExprKind::Ident(ident) = &base.kind {
-                        if let Some(&local) = self.vars.get(&ident.name) {
+                if let ExprKind::Index(base, idx) = &target.kind
+                    && let ExprKind::Ident(ident) = &base.kind
+                        && let Some(&local) = self.vars.get(&ident.name) {
                             let idx_op = self.lower_expr(idx)?;
                             self.emit(StatementKind::IndexAssign(local, idx_op, val));
                             return Some(Operand::Constant(Constant::Unit));
                         }
-                    }
-                }
 
                 None
             }
@@ -984,8 +972,8 @@ impl Lowerer {
                 let val = self.lower_expr(value)?;
                 let bin_op = self.lower_bin_op(*op);
 
-                if let ExprKind::Ident(ident) = &target.kind {
-                    if let Some(&local) = self.vars.get(&ident.name) {
+                if let ExprKind::Ident(ident) = &target.kind
+                    && let Some(&local) = self.vars.get(&ident.name) {
                         let result = self.new_temp(Ty::Int);
                         self.emit(StatementKind::Assign(
                             result,
@@ -994,7 +982,6 @@ impl Lowerer {
                         self.emit(StatementKind::Assign(local, Rvalue::Use(Operand::Local(result))));
                         return Some(Operand::Local(local));
                     }
-                }
 
                 None
             }
@@ -1324,20 +1311,17 @@ impl Lowerer {
                         return Some(Operand::Local(local));
                     }
                     // Check if it's a unit enum variant (like None)
-                    match name.as_str() {
-                        "None" => {
-                            let result = self.new_temp(Ty::Option(Box::new(Ty::Unit)));
-                            self.emit(StatementKind::Assign(
-                                result,
-                                Rvalue::Enum {
-                                    type_name: "Option".to_string(),
-                                    variant: "None".to_string(),
-                                    fields: vec![],
-                                },
-                            ));
-                            return Some(Operand::Local(result));
-                        }
-                        _ => {}
+                    if name.as_str() == "None" {
+                        let result = self.new_temp(Ty::Option(Box::new(Ty::Unit)));
+                        self.emit(StatementKind::Assign(
+                            result,
+                            Rvalue::Enum {
+                                type_name: "Option".to_string(),
+                                variant: "None".to_string(),
+                                fields: vec![],
+                            },
+                        ));
+                        return Some(Operand::Local(result));
                     }
                 }
                 // Check if this is an enum variant path (like Color::Red)
@@ -1366,8 +1350,8 @@ impl Lowerer {
 
             ExprKind::Async(block) => {
                 // Lower async block - for now, just lower the block and wrap in Future
-                let block_result = self.lower_block(block);
-                block_result
+                
+                self.lower_block(block)
             }
 
             ExprKind::Await(inner) => {
@@ -1578,6 +1562,7 @@ impl Lowerer {
         }
     }
 
+    #[allow(clippy::only_used_in_recursion)]
     fn lower_if(&mut self, if_expr: &crate::parser::IfExpr, span: Span) -> Option<Operand> {
         let cond = self.lower_expr(&if_expr.condition)?;
 
@@ -2010,18 +1995,17 @@ impl Lowerer {
                     // Range pattern: check if scrutinee is within range
                     let mut conditions = Vec::new();
 
-                    if let Some(start_pat) = start {
-                        if let PatternKind::Literal(Literal { kind: LiteralKind::Int(n), .. }) = &start_pat.kind {
+                    if let Some(start_pat) = start
+                        && let PatternKind::Literal(Literal { kind: LiteralKind::Int(n), .. }) = &start_pat.kind {
                             let start_val = self.new_temp(Ty::Int);
                             self.emit(StatementKind::Assign(start_val, Rvalue::Use(Operand::Constant(Constant::Int(*n as i64)))));
                             let ge_cond = self.new_temp(Ty::Bool);
                             self.emit(StatementKind::Assign(ge_cond, Rvalue::BinaryOp(BinOp::Ge, Operand::Copy(scrut_local), Operand::Copy(start_val))));
                             conditions.push(ge_cond);
                         }
-                    }
 
-                    if let Some(end_pat) = end {
-                        if let PatternKind::Literal(Literal { kind: LiteralKind::Int(n), .. }) = &end_pat.kind {
+                    if let Some(end_pat) = end
+                        && let PatternKind::Literal(Literal { kind: LiteralKind::Int(n), .. }) = &end_pat.kind {
                             let end_val = self.new_temp(Ty::Int);
                             self.emit(StatementKind::Assign(end_val, Rvalue::Use(Operand::Constant(Constant::Int(*n as i64)))));
                             let cmp_op = if *inclusive { BinOp::Le } else { BinOp::Lt };
@@ -2029,7 +2013,6 @@ impl Lowerer {
                             self.emit(StatementKind::Assign(le_cond, Rvalue::BinaryOp(cmp_op, Operand::Copy(scrut_local), Operand::Copy(end_val))));
                             conditions.push(le_cond);
                         }
-                    }
 
                     // Combine conditions with AND
                     let final_cond = if conditions.is_empty() {
@@ -2156,11 +2139,10 @@ impl Lowerer {
         // If we have a receiver type and this method exists for that type, use it
         if let Some(type_name) = receiver_type {
             let qualified = format!("{}::{}", type_name, method_name);
-            if let Some(qualified_names) = self.impl_methods.get(method_name) {
-                if qualified_names.contains(&qualified) {
+            if let Some(qualified_names) = self.impl_methods.get(method_name)
+                && qualified_names.contains(&qualified) {
                     return qualified;
                 }
-            }
             // Also check if function exists directly
             if self.program.functions.contains_key(&qualified) {
                 return qualified;
@@ -2680,7 +2662,7 @@ impl Lowerer {
                         }
                     }
                     "Result" => {
-                        let ok_ty = type_args.get(0).cloned().unwrap_or(Ty::Error);
+                        let ok_ty = type_args.first().cloned().unwrap_or(Ty::Error);
                         let err_ty = type_args.get(1).cloned().unwrap_or(Ty::Str);
                         Ty::Result(Box::new(ok_ty), Box::new(err_ty))
                     }
@@ -3159,11 +3141,11 @@ impl Lowerer {
 
         let mut dp = vec![vec![0; n + 1]; m + 1];
 
-        for i in 0..=m {
-            dp[i][0] = i;
+        for (i, row) in dp.iter_mut().enumerate().take(m + 1) {
+            row[0] = i;
         }
-        for j in 0..=n {
-            dp[0][j] = j;
+        for (j, val) in dp[0].iter_mut().enumerate().take(n + 1) {
+            *val = j;
         }
 
         for i in 1..=m {

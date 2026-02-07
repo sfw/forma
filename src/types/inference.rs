@@ -2613,11 +2613,10 @@ impl TypeEnv {
     /// Look up an enum type by variant name.
     /// Returns the enum name and its TypeDef if the variant is known.
     pub fn get_enum_for_variant(&self, variant_name: &str) -> Option<(&str, &TypeDef)> {
-        if let Some(enum_name) = self.variant_to_enum.get(variant_name) {
-            if let Some(def) = self.types.get(enum_name) {
+        if let Some(enum_name) = self.variant_to_enum.get(variant_name)
+            && let Some(def) = self.types.get(enum_name) {
                 return Some((enum_name.as_str(), def));
             }
-        }
         None
     }
 
@@ -2736,11 +2735,10 @@ impl Unifier {
 
             // Type variable unification
             (Ty::Var(v), t) | (t, Ty::Var(v)) => {
-                if let Ty::Var(v2) = t {
-                    if v == v2 {
+                if let Ty::Var(v2) = t
+                    && v == v2 {
                         return Ok(());
                     }
-                }
                 // Occurs check
                 if t.free_vars().contains(v) {
                     return Err(TypeError::new(
@@ -3342,7 +3340,7 @@ impl InferenceEngine {
         // Check trait definitions for matching method names.
         // If a trait defines a method with this name, return its signature.
         // This enables method calls on types that implement the trait.
-        for (_trait_name, trait_info) in &self.env.traits {
+        for trait_info in self.env.traits.values() {
             for method in &trait_info.methods {
                 if method.name == method_name {
                     let sig = MethodSignature {
@@ -3438,7 +3436,7 @@ impl InferenceEngine {
                         return self.lookup_field(self_ty, field_name, span);
                     }
                     return Err(TypeError::new(
-                        format!("'Self' used outside of impl block"),
+                        "'Self' used outside of impl block".to_string(),
                         span
                     ));
                 }
@@ -3541,11 +3539,10 @@ impl InferenceEngine {
             }
             Ty::Named(id, args) => {
                 // Check if this is a type parameter reference
-                if args.is_empty() {
-                    if let Some(replacement) = subst.get(&id.name) {
+                if args.is_empty()
+                    && let Some(replacement) = subst.get(&id.name) {
                         return replacement.clone();
                     }
-                }
                 // Otherwise, recursively substitute in args
                 let new_args = args.iter()
                     .map(|a| self.substitute_type_params(a, subst))
@@ -4021,8 +4018,8 @@ impl InferenceEngine {
 
                         // Validate method signatures
                         for impl_item in &i.items {
-                            if let crate::parser::ImplItem::Function(f) = impl_item {
-                                if let Some(trait_method) = trait_info.methods.iter()
+                            if let crate::parser::ImplItem::Function(f) = impl_item
+                                && let Some(trait_method) = trait_info.methods.iter()
                                     .find(|m| m.name == f.name.name)
                                 {
                                     let impl_params: Vec<_> = f.params.iter()
@@ -4039,7 +4036,6 @@ impl InferenceEngine {
                                         ));
                                     }
                                 }
-                            }
                         }
                     }
                 }
@@ -4185,8 +4181,8 @@ impl InferenceEngine {
                     .collect::<Result<Vec<_>, _>>()?;
 
                 // Check if callee is an identifier with function info (for default params)
-                if let ExprKind::Ident(name) = &callee.kind {
-                    if let Some(fn_info) = self.env.get_fn_info(&name.name) {
+                if let ExprKind::Ident(name) = &callee.kind
+                    && let Some(fn_info) = self.env.get_fn_info(&name.name) {
                         let provided = arg_types.len();
                         let required = fn_info.required_params;
                         let total = fn_info.total_params;
@@ -4224,7 +4220,7 @@ impl InferenceEngine {
                                         // Verify argument is a place expression
                                         if !Self::is_place_expr(&arg.value) {
                                             return Err(TypeError::new(
-                                                format!("'ref' argument must be a variable, field access, or index expression"),
+                                                "'ref' argument must be a variable, field access, or index expression".to_string(),
                                                 arg.span,
                                             ));
                                         }
@@ -4233,7 +4229,7 @@ impl InferenceEngine {
                                         // Verify argument is a place expression
                                         if !Self::is_place_expr(&arg.value) {
                                             return Err(TypeError::new(
-                                                format!("'ref mut' argument must be a variable, field access, or index expression"),
+                                                "'ref mut' argument must be a variable, field access, or index expression".to_string(),
                                                 arg.span,
                                             ));
                                         }
@@ -4242,13 +4238,8 @@ impl InferenceEngine {
                                         let mode_str = if expected == PassMode::Ref { "ref" } else { "ref mut" };
                                         return Err(TypeError::new(
                                             format!(
-                                                "parameter '{}' of '{}' requires '{}' at call site",
-                                                if i < fn_info.total_params {
-                                                    format!("argument {}", i + 1)
-                                                } else {
-                                                    format!("argument {}", i + 1)
-                                                },
-                                                name.name, mode_str
+                                                "parameter 'argument {}' of '{}' requires '{}' at call site",
+                                                i + 1, name.name, mode_str
                                             ),
                                             arg.span,
                                         ));
@@ -4289,8 +4280,8 @@ impl InferenceEngine {
                         {
                             let mut ref_mut_vars: Vec<(String, usize)> = Vec::new();
                             for (i, arg) in args.iter().enumerate().take(provided) {
-                                if arg.pass_mode == PassMode::RefMut {
-                                    if let ExprKind::Ident(ident) = &arg.value.kind {
+                                if arg.pass_mode == PassMode::RefMut
+                                    && let ExprKind::Ident(ident) = &arg.value.kind {
                                         for &(ref prev_name, prev_idx) in &ref_mut_vars {
                                             if *prev_name == ident.name {
                                                 return Err(TypeError::new(
@@ -4304,7 +4295,6 @@ impl InferenceEngine {
                                         }
                                         ref_mut_vars.push((ident.name.clone(), i));
                                     }
-                                }
                             }
                         }
 
@@ -4328,7 +4318,6 @@ impl InferenceEngine {
                         self.unifier.unify(&callee_ty, &expected_fn, expr.span)?;
                         return Ok(result_ty);
                     }
-                }
 
                 // Standard case: no function info (builtins, closures, etc.)
                 let callee_ty = self.infer_expr(callee)?;
@@ -5067,13 +5056,13 @@ impl InferenceEngine {
                             let available: Vec<_> = variants.iter()
                                 .map(|(name, _)| name.as_str())
                                 .collect();
-                            return Err(TypeError::new(
+                            Err(TypeError::new(
                                 format!(
                                     "enum '{}' has no variant '{}'. Available: {}",
                                     resolved_name, variant_name, available.join(", ")
                                 ),
                                 pattern.span,
-                            ));
+                            ))
                         }
                     }
                     _ => {
@@ -5453,12 +5442,7 @@ impl InferenceEngine {
 
     /// Check whether an expression is a "place" (lvalue) that can be passed by reference.
     fn is_place_expr(expr: &Expr) -> bool {
-        match &expr.kind {
-            ExprKind::Ident(_) => true,
-            ExprKind::Field(_, _) => true,
-            ExprKind::Index(_, _) => true,
-            _ => false,
-        }
+        matches!(&expr.kind, ExprKind::Ident(_) | ExprKind::Field(_, _) | ExprKind::Index(_, _))
     }
 
     /// Find a similar variable name for typo suggestions.
@@ -5493,8 +5477,8 @@ impl InferenceEngine {
         if n == 0 { return m; }
 
         let mut dp = vec![vec![0; n + 1]; m + 1];
-        for i in 0..=m { dp[i][0] = i; }
-        for j in 0..=n { dp[0][j] = j; }
+        for (i, row) in dp.iter_mut().enumerate().take(m + 1) { row[0] = i; }
+        for (j, val) in dp[0].iter_mut().enumerate().take(n + 1) { *val = j; }
 
         for i in 1..=m {
             for j in 1..=n {
