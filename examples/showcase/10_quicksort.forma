@@ -1,0 +1,84 @@
+# Quicksort - Classic divide-and-conquer sorting algorithm
+# Demonstrates: recursion, array manipulation, partitioning
+#
+# Average case: O(n log n), Worst case: O(n^2)
+
+# Swap two elements in array
+f swap(arr: [Int], i: Int, j: Int) -> Unit
+    temp := arr[i]
+    arr[i] := arr[j]
+    arr[j] := temp
+
+# Partition array around pivot (last element)
+# Returns index of pivot after partitioning
+f partition(arr: [Int], low: Int, high: Int) -> Int
+    pivot := arr[high]
+    i := low - 1
+
+    j := low
+    wh j < high
+        if arr[j] <= pivot then
+            i := i + 1
+            swap(arr, i, j)
+        j := j + 1
+
+    swap(arr, i + 1, high)
+    i + 1
+
+# Quicksort recursive implementation
+f quicksort(arr: [Int], low: Int, high: Int) -> Unit
+    if low < high then
+        pi := partition(arr, low, high)
+        quicksort(arr, low, pi - 1)
+        quicksort(arr, pi + 1, high)
+
+# Helper to sort entire array
+f sort(arr: [Int]) -> Unit
+    n := len(arr)
+    if n > 1 then
+        quicksort(arr, 0, n - 1)
+
+# Print array
+f print_array(arr: [Int], label: String) -> Unit
+    s := label + ": ["
+    i := 0
+    wh i < len(arr)
+        if i > 0 then
+            s := s + ", "
+        s := s + f"{arr[i]}"
+        i := i + 1
+    s := s + "]"
+    print(s)
+
+f main() -> Int
+    # Test 1: Random array
+    arr1 := [64, 34, 25, 12, 22, 11, 90]
+    print_array(arr1, "Before")
+    sort(arr1)
+    print_array(arr1, "After ")
+
+    print("")
+
+    # Test 2: Already sorted
+    arr2 := [1, 2, 3, 4, 5]
+    print_array(arr2, "Already sorted before")
+    sort(arr2)
+    print_array(arr2, "Already sorted after ")
+
+    print("")
+
+    # Test 3: Reverse sorted
+    arr3 := [5, 4, 3, 2, 1]
+    print_array(arr3, "Reverse before")
+    sort(arr3)
+    print_array(arr3, "Reverse after ")
+
+    print("")
+
+    # Test 4: With duplicates
+    arr4 := [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5]
+    print_array(arr4, "Duplicates before")
+    sort(arr4)
+    print_array(arr4, "Duplicates after ")
+
+    0

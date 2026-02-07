@@ -1,0 +1,86 @@
+# N-Queens Problem - Classic backtracking puzzle
+# Demonstrates: backtracking, array manipulation, recursion
+#
+# Place N queens on an NxN chessboard so that no two queens
+# attack each other (no shared row, column, or diagonal)
+
+# Check if placing a queen at (row, col) is safe
+# queens[i] = column position of queen in row i
+f is_safe(queens: [Int], row: Int, col: Int) -> Bool
+    i := 0
+    wh i < row
+        q_col := queens[i]
+        # Check column conflict
+        if q_col == col then
+            return false
+        # Check diagonal conflict
+        if abs(q_col - col) == abs(i - row) then
+            return false
+        i := i + 1
+    true
+
+# Solve N-Queens using backtracking
+# Returns number of solutions found
+f solve_nqueens_count(n: Int, row: Int, queens: [Int], count: Int) -> Int
+    if row == n then
+        # Found a valid solution
+        count + 1
+    else
+        result := count
+        col := 0
+        wh col < n
+            if is_safe(queens, row, col) then
+                # Place queen and recurse
+                queens[row] := col
+                result := solve_nqueens_count(n, row + 1, queens, result)
+            col := col + 1
+        result
+
+# Count all solutions for N-Queens
+f nqueens_count(n: Int) -> Int
+    queens := [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  # Max 15 queens
+    solve_nqueens_count(n, 0, queens, 0)
+
+# Print one solution
+f print_solution(queens: [Int], n: Int) -> Unit
+    row := 0
+    wh row < n
+        line := ""
+        col := 0
+        wh col < n
+            if queens[row] == col then
+                line := line + "Q "
+            else
+                line := line + ". "
+            col := col + 1
+        print(line)
+        row := row + 1
+
+# Find and print first solution
+f solve_and_print(n: Int, row: Int, queens: [Int]) -> Bool
+    if row == n then
+        print_solution(queens, n)
+        true
+    else
+        col := 0
+        wh col < n
+            if is_safe(queens, row, col) then
+                queens[row] := col
+                if solve_and_print(n, row + 1, queens) then
+                    return true
+            col := col + 1
+        false
+
+f main() -> Int
+    print("N-Queens Solutions Count:")
+    print(f"4-Queens: {nqueens_count(4)} solutions")   # 2
+    print(f"5-Queens: {nqueens_count(5)} solutions")   # 10
+    print(f"6-Queens: {nqueens_count(6)} solutions")   # 4
+    print(f"7-Queens: {nqueens_count(7)} solutions")   # 40
+    print(f"8-Queens: {nqueens_count(8)} solutions")   # 92
+
+    print("")
+    print("First 8-Queens solution:")
+    queens := [0, 0, 0, 0, 0, 0, 0, 0]
+    result := solve_and_print(8, 0, queens)
+    0

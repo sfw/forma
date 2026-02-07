@@ -1,0 +1,45 @@
+# Fibonacci Sequence - Classic recursion/dynamic programming example
+# Demonstrates: recursion, iteration, memoization patterns
+#
+# F(0) = 0, F(1) = 1
+# F(n) = F(n-1) + F(n-2)
+# 0, 1, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, ...
+
+# Naive recursive (exponential time - O(2^n))
+f fib_rec(n: Int) -> Int
+    if n <= 0 then 0
+    else if n == 1 then 1
+    else fib_rec(n - 1) + fib_rec(n - 2)
+
+# Iterative (linear time - O(n))
+f fib_iter(n: Int) -> Int
+    if n <= 0 then 0
+    else if n == 1 then 1
+    else
+        a := 0
+        b := 1
+        i := 2
+        wh i <= n
+            temp := a + b
+            a := b
+            b := temp
+            i := i + 1
+        b
+
+# Print first n Fibonacci numbers
+f print_fibs(n: Int) -> Unit
+    i := 0
+    wh i < n
+        print(f"F({i}) = {fib_iter(i)}")
+        i := i + 1
+
+f main() -> Int
+    print("First 20 Fibonacci numbers:")
+    print_fibs(20)
+
+    print("")
+    print("Larger values (iterative):")
+    print(f"F(30) = {fib_iter(30)}")    # 832040
+    print(f"F(40) = {fib_iter(40)}")    # 102334155
+    print(f"F(50) = {fib_iter(50)}")    # 12586269025
+    0

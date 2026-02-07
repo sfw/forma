@@ -1,0 +1,135 @@
+# Linked List - Classic data structure
+# Demonstrates: structs, index-based references, data structure operations
+#
+# We simulate a linked list using parallel arrays since FORMA
+# doesn't have nullable references yet. This is similar to how
+# embedded systems often implement linked lists.
+
+# Node representation: values[i] is data, next[i] is next index (-1 = null)
+# Using parallel arrays as a node pool
+
+# Initialize list (returns head index, -1 = empty)
+f list_new() -> Int
+    0 - 1
+
+# Prepend value to front of list
+f list_prepend(values: [Int], next: [Int], head: Int, value: Int, free: Int) -> (Int, Int)
+    # Use free slot for new node
+    values[free] := value
+    next[free] := head
+    new_head := free
+    new_free := free + 1
+    (new_head, new_free)
+
+# Append value to end of list
+f list_append(values: [Int], next: [Int], head: Int, value: Int, free: Int) -> (Int, Int)
+    # Create new node
+    values[free] := value
+    next[free] := 0 - 1
+
+    if head == 0 - 1 then
+        # Empty list, new node becomes head
+        (free, free + 1)
+    else
+        # Find end of list
+        current := head
+        wh next[current] != 0 - 1
+            current := next[current]
+        next[current] := free
+        (head, free + 1)
+
+# Get length of list
+f list_length(next: [Int], head: Int) -> Int
+    count := 0
+    current := head
+    wh current != 0 - 1
+        count := count + 1
+        current := next[current]
+    count
+
+# Get value at index (0-based)
+f list_get(values: [Int], next: [Int], head: Int, index: Int) -> Int
+    current := head
+    i := 0
+    wh i < index && current != 0 - 1
+        current := next[current]
+        i := i + 1
+    if current == 0 - 1 then 0 - 1
+    else values[current]
+
+# Print list
+f list_print(values: [Int], next: [Int], head: Int) -> Unit
+    s := "["
+    current := head
+    first := true
+    wh current != 0 - 1
+        if !first then
+            s := s + " -> "
+        s := s + f"{values[current]}"
+        first := false
+        current := next[current]
+    s := s + "]"
+    print(s)
+
+# Reverse list in place
+f list_reverse(next: [Int], head: Int) -> Int
+    prev := 0 - 1
+    current := head
+    wh current != 0 - 1
+        next_node := next[current]
+        next[current] := prev
+        prev := current
+        current := next_node
+    prev
+
+f main() -> Int
+    # Allocate node pool (max 100 nodes)
+    values := [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    next := [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+    print("Building linked list:")
+    head := 0 - 1
+    free := 0
+
+    # Append 1, 2, 3, 4, 5
+    result := list_append(values, next, head, 1, free)
+    head := result.0
+    free := result.1
+
+    result := list_append(values, next, head, 2, free)
+    head := result.0
+    free := result.1
+
+    result := list_append(values, next, head, 3, free)
+    head := result.0
+    free := result.1
+
+    result := list_append(values, next, head, 4, free)
+    head := result.0
+    free := result.1
+
+    result := list_append(values, next, head, 5, free)
+    head := result.0
+    free := result.1
+
+    print("List after appending 1,2,3,4,5:")
+    list_print(values, next, head)
+    print(f"Length: {list_length(next, head)}")
+
+    print("")
+    print("Prepending 0:")
+    result := list_prepend(values, next, head, 0, free)
+    head := result.0
+    free := result.1
+    list_print(values, next, head)
+
+    print("")
+    print(f"Element at index 0: {list_get(values, next, head, 0)}")
+    print(f"Element at index 3: {list_get(values, next, head, 3)}")
+
+    print("")
+    print("Reversing list:")
+    head := list_reverse(next, head)
+    list_print(values, next, head)
+
+    0

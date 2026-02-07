@@ -1,0 +1,145 @@
+# Conway's Game of Life - Cellular automaton
+# Demonstrates: 2D arrays, simulation, neighbor counting
+#
+# Rules:
+#   1. Live cell with 2-3 neighbors survives
+#   2. Dead cell with exactly 3 neighbors becomes alive
+#   3. All other cells die or stay dead
+
+# Grid size
+# Using 20x20 grid stored as flat array
+
+# Get cell state at (row, col) with wrapping
+f get_cell_wrap(grid: [Int], row: Int, col: Int, size: Int) -> Int
+    r := (row + size) % size
+    c := (col + size) % size
+    grid[r * size + c]
+
+# Set cell state
+f set_cell(grid: [Int], row: Int, col: Int, size: Int, value: Int) -> Unit
+    grid[row * size + col] := value
+
+# Count live neighbors (with wrapping)
+f count_neighbors(grid: [Int], row: Int, col: Int, size: Int) -> Int
+    count := 0
+    dr := 0 - 1
+    wh dr <= 1
+        dc := 0 - 1
+        wh dc <= 1
+            if dr != 0 || dc != 0 then
+                count := count + get_cell_wrap(grid, row + dr, col + dc, size)
+            dc := dc + 1
+        dr := dr + 1
+    count
+
+# Compute next generation
+f next_generation(current: [Int], next: [Int], size: Int) -> Unit
+    r := 0
+    wh r < size
+        c := 0
+        wh c < size
+            neighbors := count_neighbors(current, r, c, size)
+            alive := get_cell_wrap(current, r, c, size) == 1
+
+            if alive then
+                # Live cell survives with 2-3 neighbors
+                if neighbors == 2 || neighbors == 3 then
+                    set_cell(next, r, c, size, 1)
+                else
+                    set_cell(next, r, c, size, 0)
+            else
+                # Dead cell becomes alive with exactly 3 neighbors
+                if neighbors == 3 then
+                    set_cell(next, r, c, size, 1)
+                else
+                    set_cell(next, r, c, size, 0)
+
+            c := c + 1
+        r := r + 1
+
+# Copy grid
+f copy_grid(src: [Int], dst: [Int], len: Int) -> Unit
+    i := 0
+    wh i < len
+        dst[i] := src[i]
+        i := i + 1
+
+# Print grid
+f print_grid(grid: [Int], size: Int, gen: Int) -> Unit
+    print(f"Generation {gen}:")
+    r := 0
+    wh r < size
+        line := ""
+        c := 0
+        wh c < size
+            if get_cell_wrap(grid, r, c, size) == 1 then
+                line := line + "#"
+            else
+                line := line + "."
+            c := c + 1
+        print(line)
+        r := r + 1
+    print("")
+
+# Count total live cells
+f count_alive(grid: [Int], size: Int) -> Int
+    count := 0
+    i := 0
+    wh i < size * size
+        count := count + grid[i]
+        i := i + 1
+    count
+
+f main() -> Int
+    size := 10
+
+    # Initialize grids (10x10 = 100 cells)
+    grid1 := [0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+    grid2 := [0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+              0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+    # Set up a "glider" pattern
+    #   .#.
+    #   ..#
+    #   ###
+    set_cell(grid1, 1, 2, size, 1)
+    set_cell(grid1, 2, 3, size, 1)
+    set_cell(grid1, 3, 1, size, 1)
+    set_cell(grid1, 3, 2, size, 1)
+    set_cell(grid1, 3, 3, size, 1)
+
+    print("Conway's Game of Life - Glider Pattern")
+    print("")
+
+    # Run simulation for 20 generations
+    gen := 0
+    wh gen <= 20
+        print_grid(grid1, size, gen)
+        print(f"Live cells: {count_alive(grid1, size)}")
+        print("")
+
+        # Compute next generation
+        next_generation(grid1, grid2, size)
+        copy_grid(grid2, grid1, size * size)
+
+        gen := gen + 1
+
+    0

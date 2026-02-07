@@ -101,6 +101,22 @@ enum Commands {
         /// Check @pre/@post contracts at runtime
         #[arg(long)]
         check_contracts: bool,
+
+        /// Allow file read access
+        #[arg(long)]
+        allow_read: bool,
+
+        /// Allow file write access
+        #[arg(long)]
+        allow_write: bool,
+
+        /// Allow network access
+        #[arg(long)]
+        allow_network: bool,
+
+        /// Allow all capabilities
+        #[arg(long)]
+        allow_all: bool,
     },
 
     /// Lex a file and print tokens (for debugging)
@@ -202,7 +218,10 @@ fn main() {
 
     let result = match cli.command {
         Commands::Compile { file, output, opt_level } => build(&file, output.as_ref(), opt_level, error_format),
-        Commands::Run { file, args, dump_mir, check_contracts } => run(&file, &args, dump_mir, check_contracts, error_format),
+        Commands::Run { file, args, dump_mir, check_contracts, allow_read, allow_write, allow_network, allow_all } => {
+            let caps = CapabilityConfig { allow_read, allow_write, allow_network, allow_all };
+            run(&file, &args, dump_mir, check_contracts, &caps, error_format)
+        }
         Commands::Lex { file } => lex(&file, error_format),
         Commands::Parse { file } => parse(&file, error_format),
         Commands::Check { file, partial } => check(&file, partial, error_format),
@@ -233,6 +252,33 @@ fn print_json<T: Serialize>(value: &T) {
     match serde_json::to_string_pretty(value) {
         Ok(json) => println!("{}", json),
         Err(e) => eprintln!("Error serializing output: {}", e),
+    }
+}
+
+/// Configuration for runtime capabilities.
+struct CapabilityConfig {
+    allow_read: bool,
+    allow_write: bool,
+    allow_network: bool,
+    allow_all: bool,
+}
+
+impl CapabilityConfig {
+    /// Apply capability grants to an interpreter.
+    fn apply(&self, interp: &mut Interpreter) {
+        if self.allow_all {
+            interp.grant_capability("all");
+        } else {
+            if self.allow_read {
+                interp.grant_capability("read");
+            }
+            if self.allow_write {
+                interp.grant_capability("write");
+            }
+            if self.allow_network {
+                interp.grant_capability("network");
+            }
+        }
     }
 }
 
@@ -267,7 +313,7 @@ fn output_json_errors(errors: Vec<JsonError>, items_count: Option<usize>) {
     print_json(&output);
 }
 
-fn run(file: &PathBuf, program_args: &[String], dump_mir: bool, _check_contracts: bool, error_format: ErrorFormat) -> Result<(), String> {
+fn run(file: &PathBuf, program_args: &[String], dump_mir: bool, _check_contracts: bool, caps: &CapabilityConfig, error_format: ErrorFormat) -> Result<(), String> {
     let source = read_file(file)?;
     let filename = file.to_string_lossy().to_string();
     let ctx = ErrorContext::new(&filename, &source);
@@ -459,6 +505,9 @@ fn run(file: &PathBuf, program_args: &[String], dump_mir: bool, _check_contracts
     // Run the interpreter
     let mut interp = Interpreter::new(program)
         .map_err(|e| format!("Failed to create interpreter: {}", e))?;
+
+    // Apply capability grants
+    caps.apply(&mut interp);
 
     // Pass program arguments as ARGV/ARGC environment variables
     interp.set_env("ARGC", &program_args.len().to_string());

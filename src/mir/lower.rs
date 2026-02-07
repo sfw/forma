@@ -950,6 +950,17 @@ impl Lowerer {
                     }
                 }
 
+                // Handle index assignment: arr[i] := value
+                if let ExprKind::Index(base, idx) = &target.kind {
+                    if let ExprKind::Ident(ident) = &base.kind {
+                        if let Some(&local) = self.vars.get(&ident.name) {
+                            let idx_op = self.lower_expr(idx)?;
+                            self.emit(StatementKind::IndexAssign(local, idx_op, val));
+                            return Some(Operand::Constant(Constant::Unit));
+                        }
+                    }
+                }
+
                 None
             }
 

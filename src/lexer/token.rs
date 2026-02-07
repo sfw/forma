@@ -106,6 +106,8 @@ pub enum TokenKind {
     Un,     // unsafe
     Type,   // type alias
     Where,  // where clause
+    Linear, // linear type qualifier
+    Affine, // affine type qualifier
 
     // Boolean/None literals (can also be keywords)
     True,
@@ -219,6 +221,7 @@ impl TokenKind {
             "br" => Some(TokenKind::Br),
             "ct" => Some(TokenKind::Ct),
             "ret" => Some(TokenKind::Ret),
+            "return" => Some(TokenKind::Ret),
             "as" => Some(TokenKind::As),
             "aw" => Some(TokenKind::Aw),
             "sp" => Some(TokenKind::Sp),
@@ -230,6 +233,9 @@ impl TokenKind {
             "un" => Some(TokenKind::Un),
             "type" => Some(TokenKind::Type),
             "where" => Some(TokenKind::Where),
+
+            "linear" => Some(TokenKind::Linear),
+            "affine" => Some(TokenKind::Affine),
 
             // Boolean literals
             "T" => Some(TokenKind::True),
@@ -282,6 +288,8 @@ impl TokenKind {
                 | TokenKind::Un
                 | TokenKind::Type
                 | TokenKind::Where
+                | TokenKind::Linear
+                | TokenKind::Affine
                 | TokenKind::True
                 | TokenKind::False
                 | TokenKind::None
@@ -336,6 +344,8 @@ impl fmt::Display for TokenKind {
             TokenKind::Un => write!(f, "un"),
             TokenKind::Type => write!(f, "type"),
             TokenKind::Where => write!(f, "where"),
+            TokenKind::Linear => write!(f, "linear"),
+            TokenKind::Affine => write!(f, "affine"),
             TokenKind::True => write!(f, "true"),
             TokenKind::False => write!(f, "false"),
             TokenKind::None => write!(f, "none"),

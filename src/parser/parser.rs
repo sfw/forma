@@ -332,10 +332,10 @@ impl<'a> Parser<'a> {
             let is_mut = self.match_token(TokenKind::Mut);
             if self.check_ident_str("self") {
                 let name = self.parse_ident()?;
-                let ty = Type {
-                    kind: TypeKind::Ref(
-                        Box::new(Type {
-                            kind: TypeKind::Path(TypePath {
+                let ty = Type::new(
+                    TypeKind::Ref(
+                        Box::new(Type::new(
+                            TypeKind::Path(TypePath {
                                 segments: vec![TypePathSegment {
                                     name: Ident::new("Self", start),
                                     args: None,
@@ -343,12 +343,12 @@ impl<'a> Parser<'a> {
                                 }],
                                 span: start,
                             }),
-                            span: start,
-                        }),
+                            start,
+                        )),
                         is_mut,
                     ),
-                    span: start.merge(self.previous_span()),
-                };
+                    start.merge(self.previous_span()),
+                );
                 return Ok(Param {
                     name,
                     ty,
@@ -361,8 +361,8 @@ impl<'a> Parser<'a> {
         // Handle self
         if self.check_ident_str("self") {
             let name = self.parse_ident()?;
-            let ty = Type {
-                kind: TypeKind::Path(TypePath {
+            let ty = Type::new(
+                TypeKind::Path(TypePath {
                     segments: vec![TypePathSegment {
                         name: Ident::new("Self", start),
                         args: None,
@@ -370,8 +370,8 @@ impl<'a> Parser<'a> {
                     }],
                     span: start,
                 }),
-                span: start,
-            };
+                start,
+            );
             return Ok(Param {
                 name,
                 ty,
@@ -1093,32 +1093,46 @@ impl<'a> Parser<'a> {
     fn parse_type(&mut self) -> Result<Type> {
         let start = self.current_span();
 
+        // Check for linear/affine qualifier
+        let linearity = if self.match_token(TokenKind::Linear) {
+            Linearity::Linear
+        } else if self.match_token(TokenKind::Affine) {
+            Linearity::Affine
+        } else {
+            Linearity::Regular
+        };
+
         let mut ty = self.parse_type_primary()?;
+
+        // Apply linearity to the base type
+        if linearity != Linearity::Regular {
+            ty.linearity = linearity;
+        }
 
         // Check for type suffixes: ?, !, ->
         loop {
             if self.match_token(TokenKind::Question) {
-                ty = Type {
-                    kind: TypeKind::Option(Box::new(ty)),
-                    span: start.merge(self.previous_span()),
-                };
+                ty = Type::new(
+                    TypeKind::Option(Box::new(ty)),
+                    start.merge(self.previous_span()),
+                );
             } else if self.match_token(TokenKind::Bang) {
                 let error_ty = if self.check_type_start() {
                     Some(Box::new(self.parse_type()?))
                 } else {
                     None
                 };
-                ty = Type {
-                    kind: TypeKind::Result(Box::new(ty), error_ty),
-                    span: start.merge(self.previous_span()),
-                };
+                ty = Type::new(
+                    TypeKind::Result(Box::new(ty), error_ty),
+                    start.merge(self.previous_span()),
+                );
             } else if self.match_token(TokenKind::Arrow) {
                 // Function type
                 let ret = self.parse_type()?;
-                ty = Type {
-                    kind: TypeKind::Fn(vec![ty], Box::new(ret)),
-                    span: start.merge(self.previous_span()),
-                };
+                ty = Type::new(
+                    TypeKind::Fn(vec![ty], Box::new(ret)),
+                    start.merge(self.previous_span()),
+                );
             } else {
                 break;
             }
@@ -1134,20 +1148,20 @@ impl<'a> Parser<'a> {
         if self.match_token(TokenKind::Amp) {
             let is_mut = self.match_token(TokenKind::Mut);
             let inner = self.parse_type()?;
-            return Ok(Type {
-                kind: TypeKind::Ref(Box::new(inner), is_mut),
-                span: start.merge(self.previous_span()),
-            });
+            return Ok(Type::new(
+                TypeKind::Ref(Box::new(inner), is_mut),
+                start.merge(self.previous_span()),
+            ));
         }
 
         // Pointer type: *T or *mut T
         if self.match_token(TokenKind::Star) {
             let is_mut = self.match_token(TokenKind::Mut);
             let inner = self.parse_type()?;
-            return Ok(Type {
-                kind: TypeKind::Ptr(Box::new(inner), is_mut),
-                span: start.merge(self.previous_span()),
-            });
+            return Ok(Type::new(
+                TypeKind::Ptr(Box::new(inner), is_mut),
+                start.merge(self.previous_span()),
+            ));
         }
 
         // Tuple or function type: (A, B) or (A, B) -> C
@@ -1166,16 +1180,16 @@ impl<'a> Parser<'a> {
             // Check for function type
             if self.match_token(TokenKind::Arrow) {
                 let ret = self.parse_type()?;
-                return Ok(Type {
-                    kind: TypeKind::Fn(types, Box::new(ret)),
-                    span: start.merge(self.previous_span()),
-                });
+                return Ok(Type::new(
+                    TypeKind::Fn(types, Box::new(ret)),
+                    start.merge(self.previous_span()),
+                ));
             }
 
-            return Ok(Type {
-                kind: TypeKind::Tuple(types),
-                span: start.merge(self.previous_span()),
-            });
+            return Ok(Type::new(
+                TypeKind::Tuple(types),
+                start.merge(self.previous_span()),
+            ));
         }
 
         // List, Array, or generic: [T], [T; N], or Type[Args]
@@ -1186,17 +1200,17 @@ impl<'a> Parser<'a> {
                 // Array: [T; N]
                 let size = self.parse_expr()?;
                 self.expect(TokenKind::RBracket)?;
-                return Ok(Type {
-                    kind: TypeKind::Array(Box::new(inner), Box::new(size)),
-                    span: start.merge(self.previous_span()),
-                });
+                return Ok(Type::new(
+                    TypeKind::Array(Box::new(inner), Box::new(size)),
+                    start.merge(self.previous_span()),
+                ));
             }
 
             self.expect(TokenKind::RBracket)?;
-            return Ok(Type {
-                kind: TypeKind::List(Box::new(inner)),
-                span: start.merge(self.previous_span()),
-            });
+            return Ok(Type::new(
+                TypeKind::List(Box::new(inner)),
+                start.merge(self.previous_span()),
+            ));
         }
 
         // Map or Set: {K: V} or {T}
@@ -1207,43 +1221,43 @@ impl<'a> Parser<'a> {
                 // Map: {K: V}
                 let value = self.parse_type()?;
                 self.expect(TokenKind::RBrace)?;
-                return Ok(Type {
-                    kind: TypeKind::Map(Box::new(first), Box::new(value)),
-                    span: start.merge(self.previous_span()),
-                });
+                return Ok(Type::new(
+                    TypeKind::Map(Box::new(first), Box::new(value)),
+                    start.merge(self.previous_span()),
+                ));
             }
 
             // Set: {T}
             self.expect(TokenKind::RBrace)?;
-            return Ok(Type {
-                kind: TypeKind::Set(Box::new(first)),
-                span: start.merge(self.previous_span()),
-            });
+            return Ok(Type::new(
+                TypeKind::Set(Box::new(first)),
+                start.merge(self.previous_span()),
+            ));
         }
 
         // Infer type: _
         if self.check_ident_str("_") {
             self.advance();
-            return Ok(Type {
-                kind: TypeKind::Infer,
-                span: start.merge(self.previous_span()),
-            });
+            return Ok(Type::new(
+                TypeKind::Infer,
+                start.merge(self.previous_span()),
+            ));
         }
 
         // Never type: !
         if self.match_token(TokenKind::Bang) {
-            return Ok(Type {
-                kind: TypeKind::Never,
-                span: start.merge(self.previous_span()),
-            });
+            return Ok(Type::new(
+                TypeKind::Never,
+                start.merge(self.previous_span()),
+            ));
         }
 
         // Named type path
         let path = self.parse_type_path()?;
-        Ok(Type {
-            kind: TypeKind::Path(path),
-            span: start.merge(self.previous_span()),
-        })
+        Ok(Type::new(
+            TypeKind::Path(path),
+            start.merge(self.previous_span()),
+        ))
     }
 
     fn parse_type_path(&mut self) -> Result<TypePath> {
@@ -1308,6 +1322,8 @@ impl<'a> Parser<'a> {
             || self.check(TokenKind::Amp)
             || self.check(TokenKind::Star)
             || self.check(TokenKind::Bang)
+            || self.check(TokenKind::Linear)
+            || self.check(TokenKind::Affine)
     }
 
     // ========================================================================
@@ -1781,6 +1797,17 @@ impl<'a> Parser<'a> {
                     }
                 }
             } else if self.check(TokenKind::LParen) {
+                // Don't treat ( as function call after block-level expressions
+                // (while, for, loop, if, match) — prevents parsing next-line tuple
+                // as a function call on the control flow expression
+                if matches!(expr.kind,
+                    ExprKind::While(..) | ExprKind::WhileLet(..) |
+                    ExprKind::For(..) | ExprKind::Loop(..) |
+                    ExprKind::If(..) | ExprKind::Match(..) |
+                    ExprKind::Block(..)
+                ) {
+                    break;
+                }
                 // Check if this is a type cast like i32(x) or f64(x)
                 if let ExprKind::Ident(ref name) = expr.kind {
                     if let Some(target_ty) = self.type_name_to_type(&name.name, start) {
@@ -1802,6 +1829,15 @@ impl<'a> Parser<'a> {
                     span: start.merge(self.previous_span()),
                 };
             } else if self.match_token(TokenKind::LBracket) {
+                // Don't treat [ as index after block-level expressions
+                if matches!(expr.kind,
+                    ExprKind::While(..) | ExprKind::WhileLet(..) |
+                    ExprKind::For(..) | ExprKind::Loop(..) |
+                    ExprKind::If(..) | ExprKind::Match(..) |
+                    ExprKind::Block(..)
+                ) {
+                    break;
+                }
                 // Index
                 let index = self.parse_expr()?;
                 self.expect(TokenKind::RBracket)?;
@@ -2106,6 +2142,7 @@ impl<'a> Parser<'a> {
 
         // Array/List literal
         if self.match_token(TokenKind::LBracket) {
+            self.skip_whitespace_tokens();
             if self.match_token(TokenKind::RBracket) {
                 return Ok(Expr {
                     kind: ExprKind::Array(Vec::new()),
@@ -2117,7 +2154,9 @@ impl<'a> Parser<'a> {
 
             // Array repeat: [value; count]
             if self.match_token(TokenKind::Semicolon) {
+                self.skip_whitespace_tokens();
                 let count = self.parse_expr()?;
+                self.skip_whitespace_tokens();
                 self.expect(TokenKind::RBracket)?;
                 return Ok(Expr {
                     kind: ExprKind::ArrayRepeat(Box::new(first), Box::new(count)),
@@ -2128,11 +2167,13 @@ impl<'a> Parser<'a> {
             // Array literal
             let mut elements = vec![first];
             while self.match_token(TokenKind::Comma) {
+                self.skip_whitespace_tokens();
                 if self.check(TokenKind::RBracket) {
                     break;
                 }
                 elements.push(self.parse_expr()?);
             }
+            self.skip_whitespace_tokens();
             self.expect(TokenKind::RBracket)?;
             return Ok(Expr {
                 kind: ExprKind::Array(elements),
@@ -2329,27 +2370,47 @@ impl<'a> Parser<'a> {
                 self.parse_expr()?
             };
             // Skip newlines before else - it can be on the next line
+            // Save position in case there's no else and we need to not consume tokens
+            let saved_pos = self.pos;
             self.skip_newlines();
-            self.expect(TokenKind::Else)?;
-            // Also allow multi-line else branch
-            let else_expr = if self.check(TokenKind::Newline) {
+            if self.check(TokenKind::Else) {
                 self.advance();
-                if self.check(TokenKind::Indent) {
-                    let block = self.parse_indent_block()?;
-                    Expr {
-                        kind: ExprKind::Block(block.clone()),
-                        span: block.span,
+                // Also allow multi-line else branch
+                let else_expr = if self.check(TokenKind::Newline) {
+                    self.advance();
+                    if self.check(TokenKind::Indent) {
+                        let block = self.parse_indent_block()?;
+                        Expr {
+                            kind: ExprKind::Block(block.clone()),
+                            span: block.span,
+                        }
+                    } else if self.check(TokenKind::If) {
+                        // else if chain
+                        self.advance();
+                        self.parse_if_expr(self.current_span())?
+                    } else {
+                        return Err(self.error("expected expression or indented block after 'else'"));
                     }
+                } else if self.check(TokenKind::If) {
+                    // else if on same line
+                    self.advance();
+                    self.parse_if_expr(self.current_span())?
                 } else {
-                    return Err(self.error("expected expression or indented block after 'else'"));
-                }
+                    self.parse_expr()?
+                };
+                (
+                    IfBranch::Expr(Box::new(then_expr)),
+                    Some(ElseBranch::Expr(Box::new(else_expr))),
+                )
             } else {
-                self.parse_expr()?
-            };
-            (
-                IfBranch::Expr(Box::new(then_expr)),
-                Some(ElseBranch::Expr(Box::new(else_expr))),
-            )
+                // No else branch — restore position so we don't consume
+                // newlines that belong to the parent scope
+                self.pos = saved_pos;
+                (
+                    IfBranch::Expr(Box::new(then_expr)),
+                    None,
+                )
+            }
         } else {
             // Block if
             let then_block = self.parse_block()?;
@@ -3536,8 +3597,8 @@ impl<'a> Parser<'a> {
         );
 
         if is_cast_type {
-            Some(Type {
-                kind: TypeKind::Path(TypePath {
+            Some(Type::new(
+                TypeKind::Path(TypePath {
                     segments: vec![TypePathSegment {
                         name: Ident {
                             name: name.to_string(),
@@ -3549,7 +3610,7 @@ impl<'a> Parser<'a> {
                     span,
                 }),
                 span,
-            })
+            ))
         } else {
             None
         }
@@ -3698,8 +3759,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Skip newlines, indents, and dedents. Used inside brace-delimited constructs
-    /// where indentation is not significant.
+    /// Skip newlines, indents, and dedents (for use inside bracket-delimited contexts)
     fn skip_whitespace_tokens(&mut self) {
         while self.check(TokenKind::Newline)
             || self.check(TokenKind::Indent)

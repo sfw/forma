@@ -1,0 +1,127 @@
+# Sudoku Solver - Constraint satisfaction with backtracking
+# Demonstrates: 2D array manipulation, backtracking, constraint checking
+#
+# A 9x9 grid represented as flat array (grid[row*9 + col])
+# Empty cells are 0, filled cells are 1-9
+
+# Get value at (row, col)
+f get_cell(grid: [Int], row: Int, col: Int) -> Int
+    grid[row * 9 + col]
+
+# Set value at (row, col)
+f set_cell(grid: [Int], row: Int, col: Int, value: Int) -> Unit
+    grid[row * 9 + col] := value
+
+# Check if placing value at (row, col) is valid
+f is_valid(grid: [Int], row: Int, col: Int, value: Int) -> Bool
+    # Check row
+    c := 0
+    wh c < 9
+        if get_cell(grid, row, c) == value then
+            return false
+        c := c + 1
+
+    # Check column
+    r := 0
+    wh r < 9
+        if get_cell(grid, r, col) == value then
+            return false
+        r := r + 1
+
+    # Check 3x3 box
+    box_row := (row / 3) * 3
+    box_col := (col / 3) * 3
+    r := 0
+    wh r < 3
+        c := 0
+        wh c < 3
+            if get_cell(grid, box_row + r, box_col + c) == value then
+                return false
+            c := c + 1
+        r := r + 1
+
+    true
+
+# Find next empty cell, returns (row, col) or (-1, -1) if none
+f find_empty(grid: [Int]) -> (Int, Int)
+    r := 0
+    wh r < 9
+        c := 0
+        wh c < 9
+            if get_cell(grid, r, c) == 0 then
+                return (r, c)
+            c := c + 1
+        r := r + 1
+    (0 - 1, 0 - 1)
+
+# Solve sudoku using backtracking
+f solve(grid: [Int]) -> Bool
+    pos := find_empty(grid)
+    row := pos.0
+    col := pos.1
+
+    if row == 0 - 1 then
+        return true  # No empty cells, solved!
+
+    value := 1
+    wh value <= 9
+        if is_valid(grid, row, col, value) then
+            set_cell(grid, row, col, value)
+            if solve(grid) then
+                return true
+            set_cell(grid, row, col, 0)  # Backtrack
+        value := value + 1
+
+    false
+
+# Print sudoku grid
+f print_grid(grid: [Int]) -> Unit
+    r := 0
+    wh r < 9
+        if r % 3 == 0 && r != 0 then
+            print("------+-------+------")
+        line := ""
+        c := 0
+        wh c < 9
+            if c % 3 == 0 && c != 0 then
+                line := line + "| "
+            val := get_cell(grid, r, c)
+            if val == 0 then
+                line := line + ". "
+            else
+                line := line + f"{val} "
+            c := c + 1
+        print(line)
+        r := r + 1
+
+f main() -> Int
+    # Example puzzle (0 = empty)
+    # A medium difficulty puzzle
+    grid := [
+        5, 3, 0, 0, 7, 0, 0, 0, 0,
+        6, 0, 0, 1, 9, 5, 0, 0, 0,
+        0, 9, 8, 0, 0, 0, 0, 6, 0,
+        8, 0, 0, 0, 6, 0, 0, 0, 3,
+        4, 0, 0, 8, 0, 3, 0, 0, 1,
+        7, 0, 0, 0, 2, 0, 0, 0, 6,
+        0, 6, 0, 0, 0, 0, 2, 8, 0,
+        0, 0, 0, 4, 1, 9, 0, 0, 5,
+        0, 0, 0, 0, 8, 0, 0, 7, 9
+    ]
+
+    print("Sudoku Puzzle:")
+    print("")
+    print_grid(grid)
+
+    print("")
+    print("Solving...")
+
+    if solve(grid) then
+        print("")
+        print("Solution:")
+        print("")
+        print_grid(grid)
+    else
+        print("No solution exists!")
+
+    0

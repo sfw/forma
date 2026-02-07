@@ -176,6 +176,8 @@ pub struct Statement {
 pub enum StatementKind {
     /// Assign a value to a local: `_0 = rvalue`
     Assign(Local, Rvalue),
+    /// In-place index assignment: `local[index] = value`
+    IndexAssign(Local, Operand, Operand),
     /// No-op (placeholder)
     Nop,
 }
@@ -434,6 +436,7 @@ impl fmt::Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
             StatementKind::Assign(local, rvalue) => write!(f, "{} = {}", local, rvalue),
+            StatementKind::IndexAssign(local, index, value) => write!(f, "{}[{}] = {}", local, index, value),
             StatementKind::Nop => write!(f, "nop"),
         }
     }

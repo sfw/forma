@@ -26,6 +26,7 @@ pub mod borrow;
 #[cfg(feature = "llvm")]
 pub mod codegen;
 pub mod errors;
+pub mod ffi;
 pub mod fmt;
 pub mod lexer;
 pub mod lsp;

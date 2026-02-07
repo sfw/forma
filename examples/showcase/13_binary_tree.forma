@@ -1,0 +1,149 @@
+# Binary Search Tree - Classic data structure
+# Demonstrates: tree structures, recursion, in-order traversal
+#
+# Using parallel arrays: values[i], left[i], right[i]
+# -1 represents null/empty
+
+# Insert value into BST, returns root
+f bst_insert(values: [Int], left: [Int], right: [Int], root: Int, value: Int, free: Int) -> (Int, Int)
+    if root == 0 - 1 then
+        # Empty tree, create root
+        values[free] := value
+        left[free] := 0 - 1
+        right[free] := 0 - 1
+        (free, free + 1)
+    else
+        # Find insertion point
+        current := root
+        done := false
+        wh !done
+            if value < values[current] then
+                if left[current] == 0 - 1 then
+                    # Insert here
+                    values[free] := value
+                    left[free] := 0 - 1
+                    right[free] := 0 - 1
+                    left[current] := free
+                    done := true
+                else
+                    current := left[current]
+            else
+                if right[current] == 0 - 1 then
+                    # Insert here
+                    values[free] := value
+                    left[free] := 0 - 1
+                    right[free] := 0 - 1
+                    right[current] := free
+                    done := true
+                else
+                    current := right[current]
+        (root, free + 1)
+
+# Search for value in BST
+f bst_search(values: [Int], left: [Int], right: [Int], root: Int, target: Int) -> Bool
+    current := root
+    wh current != 0 - 1
+        if values[current] == target then
+            return true
+        else if target < values[current] then
+            current := left[current]
+        else
+            current := right[current]
+    false
+
+# In-order traversal (prints sorted order)
+f bst_inorder(values: [Int], left: [Int], right: [Int], node: Int) -> Unit
+    if node != 0 - 1 then
+        bst_inorder(values, left, right, left[node])
+        print(values[node])
+        bst_inorder(values, left, right, right[node])
+
+# Find minimum value
+f bst_min(values: [Int], left: [Int], root: Int) -> Int
+    if root == 0 - 1 then 0 - 1
+    else
+        current := root
+        wh left[current] != 0 - 1
+            current := left[current]
+        values[current]
+
+# Find maximum value
+f bst_max(values: [Int], right: [Int], root: Int) -> Int
+    if root == 0 - 1 then 0 - 1
+    else
+        current := root
+        wh right[current] != 0 - 1
+            current := right[current]
+        values[current]
+
+# Calculate tree height
+f bst_height(left: [Int], right: [Int], node: Int) -> Int
+    if node == 0 - 1 then 0
+    else
+        left_h := bst_height(left, right, left[node])
+        right_h := bst_height(left, right, right[node])
+        1 + (if left_h > right_h then left_h else right_h)
+
+# Count nodes
+f bst_count(left: [Int], right: [Int], node: Int) -> Int
+    if node == 0 - 1 then 0
+    else
+        1 + bst_count(left, right, left[node]) + bst_count(left, right, right[node])
+
+f main() -> Int
+    # Allocate node pool
+    values := [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    left := [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    right := [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+    print("Building BST with values: 50, 30, 70, 20, 40, 60, 80")
+    root := 0 - 1
+    free := 0
+
+    # Build tree
+    result := bst_insert(values, left, right, root, 50, free)
+    root := result.0
+    free := result.1
+
+    result := bst_insert(values, left, right, root, 30, free)
+    root := result.0
+    free := result.1
+
+    result := bst_insert(values, left, right, root, 70, free)
+    root := result.0
+    free := result.1
+
+    result := bst_insert(values, left, right, root, 20, free)
+    root := result.0
+    free := result.1
+
+    result := bst_insert(values, left, right, root, 40, free)
+    root := result.0
+    free := result.1
+
+    result := bst_insert(values, left, right, root, 60, free)
+    root := result.0
+    free := result.1
+
+    result := bst_insert(values, left, right, root, 80, free)
+    root := result.0
+    free := result.1
+
+    print("")
+    print("In-order traversal (sorted):")
+    bst_inorder(values, left, right, root)
+
+    print("")
+    print("Tree statistics:")
+    print(f"Node count: {bst_count(left, right, root)}")
+    print(f"Height: {bst_height(left, right, root)}")
+    print(f"Minimum: {bst_min(values, left, root)}")
+    print(f"Maximum: {bst_max(values, right, root)}")
+
+    print("")
+    print("Search tests:")
+    print(f"Search 40: {bst_search(values, left, right, root, 40)}")  # true
+    print(f"Search 25: {bst_search(values, left, right, root, 25)}")  # false
+    print(f"Search 70: {bst_search(values, left, right, root, 70)}")  # true
+
+    0

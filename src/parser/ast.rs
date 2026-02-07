@@ -285,10 +285,36 @@ pub struct WherePredicate {
 // Types
 // ============================================================================
 
+/// Linearity qualifier for types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Linearity {
+    /// Regular type (can be copied and dropped freely)
+    #[default]
+    Regular,
+    /// Linear type (must be used exactly once)
+    Linear,
+    /// Affine type (must be used at most once)
+    Affine,
+}
+
 #[derive(Debug, Clone)]
 pub struct Type {
     pub kind: TypeKind,
     pub span: Span,
+    /// Linearity qualifier (linear, affine, or regular)
+    pub linearity: Linearity,
+}
+
+impl Type {
+    /// Create a new Type with regular (default) linearity.
+    pub fn new(kind: TypeKind, span: Span) -> Self {
+        Self { kind, span, linearity: Linearity::Regular }
+    }
+
+    /// Create a new Type with the given linearity.
+    pub fn with_linearity(kind: TypeKind, span: Span, linearity: Linearity) -> Self {
+        Self { kind, span, linearity }
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -1,0 +1,60 @@
+# Prime Numbers - Sieve of Eratosthenes
+# Demonstrates: arrays, nested loops, algorithm optimization
+#
+# Find all prime numbers up to n using the ancient algorithm
+
+# Check if a number is prime (simple method)
+f is_prime(n: Int) -> Bool
+    if n < 2 then false
+    else if n == 2 then true
+    else if n % 2 == 0 then false
+    else
+        i := 3
+        wh i * i <= n
+            if n % i == 0 then
+                return false
+            i := i + 2
+        true
+
+# Count primes up to n using trial division
+f count_primes(n: Int) -> Int
+    count := 0
+    i := 2
+    wh i <= n
+        if is_prime(i) then
+            count := count + 1
+        i := i + 1
+    count
+
+# Print primes up to n
+f print_primes(n: Int) -> Unit
+    print(f"Primes up to {n}:")
+    i := 2
+    wh i <= n
+        if is_prime(i) then
+            print(i)
+        i := i + 1
+
+# Find the nth prime
+f nth_prime(n: Int) -> Int
+    count := 0
+    candidate := 2
+    wh count < n
+        if is_prime(candidate) then
+            count := count + 1
+            if count == n then
+                return candidate
+        candidate := candidate + 1
+    0
+
+f main() -> Int
+    print_primes(50)
+
+    print("")
+    print(f"Number of primes up to 100: {count_primes(100)}")   # 25
+    print(f"Number of primes up to 1000: {count_primes(1000)}") # 168
+
+    print("")
+    print(f"The 10th prime is: {nth_prime(10)}")   # 29
+    print(f"The 100th prime is: {nth_prime(100)}") # 541
+    0

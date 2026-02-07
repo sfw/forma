@@ -1,0 +1,23 @@
+# 99 Bottles of Beer - Classic loop exercise
+# Demonstrates: loops, string interpolation, conditionals
+
+f bottles(n: Int) -> String
+    if n == 0 then "no more bottles"
+    else if n == 1 then "1 bottle"
+    else f"{n} bottles"
+
+f verse(n: Int) -> Unit
+    if n == 0 then
+        print("No more bottles of beer on the wall, no more bottles of beer.")
+        print("Go to the store and buy some more, 99 bottles of beer on the wall.")
+    else
+        print(f"{bottles(n)} of beer on the wall, {bottles(n)} of beer.")
+        print(f"Take one down and pass it around, {bottles(n - 1)} of beer on the wall.")
+        print("")
+
+f main() -> Int
+    n := 99
+    wh n >= 0
+        verse(n)
+        n := n - 1
+    0

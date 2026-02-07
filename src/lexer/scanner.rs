@@ -23,6 +23,9 @@ pub struct Scanner<'a> {
     pending_dedents: usize,
     at_line_start: bool,
 
+    // Bracket nesting depth - suppress INDENT/DEDENT inside brackets (like Python)
+    bracket_depth: usize,
+
     // String interpolation support
     interpolation_depth: usize,
     brace_depth_stack: Vec<usize>,
@@ -46,6 +49,7 @@ impl<'a> Scanner<'a> {
             at_line_start: true,
             interpolation_depth: 0,
             brace_depth_stack: Vec::new(),
+            bracket_depth: 0,
             errors: Vec::new(),
         }
     }
@@ -68,10 +72,14 @@ impl<'a> Scanner<'a> {
 
     /// Get the next token from the source.
     pub fn next_token(&mut self) -> Token {
-        // Handle pending dedents first
+        // Handle pending dedents first (but suppress inside brackets)
         if self.pending_dedents > 0 {
-            self.pending_dedents -= 1;
-            return self.make_token(TokenKind::Dedent);
+            if self.bracket_depth > 0 {
+                self.pending_dedents = 0;
+            } else {
+                self.pending_dedents -= 1;
+                return self.make_token(TokenKind::Dedent);
+            }
         }
 
         // Handle indentation at line start
@@ -101,11 +109,27 @@ impl<'a> Scanner<'a> {
         };
 
         match c {
-            // Single-character tokens
-            '(' => self.make_token(TokenKind::LParen),
-            ')' => self.make_token(TokenKind::RParen),
-            '[' => self.make_token(TokenKind::LBracket),
-            ']' => self.make_token(TokenKind::RBracket),
+            // Single-character tokens (track bracket depth for indent suppression)
+            '(' => {
+                self.bracket_depth += 1;
+                self.make_token(TokenKind::LParen)
+            }
+            ')' => {
+                if self.bracket_depth > 0 {
+                    self.bracket_depth -= 1;
+                }
+                self.make_token(TokenKind::RParen)
+            }
+            '[' => {
+                self.bracket_depth += 1;
+                self.make_token(TokenKind::LBracket)
+            }
+            ']' => {
+                if self.bracket_depth > 0 {
+                    self.bracket_depth -= 1;
+                }
+                self.make_token(TokenKind::RBracket)
+            }
             '{' => {
                 if self.interpolation_depth > 0 {
                     if let Some(depth) = self.brace_depth_stack.last_mut() {
@@ -239,8 +263,21 @@ impl<'a> Scanner<'a> {
                         self.make_token(TokenKind::DotDot)
                     }
                 } else if self.peek().is_some_and(|c| c.is_ascii_digit()) {
-                    // Could be a float starting with .
-                    self.scan_number_after_dot()
+                    // Distinguish float literal (.5) from tuple field access (expr.0)
+                    // If preceded by an identifier char, ), ], or }, it's field access
+                    let prev_char = if self.start > 0 {
+                        self.source[..self.start].chars().last()
+                    } else {
+                        None
+                    };
+                    let is_field_access = prev_char.is_some_and(|c| {
+                        is_ident_continue(c) || c == ')' || c == ']' || c == '}'
+                    });
+                    if is_field_access {
+                        self.make_token(TokenKind::Dot)
+                    } else {
+                        self.scan_number_after_dot()
+                    }
                 } else {
                     self.make_token(TokenKind::Dot)
                 }
@@ -251,6 +288,11 @@ impl<'a> Scanner<'a> {
                 self.line += 1;
                 self.column = 1;
                 self.at_line_start = true;
+                // Suppress newline tokens inside brackets (like Python)
+                if self.bracket_depth > 0 {
+                    // Still need to process next token; recurse
+                    return self.next_token();
+                }
                 self.make_token(TokenKind::Newline)
             }
 
@@ -304,6 +346,11 @@ impl<'a> Scanner<'a> {
 
         // Check if at EOF
         if self.chars.peek().is_none() {
+            return None;
+        }
+
+        // Suppress INDENT/DEDENT inside brackets (like Python)
+        if self.bracket_depth > 0 {
             return None;
         }
 

@@ -1,0 +1,117 @@
+# Matrix Multiplication - Computational benchmark
+# Demonstrates: nested loops, 2D array operations, O(n^3) algorithm
+#
+# Matrices stored as flat arrays: matrix[row * cols + col]
+
+# Matrix dimensions (for demonstration)
+# A is m x n, B is n x p, result C is m x p
+
+# Get element at (row, col) in matrix with given column count
+f mat_get(mat: [Int], row: Int, col: Int, cols: Int) -> Int
+    mat[row * cols + col]
+
+# Set element at (row, col)
+f mat_set(mat: [Int], row: Int, col: Int, cols: Int, value: Int) -> Unit
+    mat[row * cols + col] := value
+
+# Multiply matrices A (m x n) and B (n x p), result in C (m x p)
+f mat_mult(a: [Int], b: [Int], c: [Int], m: Int, n: Int, p: Int) -> Unit
+    i := 0
+    wh i < m
+        j := 0
+        wh j < p
+            sum := 0
+            k := 0
+            wh k < n
+                sum := sum + mat_get(a, i, k, n) * mat_get(b, k, j, p)
+                k := k + 1
+            mat_set(c, i, j, p, sum)
+            j := j + 1
+        i := i + 1
+
+# Print matrix
+f mat_print(mat: [Int], rows: Int, cols: Int, name: String) -> Unit
+    print(f"{name}:")
+    r := 0
+    wh r < rows
+        line := "  ["
+        c := 0
+        wh c < cols
+            if c > 0 then
+                line := line + ", "
+            val := mat_get(mat, r, c, cols)
+            line := line + f"{val}"
+            c := c + 1
+        line := line + "]"
+        print(line)
+        r := r + 1
+
+# Identity matrix check
+f mat_is_identity(mat: [Int], n: Int) -> Bool
+    i := 0
+    wh i < n
+        j := 0
+        wh j < n
+            expected := if i == j then 1 else 0
+            if mat_get(mat, i, j, n) != expected then
+                return false
+            j := j + 1
+        i := i + 1
+    true
+
+f main() -> Int
+    # Example 1: 2x3 * 3x2 = 2x2
+    print("Example 1: 2x3 * 3x2 = 2x2")
+    print("")
+
+    a1 := [1, 2, 3, 4, 5, 6]  # 2x3
+    b1 := [7, 8, 9, 10, 11, 12]  # 3x2
+    c1 := [0, 0, 0, 0]  # 2x2 result
+
+    mat_print(a1, 2, 3, "A")
+    print("")
+    mat_print(b1, 3, 2, "B")
+    print("")
+
+    mat_mult(a1, b1, c1, 2, 3, 2)
+    mat_print(c1, 2, 2, "A * B")
+
+    print("")
+    print("=" * 40)
+    print("")
+
+    # Example 2: 3x3 * 3x3 = 3x3
+    print("Example 2: 3x3 * 3x3 = 3x3")
+    print("")
+
+    a2 := [1, 2, 3, 4, 5, 6, 7, 8, 9]  # 3x3
+    b2 := [9, 8, 7, 6, 5, 4, 3, 2, 1]  # 3x3
+    c2 := [0, 0, 0, 0, 0, 0, 0, 0, 0]  # 3x3 result
+
+    mat_print(a2, 3, 3, "A")
+    print("")
+    mat_print(b2, 3, 3, "B")
+    print("")
+
+    mat_mult(a2, b2, c2, 3, 3, 3)
+    mat_print(c2, 3, 3, "A * B")
+
+    print("")
+    print("=" * 40)
+    print("")
+
+    # Example 3: Identity matrix
+    print("Example 3: A * I = A")
+    print("")
+
+    identity := [1, 0, 0, 0, 1, 0, 0, 0, 1]  # 3x3 identity
+    result := [0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+    mat_mult(a2, identity, result, 3, 3, 3)
+    mat_print(a2, 3, 3, "A")
+    print("")
+    mat_print(identity, 3, 3, "I")
+    print("")
+    mat_print(result, 3, 3, "A * I")
+
+    0

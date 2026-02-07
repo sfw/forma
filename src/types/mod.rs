@@ -32,7 +32,8 @@ pub mod types;
 pub use checker::{TypeChecker, TypedAst, TypedItem, TypedItemKind, BoundsChecker, TypeRelations};
 pub use inference::{InferenceEngine, TypeEnv, TypeError, Unifier, TypeDef};
 pub use types::{
-    Mutability, Substitution, Ty, TypeId, TypeScheme, TypeVar,
+    Capability, EnvCapability, FileCapability, LinearityKind, Mutability, NetworkCapability,
+    Substitution, Ty, TypeId, TypeScheme, TypeVar,
     EnumInfo, FunctionInfo, MethodInfo, StructInfo, TraitBound, TraitInfo, VariantFields, VariantInfo,
     fresh_type_var_id, reset_type_var_counter,
 };

@@ -1,0 +1,6 @@
+# Hello World - The canonical first program
+# Demonstrates: basic output, string literals
+
+f main() -> Int
+    print("Hello, World!")
+    0

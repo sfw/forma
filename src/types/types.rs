@@ -167,6 +167,137 @@ pub enum Mutability {
     Mutable,
 }
 
+/// Linearity kind for the type system.
+///
+/// Controls how values of a type may be used:
+/// - `Regular`: No restrictions (can be copied and dropped freely)
+/// - `Affine`: Can be used at most once (may be dropped without use)
+/// - `Linear`: Must be used exactly once (cannot be dropped or duplicated)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum LinearityKind {
+    /// No linearity restrictions
+    #[default]
+    Regular,
+    /// Must be used at most once (can be dropped)
+    Affine,
+    /// Must be used exactly once (cannot be dropped)
+    Linear,
+}
+
+impl LinearityKind {
+    /// Returns true if values of this linearity can be implicitly copied.
+    pub fn can_copy(&self) -> bool {
+        matches!(self, LinearityKind::Regular)
+    }
+
+    /// Returns true if values of this linearity can be dropped without use.
+    pub fn can_drop(&self) -> bool {
+        matches!(self, LinearityKind::Regular | LinearityKind::Affine)
+    }
+
+    /// Combine two linearity kinds for composite types.
+    /// The result is the most restrictive of the two.
+    pub fn combine(self, other: LinearityKind) -> LinearityKind {
+        match (self, other) {
+            (LinearityKind::Linear, _) | (_, LinearityKind::Linear) => LinearityKind::Linear,
+            (LinearityKind::Affine, _) | (_, LinearityKind::Affine) => LinearityKind::Affine,
+            _ => LinearityKind::Regular,
+        }
+    }
+}
+
+impl std::fmt::Display for LinearityKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LinearityKind::Regular => write!(f, ""),
+            LinearityKind::Affine => write!(f, "affine "),
+            LinearityKind::Linear => write!(f, "linear "),
+        }
+    }
+}
+
+/// Capability types for controlling access to system resources.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Capability {
+    /// File system access
+    File(FileCapability),
+    /// Network access
+    Network(NetworkCapability),
+    /// Environment variable access
+    Env(EnvCapability),
+    /// Spawn processes/threads
+    Spawn,
+    /// FFI (foreign function interface) access
+    Ffi,
+}
+
+impl std::fmt::Display for Capability {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Capability::File(fc) => write!(f, "file({})", fc),
+            Capability::Network(nc) => write!(f, "network({})", nc),
+            Capability::Env(ec) => write!(f, "env({})", ec),
+            Capability::Spawn => write!(f, "spawn"),
+            Capability::Ffi => write!(f, "ffi"),
+        }
+    }
+}
+
+/// File system capability with path restrictions.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FileCapability {
+    /// Allowed path prefix (e.g., "/tmp", "." for current dir)
+    pub path: String,
+    /// Read permission
+    pub read: bool,
+    /// Write permission
+    pub write: bool,
+}
+
+impl std::fmt::Display for FileCapability {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let perms = match (self.read, self.write) {
+            (true, true) => "rw",
+            (true, false) => "r",
+            (false, true) => "w",
+            (false, false) => "none",
+        };
+        write!(f, "{}:{}", self.path, perms)
+    }
+}
+
+/// Network capability with host/port restrictions.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct NetworkCapability {
+    /// Allowed host pattern (e.g., "*.example.com", "*" for any)
+    pub host: String,
+    /// Allowed port (0 means any port)
+    pub port: u16,
+}
+
+impl std::fmt::Display for NetworkCapability {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.port == 0 {
+            write!(f, "{}", self.host)
+        } else {
+            write!(f, "{}:{}", self.host, self.port)
+        }
+    }
+}
+
+/// Environment variable access capability.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct EnvCapability {
+    /// Allowed env var pattern ("*" for any, or specific name)
+    pub pattern: String,
+}
+
+impl std::fmt::Display for EnvCapability {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.pattern)
+    }
+}
+
 /// A type variable for inference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TypeVar {

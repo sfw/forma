@@ -1,0 +1,24 @@
+# FizzBuzz - Classic interview problem
+# Demonstrates: loops, conditionals, modulo, string output
+#
+# Print numbers 1 to N, but:
+#   - for multiples of 3, print "Fizz"
+#   - for multiples of 5, print "Buzz"
+#   - for multiples of both, print "FizzBuzz"
+
+f fizzbuzz(n: Int) -> Unit
+    i := 1
+    wh i <= n
+        if i % 15 == 0 then
+            print("FizzBuzz")
+        else if i % 3 == 0 then
+            print("Fizz")
+        else if i % 5 == 0 then
+            print("Buzz")
+        else
+            print(i)
+        i := i + 1
+
+f main() -> Int
+    fizzbuzz(100)
+    0

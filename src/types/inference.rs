@@ -219,6 +219,19 @@ impl TypeEnv {
             TypeScheme { vars: vec![vec_new_t], ty: Ty::Fn(vec![], Box::new(Ty::List(Box::new(Ty::Var(vec_new_t))))) },
         );
 
+        // abs: Int -> Int
+        env.bindings.insert(
+            "abs".to_string(),
+            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+        );
+
+        // len: [T] -> Int (alias for vec_len)
+        let len_t = TypeVar::fresh();
+        env.bindings.insert(
+            "len".to_string(),
+            TypeScheme { vars: vec![len_t], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Var(len_t)))], Box::new(Ty::Int)) },
+        );
+
         // vec_len: [T] -> Int
         let vec_len_t = TypeVar::fresh();
         env.bindings.insert(
@@ -2947,6 +2960,19 @@ pub struct MethodSignature {
 type MethodKey = (String, String);
 
 /// Type inference engine.
+/// Tracking info for a linear/affine variable.
+#[derive(Debug, Clone)]
+struct LinearVarInfo {
+    /// The linearity kind of this variable
+    linearity: super::types::LinearityKind,
+    /// How many times this variable has been used (consumed)
+    use_count: usize,
+    /// Span where the variable was defined
+    def_span: Span,
+    /// Span of the last use (if any)
+    last_use_span: Option<Span>,
+}
+
 pub struct InferenceEngine {
     env: TypeEnv,
     unifier: Unifier,
@@ -2961,6 +2987,8 @@ pub struct InferenceEngine {
     impl_self_type: Option<Ty>,
     /// Track where symbols are defined for LSP
     symbol_locations: HashMap<String, (Span, super::checker::DefinitionKind)>,
+    /// Linear/affine variable tracking: maps variable name to tracking info
+    linear_tracking: HashMap<String, LinearVarInfo>,
 }
 
 impl InferenceEngine {
@@ -2973,6 +3001,7 @@ impl InferenceEngine {
             builtin_methods: HashMap::new(),
             impl_self_type: None,
             symbol_locations: HashMap::new(),
+            linear_tracking: HashMap::new(),
         };
         engine.register_builtin_methods();
         engine
@@ -2987,9 +3016,75 @@ impl InferenceEngine {
             builtin_methods: HashMap::new(),
             impl_self_type: None,
             symbol_locations: HashMap::new(),
+            linear_tracking: HashMap::new(),
         };
         engine.register_builtin_methods();
         engine
+    }
+
+    // ========================================================================
+    // Linear/Affine Type Tracking
+    // ========================================================================
+
+    /// Track a new linear or affine variable definition.
+    pub fn track_linear_def(&mut self, name: &str, linearity: super::types::LinearityKind, span: Span) {
+        if linearity != super::types::LinearityKind::Regular {
+            self.linear_tracking.insert(name.to_string(), LinearVarInfo {
+                linearity,
+                use_count: 0,
+                def_span: span,
+                last_use_span: None,
+            });
+        }
+    }
+
+    /// Track a use of a variable. Returns an error if it's a use-after-move.
+    pub fn track_linear_use(&mut self, name: &str, span: Span) -> Result<(), TypeError> {
+        if let Some(info) = self.linear_tracking.get_mut(name) {
+            if info.use_count >= 1 {
+                // Already used — this is a use-after-move for linear/affine types
+                return Err(TypeError {
+                    message: format!(
+                        "use of moved value: `{}` ({}type used after move)",
+                        name, info.linearity
+                    ),
+                    span,
+                });
+            }
+            info.use_count += 1;
+            info.last_use_span = Some(span);
+        }
+        Ok(())
+    }
+
+    /// Check that all linear variables in scope have been used exactly once,
+    /// and affine variables at most once. Call at function/scope exit.
+    pub fn check_linear_scope_exit(&self) -> Vec<TypeError> {
+        let mut errors = Vec::new();
+        for (name, info) in &self.linear_tracking {
+            match info.linearity {
+                super::types::LinearityKind::Linear => {
+                    if info.use_count == 0 {
+                        errors.push(TypeError {
+                            message: format!(
+                                "linear value `{}` must be used exactly once, but was never used",
+                                name
+                            ),
+                            span: info.def_span,
+                        });
+                    }
+                    // use_count > 1 is already caught by track_linear_use
+                }
+                super::types::LinearityKind::Affine => {
+                    // Affine values can be dropped (use_count == 0 is OK)
+                    // use_count > 1 is already caught by track_linear_use
+                }
+                super::types::LinearityKind::Regular => {
+                    // No restrictions
+                }
+            }
+        }
+        errors
     }
 
     /// Register built-in method signatures for Vec, Map, Str, etc.
@@ -4025,6 +4120,14 @@ impl InferenceEngine {
                 match op {
                     // Arithmetic operators
                     BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
+                        // String repetition: Str * Int -> Str
+                        if *op == BinOp::Mul {
+                            let left_resolved = left_ty.apply(self.unifier.substitution());
+                            let right_resolved = right_ty.apply(self.unifier.substitution());
+                            if left_resolved == Ty::Str && right_resolved == Ty::Int {
+                                return Ok(Ty::Str);
+                            }
+                        }
                         self.unifier.unify(&left_ty, &right_ty, expr.span)?;
                         Ok(left_ty)
                     }
@@ -5115,12 +5218,16 @@ impl InferenceEngine {
                     "f64" => Ok(Ty::F64),
                     "Bool" => Ok(Ty::Bool),
                     "Char" => Ok(Ty::Char),
-                    "Str" => Ok(Ty::Str),
+                    "Str" | "String" => Ok(Ty::Str),
+                    "Unit" => Ok(Ty::Unit),
                     "Json" => Ok(Ty::Json),
                     _ => Ok(Ty::Named(TypeId::new(name), args)),
                 }
             }
             AstTypeKind::Tuple(elems) => {
+                if elems.is_empty() {
+                    return Ok(Ty::Unit);
+                }
                 let tys: Vec<Ty> = elems
                     .iter()
                     .map(|t| self.ast_type_to_ty(t))

@@ -3,7 +3,7 @@
 //! This module provides an interpreter that can execute MIR programs
 //! for testing and validation purposes.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock, Mutex as StdMutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH, Duration};
 use std::thread;
@@ -260,10 +260,70 @@ impl std::fmt::Display for Value {
     }
 }
 
+/// Structured runtime error kinds for the interpreter.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RuntimeError {
+    /// Array/string index out of bounds
+    IndexOutOfBounds { index: usize, len: usize },
+    /// Attempted to use memory after it was freed
+    UseAfterFree { id: u64 },
+    /// Null pointer dereference
+    NullPointer,
+    /// Missing capability for FFI operation
+    CapabilityDenied { capability: String, operation: String },
+    /// Generic error with message
+    Other(String),
+}
+
+impl std::fmt::Display for RuntimeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RuntimeError::IndexOutOfBounds { index, len } => {
+                write!(f, "index {} out of bounds for length {}", index, len)
+            }
+            RuntimeError::UseAfterFree { id } => {
+                write!(f, "use-after-free: allocation {} has been freed", id)
+            }
+            RuntimeError::NullPointer => write!(f, "null pointer dereference"),
+            RuntimeError::CapabilityDenied { capability, operation } => {
+                write!(f, "capability '{}' required for operation '{}'", capability, operation)
+            }
+            RuntimeError::Other(msg) => write!(f, "{}", msg),
+        }
+    }
+}
+
 /// Interpreter error.
 #[derive(Debug, Clone)]
 pub struct InterpError {
     pub message: String,
+}
+
+impl InterpError {
+    /// Create an InterpError from a RuntimeError.
+    pub fn from_runtime(err: RuntimeError) -> Self {
+        Self {
+            message: err.to_string(),
+        }
+    }
+
+    /// Create an InterpError for an index out of bounds.
+    pub fn index_out_of_bounds(index: usize, len: usize) -> Self {
+        Self::from_runtime(RuntimeError::IndexOutOfBounds { index, len })
+    }
+
+    /// Create an InterpError for use-after-free.
+    pub fn use_after_free(id: u64) -> Self {
+        Self::from_runtime(RuntimeError::UseAfterFree { id })
+    }
+
+    /// Create an InterpError for a missing capability.
+    pub fn capability_denied(capability: &str, operation: &str) -> Self {
+        Self::from_runtime(RuntimeError::CapabilityDenied {
+            capability: capability.to_string(),
+            operation: operation.to_string(),
+        })
+    }
 }
 
 impl std::fmt::Display for InterpError {
@@ -346,6 +406,10 @@ pub struct Interpreter {
     next_task_id: u64,
     /// Thread-safe environment variable overlay. Checked before std::env::var().
     env_vars: Arc<RwLock<HashMap<String, String>>>,
+    /// Granted capabilities for FFI operations
+    capabilities: HashSet<String>,
+    /// Memory arena for safe pointer tracking
+    memory_arena: crate::ffi::MemoryArena,
 }
 
 impl Interpreter {
@@ -376,6 +440,8 @@ impl Interpreter {
             spawned_tasks: Arc::new(StdMutex::new(std::collections::HashMap::new())),
             next_task_id: 0,
             env_vars: Arc::new(RwLock::new(HashMap::new())),
+            capabilities: HashSet::new(),
+            memory_arena: crate::ffi::MemoryArena::new(),
         })
     }
 
@@ -390,6 +456,25 @@ impl Interpreter {
         if let Ok(mut env) = self.env_vars.write() {
             env.insert(key.to_string(), value.to_string());
         }
+    }
+
+    /// Grant a capability to this interpreter.
+    pub fn grant_capability(&mut self, capability: &str) {
+        self.capabilities.insert(capability.to_string());
+    }
+
+    /// Check if a capability is granted, returning an error if not.
+    pub fn require_capability(&self, capability: &str, operation: &str) -> Result<(), InterpError> {
+        if self.capabilities.contains(capability) || self.capabilities.contains("all") {
+            Ok(())
+        } else {
+            Err(InterpError::capability_denied(capability, operation))
+        }
+    }
+
+    /// Check if a capability is granted.
+    pub fn has_capability(&self, capability: &str) -> bool {
+        self.capabilities.contains(capability) || self.capabilities.contains("all")
     }
 
     /// Create a minimal interpreter for running spawned tasks.
@@ -421,6 +506,8 @@ impl Interpreter {
             spawned_tasks: Arc::new(StdMutex::new(std::collections::HashMap::new())),
             next_task_id: 0,
             env_vars: Arc::new(RwLock::new(HashMap::new())),
+            capabilities: HashSet::new(),
+            memory_arena: crate::ffi::MemoryArena::new(),
         })
     }
 
@@ -470,6 +557,21 @@ impl Interpreter {
 
     /// Call a function with the given arguments (internal helper for builtins)
     fn call_function_internal(&mut self, func: &Function, args: Vec<Value>) -> Result<Value, InterpError> {
+        self.call_function_internal_with_copyback(func, args, &[])
+    }
+
+    /// Call a function with copy-back semantics for array arguments.
+    /// After the callee returns, modified array parameter values are copied back
+    /// to the caller's corresponding locals, simulating pass-by-reference for arrays.
+    fn call_function_internal_with_copyback(
+        &mut self,
+        func: &Function,
+        args: Vec<Value>,
+        array_copyback: &[(Local, usize)],
+    ) -> Result<Value, InterpError> {
+        // Collect callee parameter locals for copy-back lookup
+        let param_locals: Vec<Local> = func.params.iter().map(|(local, _ty)| *local).collect();
+
         // Create frame for the function
         let mut frame = Frame::new(func.name.clone(), func.entry_block);
 
@@ -551,7 +653,34 @@ impl Interpreter {
             }
         }
 
-        self.call_stack.pop();
+        // Copy-back: before popping callee frame, copy modified arrays back to caller
+        if !array_copyback.is_empty() {
+            let mut copyback_values: Vec<(Local, Value)> = Vec::new();
+            {
+                let callee_frame = self.call_stack.last().unwrap();
+                for &(caller_local, param_idx) in array_copyback {
+                    if param_idx < param_locals.len() {
+                        let callee_local = param_locals[param_idx];
+                        if let Some(val) = callee_frame.locals.get(&callee_local) {
+                            if matches!(val, Value::Array(_)) {
+                                copyback_values.push((caller_local, val.clone()));
+                            }
+                        }
+                    }
+                }
+            }
+
+            self.call_stack.pop();
+
+            // Write modified arrays back to caller's frame
+            if let Some(caller_frame) = self.call_stack.last_mut() {
+                for (caller_local, val) in copyback_values {
+                    caller_frame.locals.insert(caller_local, val);
+                }
+            }
+        } else {
+            self.call_stack.pop();
+        }
 
         Ok(result)
     }
@@ -842,6 +971,33 @@ impl Interpreter {
                         let frame = self.current_frame_mut()?;
                         frame.locals.insert(*local, value);
                     }
+                    StatementKind::IndexAssign(local, index_op, value_op) => {
+                        let index = self.eval_operand(index_op)?;
+                        let value = self.eval_operand(value_op)?;
+                        let idx = match &index {
+                            Value::Int(n) => *n as usize,
+                            _ => return Err(InterpError {
+                                message: "index must be integer".to_string(),
+                            }),
+                        };
+                        let frame = self.current_frame_mut()?;
+                        if let Some(arr_val) = frame.locals.get_mut(local) {
+                            match arr_val {
+                                Value::Array(arr) => {
+                                    if idx < arr.len() {
+                                        arr[idx] = value;
+                                    } else {
+                                        return Err(InterpError {
+                                            message: format!("index {} out of bounds for array of length {}", idx, arr.len()),
+                                        });
+                                    }
+                                }
+                                _ => return Err(InterpError {
+                                    message: "index assignment on non-array".to_string(),
+                                }),
+                            }
+                        }
+                    }
                     StatementKind::Nop => {}
                 }
             }
@@ -922,12 +1078,22 @@ impl Interpreter {
                         .map(|a| self.eval_operand(a))
                         .collect::<Result<_, _>>()?;
 
+                    // Track which caller locals have array arguments (for copy-back)
+                    let mut array_copyback: Vec<(Local, usize)> = Vec::new();
+                    for (i, arg) in args.iter().enumerate() {
+                        if let Operand::Local(local) = arg {
+                            if matches!(&arg_vals[i], Value::Array(_)) {
+                                array_copyback.push((*local, i));
+                            }
+                        }
+                    }
+
                     // Handle built-in functions
                     let result = if let Some(builtin_result) = self.call_builtin(&fn_name, &arg_vals)? {
                         builtin_result
                     } else if let Some(callee) = self.program.functions.get(&fn_name).cloned() {
-                        // Regular function call - use call_function_internal for contract checking
-                        self.call_function_internal(&callee, arg_vals)?
+                        // Regular function call with copy-back for arrays
+                        self.call_function_internal_with_copyback(&callee, arg_vals, &array_copyback)?
                     } else {
                         return Err(InterpError {
                             message: format!("undefined function: {}", fn_name),
@@ -1172,6 +1338,33 @@ impl Interpreter {
                     other => format!("{}", other), // fallback to Display
                 };
                 Ok(Some(Value::Str(s)))
+            }
+
+            // ===== Math builtins =====
+            "abs" => {
+                validate_args!(args, 1, "abs");
+                match &args[0] {
+                    Value::Int(n) => Ok(Some(Value::Int(n.abs()))),
+                    Value::Float(n) => Ok(Some(Value::Float(n.abs()))),
+                    _ => Err(InterpError { message: "abs: expected numeric argument".to_string() })
+                }
+            }
+
+            // ===== len (alias for vec_len) =====
+            "len" => {
+                validate_args!(args, 1, "len");
+                match &args[0] {
+                    Value::Array(arr) => Ok(Some(Value::Int(arr.len() as i64))),
+                    Value::Str(s) => Ok(Some(Value::Int(s.len() as i64))),
+                    Value::Ref(inner) => {
+                        match inner.as_ref() {
+                            Value::Array(arr) => Ok(Some(Value::Int(arr.len() as i64))),
+                            Value::Str(s) => Ok(Some(Value::Int(s.len() as i64))),
+                            _ => Err(InterpError { message: "len: expected array or string".to_string() })
+                        }
+                    }
+                    _ => Err(InterpError { message: "len: expected array or string".to_string() })
+                }
             }
 
             // ===== Vec operations =====
@@ -2183,6 +2376,7 @@ impl Interpreter {
             // ===== File I/O =====
             "file_read" => {
                 validate_args!(args, 1, "file_read");
+                self.require_capability("read", "file_read")?;
                 // file_read(path: Str) -> Result[Str, Str]
                 let path = match &args[0] {
                     Value::Str(s) => s.clone(),
@@ -2203,6 +2397,7 @@ impl Interpreter {
             }
             "file_write" => {
                 validate_args!(args, 2, "file_write");
+                self.require_capability("write", "file_write")?;
                 // file_write(path: Str, content: Str) -> Result[(), Str]
                 let path = match &args[0] {
                     Value::Str(s) => s.clone(),
@@ -3824,6 +4019,7 @@ impl Interpreter {
             // ===== HTTP operations =====
             "http_get" => {
                 validate_args!(args, 1, "http_get");
+                self.require_capability("network", "http_get")?;
                 // http_get(url: Str) -> Result[(Int, Str, {Str: Str}), Str]
                 let url = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "http_get: url must be Str".to_string() }) };
                 match reqwest::blocking::get(&url) {
@@ -4405,6 +4601,7 @@ impl Interpreter {
             // ===== TCP/UDP Socket builtins =====
             "tcp_connect" => {
                 validate_args!(args, 2, "tcp_connect");
+                self.require_capability("network", "tcp_connect")?;
                 // tcp_connect(host: Str, port: Int) -> Result[TcpStream, Str]
                 let host = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "tcp_connect: host must be Str".to_string() }) };
                 let port = match &args[1] { Value::Int(n) => *n as u16, _ => return Err(InterpError { message: "tcp_connect: port must be Int".to_string() }) };
@@ -4627,6 +4824,7 @@ impl Interpreter {
             }
             "tcp_listen" => {
                 validate_args!(args, 2, "tcp_listen");
+                self.require_capability("network", "tcp_listen")?;
                 // tcp_listen(host: Str, port: Int) -> Result[TcpListener, Str]
                 let host = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "tcp_listen: host must be Str".to_string() }) };
                 let port = match &args[1] { Value::Int(n) => *n as u16, _ => return Err(InterpError { message: "tcp_listen: port must be Int".to_string() }) };
@@ -6678,14 +6876,15 @@ impl Interpreter {
                 };
 
                 match base_val {
-                    Value::Array(vals) => vals.get(index).cloned().ok_or_else(|| InterpError {
-                        message: format!("array index {} out of bounds", index),
-                    }),
-                    Value::Str(s) => s.chars().nth(index).map(Value::Char).ok_or_else(|| {
-                        InterpError {
-                            message: format!("string index {} out of bounds", index),
-                        }
-                    }),
+                    Value::Array(ref vals) => {
+                        let len = vals.len();
+                        vals.get(index).cloned().ok_or_else(|| InterpError::index_out_of_bounds(index, len))
+                    }
+                    Value::Str(ref s) => {
+                        let len = s.chars().count();
+                        s.chars().nth(index).map(Value::Char)
+                            .ok_or_else(|| InterpError::index_out_of_bounds(index, len))
+                    }
                     _ => Err(InterpError {
                         message: "index access on non-indexable".to_string(),
                     }),
@@ -6810,6 +7009,11 @@ impl Interpreter {
                 } else {
                     Ok(Value::Int(a % b))
                 }
+            }
+
+            // String repetition: Str * Int -> Str
+            (BinOp::Mul, Value::Str(s), Value::Int(n)) => {
+                Ok(Value::Str(s.repeat(*n as usize)))
             }
 
             // Float arithmetic
