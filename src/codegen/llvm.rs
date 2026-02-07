@@ -1493,7 +1493,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
                 self.builder.build_switch(val, default_bb, &cases)
                     .map_err(|e| CodegenError { message: format!("switch failed: {:?}", e) })?;
             }
-            Terminator::Call { func, args, dest, next } => {
+            Terminator::Call { func, args, arg_pass_modes: _, dest, next } => {
                 // Check if this is a builtin function that should go to the runtime
                 if self.is_builtin(func) {
                     return self.compile_builtin_call(func, args, dest, blocks, next);
@@ -1528,7 +1528,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
                         .map_err(|e| CodegenError { message: format!("branch failed: {:?}", e) })?;
                 }
             }
-            Terminator::CallIndirect { callee, args, dest, next } => {
+            Terminator::CallIndirect { callee, args, arg_pass_modes: _, dest, next } => {
                 let i8_ptr_type = self.context.i8_type().ptr_type(inkwell::AddressSpace::default());
                 let i64_type = self.context.i64_type();
 

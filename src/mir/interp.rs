@@ -334,6 +334,17 @@ impl std::fmt::Display for InterpError {
 
 impl std::error::Error for InterpError {}
 
+/// A reference binding: points to a local in another (or the same) frame.
+#[derive(Debug, Clone)]
+struct RefBinding {
+    /// Index into call_stack where the owning frame lives
+    frame_index: usize,
+    /// Local variable in the owning frame
+    local: Local,
+    /// Whether this is a mutable reference
+    mutable: bool,
+}
+
 /// Stack frame for function calls.
 #[derive(Debug)]
 struct Frame {
@@ -341,6 +352,8 @@ struct Frame {
     #[allow(dead_code)]
     function: String,
     locals: HashMap<Local, Value>,
+    /// Reference bindings: local -> reference to another frame's local
+    ref_bindings: HashMap<Local, RefBinding>,
     current_block: BlockId,
     /// Result value for postcondition checking (the 'result' keyword)
     contract_result: Option<Value>,
@@ -351,6 +364,7 @@ impl Frame {
         Self {
             function,
             locals: HashMap::new(),
+            ref_bindings: HashMap::new(),
             current_block: entry,
             contract_result: None,
         }
@@ -557,27 +571,30 @@ impl Interpreter {
 
     /// Call a function with the given arguments (internal helper for builtins)
     fn call_function_internal(&mut self, func: &Function, args: Vec<Value>) -> Result<Value, InterpError> {
-        self.call_function_internal_with_copyback(func, args, &[])
+        self.call_function_with_refs(func, args, vec![])
     }
 
-    /// Call a function with copy-back semantics for array arguments.
-    /// After the callee returns, modified array parameter values are copied back
-    /// to the caller's corresponding locals, simulating pass-by-reference for arrays.
-    fn call_function_internal_with_copyback(
+    /// Call a function with reference bindings for ref/ref mut parameters.
+    /// For ref params, a RefBinding is created instead of copying the value.
+    fn call_function_with_refs(
         &mut self,
         func: &Function,
         args: Vec<Value>,
-        array_copyback: &[(Local, usize)],
+        ref_bindings: Vec<Option<RefBinding>>,
     ) -> Result<Value, InterpError> {
-        // Collect callee parameter locals for copy-back lookup
-        let param_locals: Vec<Local> = func.params.iter().map(|(local, _ty)| *local).collect();
-
-        // Create frame for the function
         let mut frame = Frame::new(func.name.clone(), func.entry_block);
 
         // Initialize parameters
-        for ((local, _ty), value) in func.params.iter().zip(args.iter()) {
-            frame.locals.insert(*local, value.clone());
+        for (i, ((local, _ty), value)) in func.params.iter().zip(args.iter()).enumerate() {
+            if let Some(Some(rb)) = ref_bindings.get(i) {
+                // This param is a reference - don't copy the value, just set up the binding
+                frame.ref_bindings.insert(*local, rb.clone());
+                // Also store the current value in locals so reads work before any writes
+                // (but actual reads will go through ref_bindings first)
+            } else {
+                // Owned parameter - copy value as before
+                frame.locals.insert(*local, value.clone());
+            }
         }
 
         self.call_stack.push(frame);
@@ -653,37 +670,10 @@ impl Interpreter {
             }
         }
 
-        // Copy-back: before popping callee frame, copy modified arrays back to caller
-        if !array_copyback.is_empty() {
-            let mut copyback_values: Vec<(Local, Value)> = Vec::new();
-            {
-                let callee_frame = self.call_stack.last().unwrap();
-                for &(caller_local, param_idx) in array_copyback {
-                    if param_idx < param_locals.len() {
-                        let callee_local = param_locals[param_idx];
-                        if let Some(val) = callee_frame.locals.get(&callee_local) {
-                            if matches!(val, Value::Array(_)) {
-                                copyback_values.push((caller_local, val.clone()));
-                            }
-                        }
-                    }
-                }
-            }
-
-            self.call_stack.pop();
-
-            // Write modified arrays back to caller's frame
-            if let Some(caller_frame) = self.call_stack.last_mut() {
-                for (caller_local, val) in copyback_values {
-                    caller_frame.locals.insert(caller_local, val);
-                }
-            }
-        } else {
-            self.call_stack.pop();
-        }
-
+        self.call_stack.pop();
         Ok(result)
     }
+
 
     /// Evaluate an AST expression for contract checking
     fn eval_contract_expr(&mut self, expr: &crate::parser::Expr) -> Result<Value, InterpError> {
@@ -968,8 +958,23 @@ impl Interpreter {
                 match &stmt.kind {
                     StatementKind::Assign(local, rvalue) => {
                         let value = self.eval_rvalue(rvalue, func)?;
-                        let frame = self.current_frame_mut()?;
-                        frame.locals.insert(*local, value);
+                        // Check if this local is a ref mut binding
+                        let ref_binding = self.current_frame()?.ref_bindings.get(local).cloned();
+                        if let Some(rb) = ref_binding {
+                            if rb.mutable {
+                                // Write through to the target frame
+                                if let Some(target_frame) = self.call_stack.get_mut(rb.frame_index) {
+                                    target_frame.locals.insert(rb.local, value);
+                                }
+                            } else {
+                                return Err(InterpError {
+                                    message: "cannot assign through immutable reference".to_string(),
+                                });
+                            }
+                        } else {
+                            let frame = self.current_frame_mut()?;
+                            frame.locals.insert(*local, value);
+                        }
                     }
                     StatementKind::IndexAssign(local, index_op, value_op) => {
                         let index = self.eval_operand(index_op)?;
@@ -980,21 +985,34 @@ impl Interpreter {
                                 message: "index must be integer".to_string(),
                             }),
                         };
-                        let frame = self.current_frame_mut()?;
-                        if let Some(arr_val) = frame.locals.get_mut(local) {
-                            match arr_val {
-                                Value::Array(arr) => {
-                                    if idx < arr.len() {
-                                        arr[idx] = value;
-                                    } else {
-                                        return Err(InterpError {
-                                            message: format!("index {} out of bounds for array of length {}", idx, arr.len()),
-                                        });
+                        // Resolve through ref_bindings
+                        let ref_binding = self.current_frame()?.ref_bindings.get(local).cloned();
+                        let (target_frame_idx, target_local) = if let Some(rb) = ref_binding {
+                            if !rb.mutable {
+                                return Err(InterpError {
+                                    message: "cannot index-assign through immutable reference".to_string(),
+                                });
+                            }
+                            (rb.frame_index, rb.local)
+                        } else {
+                            (self.call_stack.len() - 1, *local)
+                        };
+                        if let Some(target_frame) = self.call_stack.get_mut(target_frame_idx) {
+                            if let Some(arr_val) = target_frame.locals.get_mut(&target_local) {
+                                match arr_val {
+                                    Value::Array(arr) => {
+                                        if idx < arr.len() {
+                                            arr[idx] = value;
+                                        } else {
+                                            return Err(InterpError {
+                                                message: format!("index {} out of bounds for array of length {}", idx, arr.len()),
+                                            });
+                                        }
                                     }
+                                    _ => return Err(InterpError {
+                                        message: "index assignment on non-array".to_string(),
+                                    }),
                                 }
-                                _ => return Err(InterpError {
-                                    message: "index assignment on non-array".to_string(),
-                                }),
                             }
                         }
                     }
@@ -1069,6 +1087,7 @@ impl Interpreter {
                 Terminator::Call {
                     func: fn_name,
                     args,
+                    arg_pass_modes,
                     dest,
                     next,
                 } => {
@@ -1078,12 +1097,46 @@ impl Interpreter {
                         .map(|a| self.eval_operand(a))
                         .collect::<Result<_, _>>()?;
 
-                    // Track which caller locals have array arguments (for copy-back)
-                    let mut array_copyback: Vec<(Local, usize)> = Vec::new();
-                    for (i, arg) in args.iter().enumerate() {
-                        if let Operand::Local(local) = arg {
-                            if matches!(&arg_vals[i], Value::Array(_)) {
-                                array_copyback.push((*local, i));
+                    // Determine pass modes: use arg_pass_modes from the call site,
+                    // falling back to the callee's param_pass_modes if available
+                    let callee_fn = self.program.functions.get(&fn_name).cloned();
+                    let effective_modes: Vec<super::mir::PassMode> = if !arg_pass_modes.is_empty() {
+                        arg_pass_modes.clone()
+                    } else if let Some(ref cf) = callee_fn {
+                        cf.param_pass_modes.clone()
+                    } else {
+                        vec![]
+                    };
+
+                    // Build ref_bindings for ref/ref mut parameters
+                    let has_refs = effective_modes.iter().any(|m| *m != super::mir::PassMode::Owned);
+                    let caller_frame_idx = self.call_stack.len() - 1;
+
+                    let mut ref_binding_list: Vec<Option<RefBinding>> = Vec::new();
+                    if has_refs {
+                        for (i, arg) in args.iter().enumerate() {
+                            let mode = effective_modes.get(i).copied().unwrap_or(super::mir::PassMode::Owned);
+                            if mode == super::mir::PassMode::Ref || mode == super::mir::PassMode::RefMut {
+                                // Get the caller local for this argument
+                                if let Operand::Local(caller_local) | Operand::Copy(caller_local) | Operand::Move(caller_local) = arg {
+                                    // Resolve transitive refs: if caller_local is itself a ref binding, follow it
+                                    let caller_frame = &self.call_stack[caller_frame_idx];
+                                    let (ultimate_frame_idx, ultimate_local) = if let Some(existing_rb) = caller_frame.ref_bindings.get(caller_local) {
+                                        (existing_rb.frame_index, existing_rb.local)
+                                    } else {
+                                        (caller_frame_idx, *caller_local)
+                                    };
+                                    ref_binding_list.push(Some(RefBinding {
+                                        frame_index: ultimate_frame_idx,
+                                        local: ultimate_local,
+                                        mutable: mode == super::mir::PassMode::RefMut,
+                                    }));
+                                } else {
+                                    // Constant or other non-local operand - can't create ref binding
+                                    ref_binding_list.push(None);
+                                }
+                            } else {
+                                ref_binding_list.push(None);
                             }
                         }
                     }
@@ -1091,9 +1144,8 @@ impl Interpreter {
                     // Handle built-in functions
                     let result = if let Some(builtin_result) = self.call_builtin(&fn_name, &arg_vals)? {
                         builtin_result
-                    } else if let Some(callee) = self.program.functions.get(&fn_name).cloned() {
-                        // Regular function call with copy-back for arrays
-                        self.call_function_internal_with_copyback(&callee, arg_vals, &array_copyback)?
+                    } else if let Some(callee) = callee_fn {
+                        self.call_function_with_refs(&callee, arg_vals, ref_binding_list)?
                     } else {
                         return Err(InterpError {
                             message: format!("undefined function: {}", fn_name),
@@ -1111,6 +1163,7 @@ impl Interpreter {
                 Terminator::CallIndirect {
                     callee,
                     args,
+                    arg_pass_modes: _,
                     dest,
                     next,
                 } => {
@@ -6915,6 +6968,20 @@ impl Interpreter {
 
             Operand::Local(local) | Operand::Copy(local) | Operand::Move(local) => {
                 let frame = self.current_frame()?;
+                // Check ref_bindings first
+                if let Some(ref_binding) = frame.ref_bindings.get(local) {
+                    let target_frame = self.call_stack.get(ref_binding.frame_index)
+                        .ok_or_else(|| InterpError {
+                            message: format!("ref binding points to invalid frame {}", ref_binding.frame_index),
+                        })?;
+                    return target_frame
+                        .locals
+                        .get(&ref_binding.local)
+                        .cloned()
+                        .ok_or_else(|| InterpError {
+                            message: format!("ref binding points to undefined local: {}", ref_binding.local),
+                        });
+                }
                 frame
                     .locals
                     .get(local)

@@ -16,7 +16,7 @@ f get_cell_wrap(grid: [Int], row: Int, col: Int, size: Int) -> Int
     grid[r * size + c]
 
 # Set cell state
-f set_cell(grid: [Int], row: Int, col: Int, size: Int, value: Int) -> Unit
+f set_cell(ref mut grid: [Int], row: Int, col: Int, size: Int, value: Int) -> Unit
     grid[row * size + col] := value
 
 # Count live neighbors (with wrapping)
@@ -33,7 +33,7 @@ f count_neighbors(grid: [Int], row: Int, col: Int, size: Int) -> Int
     count
 
 # Compute next generation
-f next_generation(current: [Int], next: [Int], size: Int) -> Unit
+f next_generation(current: [Int], ref mut next: [Int], size: Int) -> Unit
     r := 0
     wh r < size
         c := 0
@@ -44,21 +44,21 @@ f next_generation(current: [Int], next: [Int], size: Int) -> Unit
             if alive then
                 # Live cell survives with 2-3 neighbors
                 if neighbors == 2 || neighbors == 3 then
-                    set_cell(next, r, c, size, 1)
+                    set_cell(ref mut next, r, c, size, 1)
                 else
-                    set_cell(next, r, c, size, 0)
+                    set_cell(ref mut next, r, c, size, 0)
             else
                 # Dead cell becomes alive with exactly 3 neighbors
                 if neighbors == 3 then
-                    set_cell(next, r, c, size, 1)
+                    set_cell(ref mut next, r, c, size, 1)
                 else
-                    set_cell(next, r, c, size, 0)
+                    set_cell(ref mut next, r, c, size, 0)
 
             c := c + 1
         r := r + 1
 
 # Copy grid
-f copy_grid(src: [Int], dst: [Int], len: Int) -> Unit
+f copy_grid(src: [Int], ref mut dst: [Int], len: Int) -> Unit
     i := 0
     wh i < len
         dst[i] := src[i]
@@ -120,11 +120,11 @@ f main() -> Int
     #   .#.
     #   ..#
     #   ###
-    set_cell(grid1, 1, 2, size, 1)
-    set_cell(grid1, 2, 3, size, 1)
-    set_cell(grid1, 3, 1, size, 1)
-    set_cell(grid1, 3, 2, size, 1)
-    set_cell(grid1, 3, 3, size, 1)
+    set_cell(ref mut grid1, 1, 2, size, 1)
+    set_cell(ref mut grid1, 2, 3, size, 1)
+    set_cell(ref mut grid1, 3, 1, size, 1)
+    set_cell(ref mut grid1, 3, 2, size, 1)
+    set_cell(ref mut grid1, 3, 3, size, 1)
 
     print("Conway's Game of Life - Glider Pattern")
     print("")
@@ -137,8 +137,8 @@ f main() -> Int
         print("")
 
         # Compute next generation
-        next_generation(grid1, grid2, size)
-        copy_grid(grid2, grid1, size * size)
+        next_generation(grid1, ref mut grid2, size)
+        copy_grid(grid2, ref mut grid1, size * size)
 
         gen := gen + 1
 

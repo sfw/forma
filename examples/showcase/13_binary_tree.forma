@@ -5,7 +5,7 @@
 # -1 represents null/empty
 
 # Insert value into BST, returns root
-f bst_insert(values: [Int], left: [Int], right: [Int], root: Int, value: Int, free: Int) -> (Int, Int)
+f bst_insert(ref mut values: [Int], ref mut left: [Int], ref mut right: [Int], root: Int, value: Int, free: Int) -> (Int, Int)
     if root == 0 - 1 then
         # Empty tree, create root
         values[free] := value
@@ -101,31 +101,31 @@ f main() -> Int
     free := 0
 
     # Build tree
-    result := bst_insert(values, left, right, root, 50, free)
+    result := bst_insert(ref mut values, ref mut left, ref mut right, root, 50, free)
     root := result.0
     free := result.1
 
-    result := bst_insert(values, left, right, root, 30, free)
+    result := bst_insert(ref mut values, ref mut left, ref mut right, root, 30, free)
     root := result.0
     free := result.1
 
-    result := bst_insert(values, left, right, root, 70, free)
+    result := bst_insert(ref mut values, ref mut left, ref mut right, root, 70, free)
     root := result.0
     free := result.1
 
-    result := bst_insert(values, left, right, root, 20, free)
+    result := bst_insert(ref mut values, ref mut left, ref mut right, root, 20, free)
     root := result.0
     free := result.1
 
-    result := bst_insert(values, left, right, root, 40, free)
+    result := bst_insert(ref mut values, ref mut left, ref mut right, root, 40, free)
     root := result.0
     free := result.1
 
-    result := bst_insert(values, left, right, root, 60, free)
+    result := bst_insert(ref mut values, ref mut left, ref mut right, root, 60, free)
     root := result.0
     free := result.1
 
-    result := bst_insert(values, left, right, root, 80, free)
+    result := bst_insert(ref mut values, ref mut left, ref mut right, root, 80, free)
     root := result.0
     free := result.1
 

@@ -114,6 +114,11 @@ impl Formatter {
             if i > 0 {
                 self.write(", ");
             }
+            match param.pass_mode {
+                PassMode::Ref => self.write("ref "),
+                PassMode::RefMut => self.write("ref mut "),
+                PassMode::Owned => {}
+            }
             self.write(&param.name.name);
             self.write(": ");
             self.format_type(&param.ty);

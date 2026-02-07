@@ -11,8 +11,8 @@ use std::collections::HashMap;
 use crate::lexer::Span;
 use crate::parser::{
     BinOp, Block, Expr, ExprKind, FnBody, GenericParam, Generics, Item, ItemKind,
-    LiteralKind, Pattern, PatternKind, Stmt, StmtKind, Type as AstType, TypeKind as AstTypeKind,
-    UnaryOp, VariantKind, GenericArg,
+    LiteralKind, PassMode, Pattern, PatternKind, Stmt, StmtKind, Type as AstType,
+    TypeKind as AstTypeKind, UnaryOp, VariantKind, GenericArg,
 };
 
 use super::types::{Mutability, Substitution, Ty, TypeId, TypeScheme, TypeVar};
@@ -61,6 +61,8 @@ pub struct FunctionInfo {
     pub total_params: usize,
     /// Types of all parameters (for filling in defaults)
     pub param_types: Vec<Ty>,
+    /// Pass modes for each parameter (Owned, Ref, RefMut)
+    pub param_pass_modes: Vec<PassMode>,
 }
 
 #[derive(Debug, Clone)]
@@ -3859,12 +3861,14 @@ impl InferenceEngine {
                 // Track function info for default parameter handling
                 let required_params = f.params.iter().filter(|p| p.default.is_none()).count();
                 let total_params = f.params.len();
+                let param_pass_modes: Vec<PassMode> = f.params.iter().map(|p| p.pass_mode).collect();
                 self.env.insert_fn_info(
                     f.name.name.clone(),
                     FunctionInfo {
                         required_params,
                         total_params,
                         param_types,
+                        param_pass_modes,
                     },
                 );
 
@@ -4206,6 +4210,102 @@ impl InferenceEngine {
                                 ),
                                 expr.span,
                             ));
+                        }
+
+                        // Validate pass modes match between call site and declaration
+                        let param_modes = &fn_info.param_pass_modes;
+                        for (i, arg) in args.iter().enumerate().take(provided) {
+                            if i < param_modes.len() {
+                                let expected = param_modes[i];
+                                let actual = arg.pass_mode;
+                                match (expected, actual) {
+                                    (PassMode::Owned, PassMode::Owned) => {}
+                                    (PassMode::Ref, PassMode::Ref) => {
+                                        // Verify argument is a place expression
+                                        if !Self::is_place_expr(&arg.value) {
+                                            return Err(TypeError::new(
+                                                format!("'ref' argument must be a variable, field access, or index expression"),
+                                                arg.span,
+                                            ));
+                                        }
+                                    }
+                                    (PassMode::RefMut, PassMode::RefMut) => {
+                                        // Verify argument is a place expression
+                                        if !Self::is_place_expr(&arg.value) {
+                                            return Err(TypeError::new(
+                                                format!("'ref mut' argument must be a variable, field access, or index expression"),
+                                                arg.span,
+                                            ));
+                                        }
+                                    }
+                                    (PassMode::Ref, PassMode::Owned) | (PassMode::RefMut, PassMode::Owned) => {
+                                        let mode_str = if expected == PassMode::Ref { "ref" } else { "ref mut" };
+                                        return Err(TypeError::new(
+                                            format!(
+                                                "parameter '{}' of '{}' requires '{}' at call site",
+                                                if i < fn_info.total_params {
+                                                    format!("argument {}", i + 1)
+                                                } else {
+                                                    format!("argument {}", i + 1)
+                                                },
+                                                name.name, mode_str
+                                            ),
+                                            arg.span,
+                                        ));
+                                    }
+                                    (PassMode::Owned, PassMode::Ref) | (PassMode::Owned, PassMode::RefMut) => {
+                                        let mode_str = if actual == PassMode::Ref { "ref" } else { "ref mut" };
+                                        return Err(TypeError::new(
+                                            format!(
+                                                "unexpected '{}' on argument {} of '{}' (parameter is not a reference)",
+                                                mode_str, i + 1, name.name
+                                            ),
+                                            arg.span,
+                                        ));
+                                    }
+                                    (PassMode::Ref, PassMode::RefMut) => {
+                                        return Err(TypeError::new(
+                                            format!(
+                                                "parameter {} of '{}' expects 'ref' but got 'ref mut'",
+                                                i + 1, name.name
+                                            ),
+                                            arg.span,
+                                        ));
+                                    }
+                                    (PassMode::RefMut, PassMode::Ref) => {
+                                        return Err(TypeError::new(
+                                            format!(
+                                                "parameter {} of '{}' expects 'ref mut' but got 'ref'",
+                                                i + 1, name.name
+                                            ),
+                                            arg.span,
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+
+                        // Basic borrow check: reject same variable as ref mut in multiple args
+                        {
+                            let mut ref_mut_vars: Vec<(String, usize)> = Vec::new();
+                            for (i, arg) in args.iter().enumerate().take(provided) {
+                                if arg.pass_mode == PassMode::RefMut {
+                                    if let ExprKind::Ident(ident) = &arg.value.kind {
+                                        for &(ref prev_name, prev_idx) in &ref_mut_vars {
+                                            if *prev_name == ident.name {
+                                                return Err(TypeError::new(
+                                                    format!(
+                                                        "cannot pass '{}' as 'ref mut' to both argument {} and argument {} of '{}'",
+                                                        ident.name, prev_idx + 1, i + 1, name.name
+                                                    ),
+                                                    arg.span,
+                                                ));
+                                            }
+                                        }
+                                        ref_mut_vars.push((ident.name.clone(), i));
+                                    }
+                                }
+                            }
                         }
 
                         // Build a function type with all params (using defaults for missing ones)
@@ -5349,6 +5449,16 @@ impl InferenceEngine {
 
     pub fn get_symbol_location(&self, name: &str) -> Option<(Span, super::checker::DefinitionKind)> {
         self.symbol_locations.get(name).copied()
+    }
+
+    /// Check whether an expression is a "place" (lvalue) that can be passed by reference.
+    fn is_place_expr(expr: &Expr) -> bool {
+        match &expr.kind {
+            ExprKind::Ident(_) => true,
+            ExprKind::Field(_, _) => true,
+            ExprKind::Index(_, _) => true,
+            _ => false,
+        }
     }
 
     /// Find a similar variable name for typo suggestions.

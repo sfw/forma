@@ -102,6 +102,7 @@ pub enum TokenKind {
     Md,     // module
     Pub,    // public
     Mut,    // mutable
+    Ref,    // reference parameter
     Mv,     // move
     Un,     // unsafe
     Type,   // type alias
@@ -229,6 +230,7 @@ impl TokenKind {
             "md" => Some(TokenKind::Md),
             "pub" => Some(TokenKind::Pub),
             "mut" => Some(TokenKind::Mut),
+            "ref" => Some(TokenKind::Ref),
             "mv" => Some(TokenKind::Mv),
             "un" => Some(TokenKind::Un),
             "type" => Some(TokenKind::Type),
@@ -284,6 +286,7 @@ impl TokenKind {
                 | TokenKind::Md
                 | TokenKind::Pub
                 | TokenKind::Mut
+                | TokenKind::Ref
                 | TokenKind::Mv
                 | TokenKind::Un
                 | TokenKind::Type
@@ -340,6 +343,7 @@ impl fmt::Display for TokenKind {
             TokenKind::Md => write!(f, "md"),
             TokenKind::Pub => write!(f, "pub"),
             TokenKind::Mut => write!(f, "mut"),
+            TokenKind::Ref => write!(f, "ref"),
             TokenKind::Mv => write!(f, "mv"),
             TokenKind::Un => write!(f, "un"),
             TokenKind::Type => write!(f, "type"),

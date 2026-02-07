@@ -9,7 +9,7 @@ f get_cell(grid: [Int], row: Int, col: Int) -> Int
     grid[row * 9 + col]
 
 # Set value at (row, col)
-f set_cell(grid: [Int], row: Int, col: Int, value: Int) -> Unit
+f set_cell(ref mut grid: [Int], row: Int, col: Int, value: Int) -> Unit
     grid[row * 9 + col] := value
 
 # Check if placing value at (row, col) is valid
@@ -55,7 +55,7 @@ f find_empty(grid: [Int]) -> (Int, Int)
     (0 - 1, 0 - 1)
 
 # Solve sudoku using backtracking
-f solve(grid: [Int]) -> Bool
+f solve(ref mut grid: [Int]) -> Bool
     pos := find_empty(grid)
     row := pos.0
     col := pos.1
@@ -66,10 +66,10 @@ f solve(grid: [Int]) -> Bool
     value := 1
     wh value <= 9
         if is_valid(grid, row, col, value) then
-            set_cell(grid, row, col, value)
-            if solve(grid) then
+            set_cell(ref mut grid, row, col, value)
+            if solve(ref mut grid) then
                 return true
-            set_cell(grid, row, col, 0)  # Backtrack
+            set_cell(ref mut grid, row, col, 0)  # Backtrack
         value := value + 1
 
     false
@@ -116,7 +116,7 @@ f main() -> Int
     print("")
     print("Solving...")
 
-    if solve(grid) then
+    if solve(ref mut grid) then
         print("")
         print("Solution:")
         print("")

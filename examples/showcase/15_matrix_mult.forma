@@ -11,11 +11,11 @@ f mat_get(mat: [Int], row: Int, col: Int, cols: Int) -> Int
     mat[row * cols + col]
 
 # Set element at (row, col)
-f mat_set(mat: [Int], row: Int, col: Int, cols: Int, value: Int) -> Unit
+f mat_set(ref mut mat: [Int], row: Int, col: Int, cols: Int, value: Int) -> Unit
     mat[row * cols + col] := value
 
 # Multiply matrices A (m x n) and B (n x p), result in C (m x p)
-f mat_mult(a: [Int], b: [Int], c: [Int], m: Int, n: Int, p: Int) -> Unit
+f mat_mult(a: [Int], b: [Int], ref mut c: [Int], m: Int, n: Int, p: Int) -> Unit
     i := 0
     wh i < m
         j := 0
@@ -25,7 +25,7 @@ f mat_mult(a: [Int], b: [Int], c: [Int], m: Int, n: Int, p: Int) -> Unit
             wh k < n
                 sum := sum + mat_get(a, i, k, n) * mat_get(b, k, j, p)
                 k := k + 1
-            mat_set(c, i, j, p, sum)
+            mat_set(ref mut c, i, j, p, sum)
             j := j + 1
         i := i + 1
 
@@ -73,7 +73,7 @@ f main() -> Int
     mat_print(b1, 3, 2, "B")
     print("")
 
-    mat_mult(a1, b1, c1, 2, 3, 2)
+    mat_mult(a1, b1, ref mut c1, 2, 3, 2)
     mat_print(c1, 2, 2, "A * B")
 
     print("")
@@ -93,7 +93,7 @@ f main() -> Int
     mat_print(b2, 3, 3, "B")
     print("")
 
-    mat_mult(a2, b2, c2, 3, 3, 3)
+    mat_mult(a2, b2, ref mut c2, 3, 3, 3)
     mat_print(c2, 3, 3, "A * B")
 
     print("")
@@ -107,7 +107,7 @@ f main() -> Int
     identity := [1, 0, 0, 0, 1, 0, 0, 0, 1]  # 3x3 identity
     result := [0, 0, 0, 0, 0, 0, 0, 0, 0]
 
-    mat_mult(a2, identity, result, 3, 3, 3)
+    mat_mult(a2, identity, ref mut result, 3, 3, 3)
     mat_print(a2, 3, 3, "A")
     print("")
     mat_print(identity, 3, 3, "I")

@@ -76,6 +76,23 @@ pub struct MirContract {
     pub condition: Option<Box<crate::parser::Expr>>,
 }
 
+/// How a parameter is passed at the MIR level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PassMode {
+    /// Pass by value (default)
+    Owned,
+    /// Pass by shared reference
+    Ref,
+    /// Pass by mutable reference
+    RefMut,
+}
+
+impl Default for PassMode {
+    fn default() -> Self {
+        PassMode::Owned
+    }
+}
+
 /// A function in MIR.
 #[derive(Debug, Clone)]
 pub struct Function {
@@ -83,6 +100,8 @@ pub struct Function {
     pub params: Vec<(Local, Ty)>,
     /// Parameter names for contract evaluation (parallel to params)
     pub param_names: Vec<(String, Ty)>,
+    /// Pass modes for each parameter (parallel to params)
+    pub param_pass_modes: Vec<PassMode>,
     pub return_ty: Ty,
     pub locals: Vec<LocalDecl>,
     pub blocks: Vec<BasicBlock>,
@@ -99,6 +118,7 @@ impl Function {
             name,
             params,
             param_names: Vec::new(),
+            param_pass_modes: Vec::new(),
             return_ty,
             locals: Vec::new(),
             blocks: Vec::new(),
@@ -349,6 +369,7 @@ pub enum Terminator {
     Call {
         func: String,
         args: Vec<Operand>,
+        arg_pass_modes: Vec<PassMode>,
         dest: Option<Local>,
         next: BlockId,
     },
@@ -360,6 +381,7 @@ pub enum Terminator {
     CallIndirect {
         callee: Operand,
         args: Vec<Operand>,
+        arg_pass_modes: Vec<PassMode>,
         dest: Option<Local>,
         next: BlockId,
     },
@@ -566,6 +588,7 @@ impl fmt::Display for Terminator {
             Terminator::Call {
                 func,
                 args,
+                arg_pass_modes: _,
                 dest,
                 next,
             } => {
@@ -584,6 +607,7 @@ impl fmt::Display for Terminator {
             Terminator::CallIndirect {
                 callee,
                 args,
+                arg_pass_modes: _,
                 dest,
                 next,
             } => {

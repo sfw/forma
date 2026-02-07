@@ -21,7 +21,7 @@ f is_safe(queens: [Int], row: Int, col: Int) -> Bool
 
 # Solve N-Queens using backtracking
 # Returns number of solutions found
-f solve_nqueens_count(n: Int, row: Int, queens: [Int], count: Int) -> Int
+f solve_nqueens_count(n: Int, row: Int, ref mut queens: [Int], count: Int) -> Int
     if row == n then
         # Found a valid solution
         count + 1
@@ -32,14 +32,14 @@ f solve_nqueens_count(n: Int, row: Int, queens: [Int], count: Int) -> Int
             if is_safe(queens, row, col) then
                 # Place queen and recurse
                 queens[row] := col
-                result := solve_nqueens_count(n, row + 1, queens, result)
+                result := solve_nqueens_count(n, row + 1, ref mut queens, result)
             col := col + 1
         result
 
 # Count all solutions for N-Queens
 f nqueens_count(n: Int) -> Int
     queens := [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  # Max 15 queens
-    solve_nqueens_count(n, 0, queens, 0)
+    solve_nqueens_count(n, 0, ref mut queens, 0)
 
 # Print one solution
 f print_solution(queens: [Int], n: Int) -> Unit
@@ -57,7 +57,7 @@ f print_solution(queens: [Int], n: Int) -> Unit
         row := row + 1
 
 # Find and print first solution
-f solve_and_print(n: Int, row: Int, queens: [Int]) -> Bool
+f solve_and_print(n: Int, row: Int, ref mut queens: [Int]) -> Bool
     if row == n then
         print_solution(queens, n)
         true
@@ -66,7 +66,7 @@ f solve_and_print(n: Int, row: Int, queens: [Int]) -> Bool
         wh col < n
             if is_safe(queens, row, col) then
                 queens[row] := col
-                if solve_and_print(n, row + 1, queens) then
+                if solve_and_print(n, row + 1, ref mut queens) then
                     return true
             col := col + 1
         false
@@ -82,5 +82,5 @@ f main() -> Int
     print("")
     print("First 8-Queens solution:")
     queens := [0, 0, 0, 0, 0, 0, 0, 0]
-    result := solve_and_print(8, 0, queens)
+    result := solve_and_print(8, 0, ref mut queens)
     0

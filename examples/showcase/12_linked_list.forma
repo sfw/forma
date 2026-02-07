@@ -13,7 +13,7 @@ f list_new() -> Int
     0 - 1
 
 # Prepend value to front of list
-f list_prepend(values: [Int], next: [Int], head: Int, value: Int, free: Int) -> (Int, Int)
+f list_prepend(ref mut values: [Int], ref mut next: [Int], head: Int, value: Int, free: Int) -> (Int, Int)
     # Use free slot for new node
     values[free] := value
     next[free] := head
@@ -22,7 +22,7 @@ f list_prepend(values: [Int], next: [Int], head: Int, value: Int, free: Int) -> 
     (new_head, new_free)
 
 # Append value to end of list
-f list_append(values: [Int], next: [Int], head: Int, value: Int, free: Int) -> (Int, Int)
+f list_append(ref mut values: [Int], ref mut next: [Int], head: Int, value: Int, free: Int) -> (Int, Int)
     # Create new node
     values[free] := value
     next[free] := 0 - 1
@@ -72,7 +72,7 @@ f list_print(values: [Int], next: [Int], head: Int) -> Unit
     print(s)
 
 # Reverse list in place
-f list_reverse(next: [Int], head: Int) -> Int
+f list_reverse(ref mut next: [Int], head: Int) -> Int
     prev := 0 - 1
     current := head
     wh current != 0 - 1
@@ -92,23 +92,23 @@ f main() -> Int
     free := 0
 
     # Append 1, 2, 3, 4, 5
-    result := list_append(values, next, head, 1, free)
+    result := list_append(ref mut values, ref mut next, head, 1, free)
     head := result.0
     free := result.1
 
-    result := list_append(values, next, head, 2, free)
+    result := list_append(ref mut values, ref mut next, head, 2, free)
     head := result.0
     free := result.1
 
-    result := list_append(values, next, head, 3, free)
+    result := list_append(ref mut values, ref mut next, head, 3, free)
     head := result.0
     free := result.1
 
-    result := list_append(values, next, head, 4, free)
+    result := list_append(ref mut values, ref mut next, head, 4, free)
     head := result.0
     free := result.1
 
-    result := list_append(values, next, head, 5, free)
+    result := list_append(ref mut values, ref mut next, head, 5, free)
     head := result.0
     free := result.1
 
@@ -118,7 +118,7 @@ f main() -> Int
 
     print("")
     print("Prepending 0:")
-    result := list_prepend(values, next, head, 0, free)
+    result := list_prepend(ref mut values, ref mut next, head, 0, free)
     head := result.0
     free := result.1
     list_print(values, next, head)
@@ -129,7 +129,7 @@ f main() -> Int
 
     print("")
     print("Reversing list:")
-    head := list_reverse(next, head)
+    head := list_reverse(ref mut next, head)
     list_print(values, next, head)
 
     0

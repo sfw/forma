@@ -353,6 +353,7 @@ impl<'a> Parser<'a> {
                     name,
                     ty,
                     default: None,
+                    pass_mode: PassMode::Owned,
                     span: start.merge(self.previous_span()),
                 });
             }
@@ -376,9 +377,21 @@ impl<'a> Parser<'a> {
                 name,
                 ty,
                 default: None,
+                pass_mode: PassMode::Owned,
                 span: start.merge(self.previous_span()),
             });
         }
+
+        // Check for ref / ref mut pass mode
+        let pass_mode = if self.match_token(TokenKind::Ref) {
+            if self.match_token(TokenKind::Mut) {
+                PassMode::RefMut
+            } else {
+                PassMode::Ref
+            }
+        } else {
+            PassMode::Owned
+        };
 
         let name = self.parse_ident()?;
         self.expect(TokenKind::Colon)?;
@@ -393,6 +406,7 @@ impl<'a> Parser<'a> {
             name,
             ty,
             default,
+            pass_mode,
             span: start.merge(self.previous_span()),
         })
     }
@@ -1867,6 +1881,18 @@ impl<'a> Parser<'a> {
             loop {
                 let start = self.current_span();
 
+                // Check for ref / ref mut pass mode on arguments
+                let pass_mode = if self.check(TokenKind::Ref) {
+                    self.advance();
+                    if self.match_token(TokenKind::Mut) {
+                        PassMode::RefMut
+                    } else {
+                        PassMode::Ref
+                    }
+                } else {
+                    PassMode::Owned
+                };
+
                 // Check for named argument
                 let (name, value) = if self.check_ident() && self.peek_is(TokenKind::Colon) {
                     let name = self.parse_ident()?;
@@ -1880,6 +1906,7 @@ impl<'a> Parser<'a> {
                 args.push(Arg {
                     name,
                     value,
+                    pass_mode,
                     span: start.merge(self.previous_span()),
                 });
 
@@ -2290,7 +2317,7 @@ impl<'a> Parser<'a> {
                                 kind: ExprKind::Ident(Ident::new("str", span)),
                                 span,
                             }),
-                            vec![Arg { name: None, value: expr, span }],
+                            vec![Arg { name: None, value: expr, pass_mode: PassMode::Owned, span }],
                         ),
                         span,
                     };

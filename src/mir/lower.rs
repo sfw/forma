@@ -14,9 +14,18 @@ use crate::parser::{
 use crate::types::Ty;
 
 use super::mir::{
-    BinOp, BlockId, Constant, Function, Local, MirContract, Mutability, Operand, Program,
-    Rvalue, Statement, StatementKind, Terminator, UnOp,
+    BinOp, BlockId, Constant, Function, Local, MirContract, Mutability, Operand, PassMode,
+    Program, Rvalue, Statement, StatementKind, Terminator, UnOp,
 };
+
+/// Convert AST PassMode to MIR PassMode.
+fn lower_pass_mode(ast_mode: crate::parser::PassMode) -> PassMode {
+    match ast_mode {
+        crate::parser::PassMode::Owned => PassMode::Owned,
+        crate::parser::PassMode::Ref => PassMode::Ref,
+        crate::parser::PassMode::RefMut => PassMode::RefMut,
+    }
+}
 
 /// Error during lowering.
 #[derive(Debug, Clone)]
@@ -316,6 +325,7 @@ impl Lowerer {
             let local = mir_fn.add_local(ty.clone(), Some(param.name.name.clone()));
             mir_fn.params.push((local, ty.clone()));
             mir_fn.param_names.push((param.name.name.clone(), ty));
+            mir_fn.param_pass_modes.push(lower_pass_mode(param.pass_mode));
             self.vars.insert(param.name.name.clone(), local);
         }
 
@@ -690,9 +700,11 @@ impl Lowerer {
 
                 // Lower arguments
                 let mut mir_args = Vec::new();
+                let mut mir_arg_pass_modes: Vec<PassMode> = Vec::new();
                 for arg in args {
                     if let Some(op) = self.lower_expr(&arg.value) {
                         mir_args.push(op);
+                        mir_arg_pass_modes.push(lower_pass_mode(arg.pass_mode));
                     }
                 }
 
@@ -734,6 +746,7 @@ impl Lowerer {
                     self.terminate(Terminator::Call {
                         func,
                         args: mir_args,
+                        arg_pass_modes: mir_arg_pass_modes,
                         dest: Some(result),
                         next: next_block,
                     });
@@ -743,6 +756,7 @@ impl Lowerer {
                     self.terminate(Terminator::CallIndirect {
                         callee: callee_op,
                         args: mir_args,
+                        arg_pass_modes: mir_arg_pass_modes,
                         dest: Some(result),
                         next: next_block,
                     });
@@ -777,6 +791,7 @@ impl Lowerer {
                 self.terminate(Terminator::Call {
                     func: func_name,
                     args: mir_args,
+                    arg_pass_modes: vec![],
                     dest: Some(result),
                     next: next_block,
                 });
@@ -1135,6 +1150,7 @@ impl Lowerer {
                         self.terminate(Terminator::Call {
                             func: func_name.name.clone(),
                             args: vec![arg],
+                            arg_pass_modes: vec![],
                             dest: Some(result),
                             next: next_block,
                         });
@@ -1155,6 +1171,7 @@ impl Lowerer {
                             self.terminate(Terminator::Call {
                                 func: func_name.name.clone(),
                                 args,
+                                arg_pass_modes: vec![],
                                 dest: Some(result),
                                 next: next_block,
                             });
@@ -1492,6 +1509,7 @@ impl Lowerer {
                 self.terminate(Terminator::Call {
                     func: "array_repeat".to_string(),
                     args: vec![val, cnt],
+                    arg_pass_modes: vec![],
                     dest: Some(result),
                     next: next_block,
                 });
@@ -1509,6 +1527,7 @@ impl Lowerer {
                 self.terminate(Terminator::Call {
                     func: "map_new".to_string(),
                     args: vec![],
+                    arg_pass_modes: vec![],
                     dest: Some(result),
                     next: init_block,
                 });
@@ -1527,6 +1546,7 @@ impl Lowerer {
                     self.terminate(Terminator::Call {
                         func: "map_set".to_string(),
                         args: vec![Operand::Copy(result), key, val],
+                        arg_pass_modes: vec![],
                         dest: None,
                         next,
                     });
@@ -2260,6 +2280,7 @@ impl Lowerer {
         self.terminate(Terminator::Call {
             func: "vec_len".to_string(),
             args: vec![Operand::Copy(arr_local)],
+            arg_pass_modes: vec![],
             dest: Some(len_local),
             next: len_block,
         });

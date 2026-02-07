@@ -85,11 +85,29 @@ pub enum FnBody {
     Block(Block),
 }
 
+/// How a parameter is passed: by value (owned), by shared reference, or by mutable reference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PassMode {
+    /// Pass by value (default)
+    Owned,
+    /// Pass by shared reference (`ref`)
+    Ref,
+    /// Pass by mutable reference (`ref mut`)
+    RefMut,
+}
+
+impl Default for PassMode {
+    fn default() -> Self {
+        PassMode::Owned
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Param {
     pub name: Ident,
     pub ty: Type,
     pub default: Option<Expr>,
+    pub pass_mode: PassMode,
     pub span: Span,
 }
 
@@ -540,6 +558,7 @@ pub struct FieldInit {
 pub struct Arg {
     pub name: Option<Ident>,
     pub value: Expr,
+    pub pass_mode: PassMode,
     pub span: Span,
 }
 
