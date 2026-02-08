@@ -1,0 +1,184 @@
+# Sprint 45 - Long-tail builtin coverage wave 2
+# Tests deterministic, CI-safe builtins that were previously untested.
+
+f test_abs_float() -> Bool
+    abs_float(-3.14) > 3.13
+
+f test_tan() -> Bool
+    r := tan(0.0)
+    r > -0.01 && r < 0.01
+
+f test_char_to_str() -> Bool
+    s := char_to_str('A')
+    s == "A"
+
+f test_str_to_int_radix_hex() -> Bool
+    opt := str_to_int_radix("ff", 16)
+    m opt
+        Some(n) -> n == 255
+        None -> false
+
+f test_str_to_int_radix_bin() -> Bool
+    opt := str_to_int_radix("1010", 2)
+    m opt
+        Some(n) -> n == 10
+        None -> false
+
+f test_hex_encode_bytes() -> Bool
+    bytes := [72, 101, 108, 108, 111]
+    hex_str := hex_encode_bytes(bytes)
+    hex_str == "48656c6c6f"
+
+f test_hex_decode_bytes() -> Bool
+    decoded := hex_decode_bytes("48656c6c6f")
+    m decoded
+        Ok(b) -> vec_len(b) == 5
+        Err(_) -> false
+
+f test_random_bool() -> Bool
+    rb := random_bool()
+    rb == true || rb == false
+
+f test_random_int() -> Bool
+    ri := random_int(1, 10)
+    ri >= 1 && ri <= 10
+
+f test_random_choice() -> Bool
+    choices := ["a", "b", "c"]
+    rc := random_choice(choices)
+    rc == "a" || rc == "b" || rc == "c"
+
+f test_time_now_ms() -> Bool
+    ms := time_now_ms()
+    ms > 0
+
+f test_duration_seconds() -> Bool
+    dur := duration_seconds(5)
+    dur == 5
+
+f test_time_parse() -> Bool
+    tp := time_parse("2024-01-15 10:30:00 +0000", "%Y-%m-%d %H:%M:%S %z")
+    m tp
+        Ok(ts) -> ts > 0
+        Err(_) -> false
+
+f test_assert_builtin() -> Bool
+    assert(true)
+    true
+
+f test_eprintln() -> Bool
+    eprintln("test stderr output")
+    true
+
+f test_json_get_array() -> Bool
+    j := json_parse("{\"items\": [1, 2, 3]}")
+    m j
+        Ok(doc) ->
+            arr := json_get_array(doc, "items")
+            m arr
+                Some(a) -> vec_len(a) == 3
+                None -> false
+        Err(_) -> false
+
+f test_file_ops() -> Bool
+    tmp_base := "/tmp/forma_wave2_test"
+    dr := dir_create(tmp_base)
+    ok1 := m dr
+        Ok(_) -> true
+        Err(_) -> false
+
+    nested := tmp_base + "/a/b/c"
+    dr2 := dir_create_all(nested)
+    ok2 := m dr2
+        Ok(_) -> true
+        Err(_) -> false
+
+    test_file := tmp_base + "/test.txt"
+    fw := file_write(test_file, "hello wave2")
+    ok3 := m fw
+        Ok(_) -> true
+        Err(_) -> false
+
+    fs := file_size(test_file)
+    ok4 := m fs
+        Ok(sz) -> sz > 0
+        Err(_) -> false
+
+    copy_dest := tmp_base + "/test_copy.txt"
+    fc := file_copy(test_file, copy_dest)
+    ok5 := m fc
+        Ok(_) -> file_exists(copy_dest)
+        Err(_) -> false
+
+    move_dest := tmp_base + "/test_moved.txt"
+    fm := file_move(copy_dest, move_dest)
+    ok6 := m fm
+        Ok(_) -> file_exists(move_dest) && !file_exists(copy_dest)
+        Err(_) -> false
+
+    fr := file_remove(move_dest)
+    ok7 := m fr
+        Ok(_) -> !file_exists(move_dest)
+        Err(_) -> false
+
+    dl := dir_list(tmp_base)
+    ok8 := m dl
+        Ok(entries) -> vec_len(entries) >= 2
+        Err(_) -> false
+
+    pa := path_absolute(tmp_base)
+    ok9 := m pa
+        Ok(abs) -> str_len(abs) > 0
+        Err(_) -> false
+
+    # Clean up
+    file_remove(test_file)
+    dir_remove_all(tmp_base)
+    ok10 := !file_exists(tmp_base)
+
+    ok1 && ok2 && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10
+
+f test_env_ops() -> Bool
+    env_set("FORMA_TEST_WAVE2", "hello")
+    ev := env_get("FORMA_TEST_WAVE2")
+    ok1 := m ev
+        Some(v) -> v == "hello"
+        None -> false
+
+    env_remove("FORMA_TEST_WAVE2")
+    ev2 := env_get("FORMA_TEST_WAVE2")
+    ok2 := m ev2
+        Some(_) -> false
+        None -> true
+
+    # env_vars returns a map; just verify it does not crash
+    all_vars := env_vars()
+    ok3 := type_of(all_vars) == "Map"
+
+    ok1 && ok2 && ok3
+
+f main() -> Int
+    passed := 0
+    failed := 0
+
+    if test_abs_float() then passed := passed + 1 else failed := failed + 1
+    if test_tan() then passed := passed + 1 else failed := failed + 1
+    if test_char_to_str() then passed := passed + 1 else failed := failed + 1
+    if test_str_to_int_radix_hex() then passed := passed + 1 else failed := failed + 1
+    if test_str_to_int_radix_bin() then passed := passed + 1 else failed := failed + 1
+    if test_hex_encode_bytes() then passed := passed + 1 else failed := failed + 1
+    if test_hex_decode_bytes() then passed := passed + 1 else failed := failed + 1
+    if test_random_bool() then passed := passed + 1 else failed := failed + 1
+    if test_random_int() then passed := passed + 1 else failed := failed + 1
+    if test_random_choice() then passed := passed + 1 else failed := failed + 1
+    if test_time_now_ms() then passed := passed + 1 else failed := failed + 1
+    if test_duration_seconds() then passed := passed + 1 else failed := failed + 1
+    if test_time_parse() then passed := passed + 1 else failed := failed + 1
+    if test_assert_builtin() then passed := passed + 1 else failed := failed + 1
+    if test_eprintln() then passed := passed + 1 else failed := failed + 1
+    if test_json_get_array() then passed := passed + 1 else failed := failed + 1
+    if test_file_ops() then passed := passed + 1 else failed := failed + 1
+    if test_env_ops() then passed := passed + 1 else failed := failed + 1
+
+    print("Wave2 builtins: " + int_to_str(passed) + " passed, " + int_to_str(failed) + " failed")
+    if failed > 0 then 1 else 0

@@ -104,12 +104,12 @@ jobs:
     name: Builtin Coverage Audit
     runs-on: ubuntu-latest
     needs: test
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - name: Run coverage audit
-        run: bash scripts/builtin_coverage.sh | tee coverage-report.txt
+      - name: Run coverage audit (enforce 70% threshold)
+        run: bash scripts/builtin_coverage.sh --enforce 70 | tee coverage-report.txt
       - name: Upload coverage report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: builtin-coverage-report
