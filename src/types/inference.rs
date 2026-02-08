@@ -6581,7 +6581,12 @@ impl InferenceEngine {
         match &pattern.kind {
             PatternKind::Wildcard => Ok(()),
             PatternKind::Ident(ident, _mutable, subpattern) => {
-                env.insert(ident.name.clone(), TypeScheme::mono(ty.clone()));
+                // Don't bind names that are enum variant constructors (e.g., None, Ok, Err).
+                // These are constructor patterns, not variable bindings, and binding them
+                // would shadow the constructor in the arm body causing type conflicts.
+                if self.env.get_enum_for_variant(&ident.name).is_none() {
+                    env.insert(ident.name.clone(), TypeScheme::mono(ty.clone()));
+                }
                 if let Some(sub) = subpattern {
                     self.collect_pattern_bindings(sub, ty, env)?;
                 }

@@ -53,3 +53,28 @@ pub extern "C" fn forma_env_set(name: *const c_char, value: *const c_char) {
         std::env::set_var(&name_str, &val_str);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_args_count_positive() {
+        assert!(forma_args_count() > 0);
+    }
+
+    #[test]
+    fn test_args_get_out_of_bounds() {
+        assert!(forma_args_get(9999).is_null());
+    }
+
+    #[test]
+    fn test_args_get_negative() {
+        assert!(forma_args_get(-1).is_null());
+    }
+
+    #[test]
+    fn test_env_get_null_safety() {
+        assert!(forma_env_get(ptr::null()).is_null());
+    }
+}

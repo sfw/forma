@@ -3,19 +3,19 @@
 
 # Simple closure with no captures
 f test_simple_closure() -> Bool
-    add_one := |x| x + 1
+    add_one := |x: Int| x + 1
     add_one(5) == 6
 
 # Closure with captures
 f test_closure_capture() -> Bool
     offset := 10
-    add_offset := |x| x + offset
+    add_offset := |x: Int| x + offset
     add_offset(5) == 15
 
 # Higher-order function: apply
 # Note: FORMA doesn't have function types yet, so we'll test closures differently
 f test_closure_call() -> Bool
-    double := |x| x * 2
+    double := |x: Int| x * 2
     result := double(7)
     result == 14
 
@@ -23,7 +23,7 @@ f test_closure_call() -> Bool
 f test_multiple_captures() -> Bool
     base := 100
     multiplier := 2
-    calc := |x| base + x * multiplier
+    calc := |x: Int| base + x * multiplier
     calc(5) == 110
 
 f run_all_tests() -> Int

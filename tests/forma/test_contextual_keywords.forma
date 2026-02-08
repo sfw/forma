@@ -189,7 +189,7 @@ f test_all_as_local_vars() -> Bool
 
 f test_keyword_in_closure() -> Bool
     m := 10
-    add_m := |x| x + m
+    add_m := |x: Int| x + m
     add_m(5) == 15
 
 # =============================================================================

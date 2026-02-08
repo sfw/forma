@@ -2718,7 +2718,7 @@ impl Interpreter {
                     Value::Database(_) => "Database",
                     Value::Statement(_) => "Statement",
                     Value::DbRow(_) => "Row",
-                    Value::TokioTask(_) => "TokioTask",
+                    Value::TokioTask(_) => "Future",
                 };
                 Ok(Some(Value::Str(type_name.to_string())))
             }
@@ -3310,7 +3310,7 @@ impl Interpreter {
             // ===== Duration functions =====
             "duration_seconds" => {
                 validate_args!(args, 1, "duration_seconds");
-                // duration_seconds(secs: Int) -> Int (returns milliseconds)
+                // duration_seconds(secs: Int) -> Int (returns seconds)
                 let secs = match &args[0] {
                     Value::Int(n) => *n,
                     _ => {
@@ -3319,11 +3319,11 @@ impl Interpreter {
                         });
                     }
                 };
-                Ok(Some(Value::Int(secs * 1000)))
+                Ok(Some(Value::Int(secs)))
             }
             "duration_minutes" => {
                 validate_args!(args, 1, "duration_minutes");
-                // duration_minutes(mins: Int) -> Int (returns milliseconds)
+                // duration_minutes(mins: Int) -> Int (returns seconds)
                 let mins = match &args[0] {
                     Value::Int(n) => *n,
                     _ => {
@@ -3332,11 +3332,11 @@ impl Interpreter {
                         });
                     }
                 };
-                Ok(Some(Value::Int(mins * 60 * 1000)))
+                Ok(Some(Value::Int(mins * 60)))
             }
             "duration_hours" => {
                 validate_args!(args, 1, "duration_hours");
-                // duration_hours(hours: Int) -> Int (returns milliseconds)
+                // duration_hours(hours: Int) -> Int (returns seconds)
                 let hours = match &args[0] {
                     Value::Int(n) => *n,
                     _ => {
@@ -3345,11 +3345,11 @@ impl Interpreter {
                         });
                     }
                 };
-                Ok(Some(Value::Int(hours * 60 * 60 * 1000)))
+                Ok(Some(Value::Int(hours * 60 * 60)))
             }
             "duration_days" => {
                 validate_args!(args, 1, "duration_days");
-                // duration_days(days: Int) -> Int (returns milliseconds)
+                // duration_days(days: Int) -> Int (returns seconds)
                 let days = match &args[0] {
                     Value::Int(n) => *n,
                     _ => {
@@ -3358,7 +3358,7 @@ impl Interpreter {
                         });
                     }
                 };
-                Ok(Some(Value::Int(days * 24 * 60 * 60 * 1000)))
+                Ok(Some(Value::Int(days * 24 * 60 * 60)))
             }
 
             // ===== Async operations =====
@@ -10573,5 +10573,85 @@ f main() -> Str
         )
         .unwrap();
         assert_eq!(result, Value::Str("not found".to_string()));
+    }
+
+    // === Option/Result negative builtin tests ===
+
+    #[test]
+    fn test_unwrap_none_panics() {
+        let result = run_source("f main() -> Int\n    unwrap(None)\n    0\n");
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("unwrap called on None"),
+            "expected 'unwrap called on None'"
+        );
+    }
+
+    #[test]
+    fn test_unwrap_err_panics() {
+        let result = run_source(
+            r#"f main() -> Int
+    unwrap(Err("oops"))
+    0
+"#,
+        );
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("unwrap called on Err"),
+            "expected 'unwrap called on Err'"
+        );
+    }
+
+    #[test]
+    fn test_expect_none_custom_msg() {
+        let result = run_source(
+            r#"f main() -> Int
+    expect(None, "missing value")
+    0
+"#,
+        );
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("missing value"),
+            "expected 'missing value'"
+        );
+    }
+
+    #[test]
+    fn test_expect_err_custom_msg() {
+        let result = run_source(
+            r#"f main() -> Int
+    expect(Err("fail"), "operation failed")
+    0
+"#,
+        );
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("operation failed"),
+            "expected 'operation failed'"
+        );
+    }
+
+    #[test]
+    fn test_is_some_wrong_type() {
+        let result = run_source("f main() -> Bool = is_some(42)\n");
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("is_some: expected Option"),
+            "expected 'is_some: expected Option'"
+        );
+    }
+
+    #[test]
+    fn test_is_ok_wrong_type() {
+        let result = run_source(
+            r#"f main() -> Bool = is_ok("hello")
+"#,
+        );
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("is_ok: expected Result"),
+            "expected 'is_ok: expected Result'"
+        );
     }
 }

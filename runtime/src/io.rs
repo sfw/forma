@@ -150,3 +150,38 @@ pub extern "C" fn forma_write_stderr(buf: *const u8, len: size_t) -> c_int {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_print_int_no_panic() {
+        forma_print_int(42);
+    }
+
+    #[test]
+    fn test_println_int_no_panic() {
+        forma_println_int(-1);
+    }
+
+    #[test]
+    fn test_write_stdout_null_safety() {
+        assert_eq!(forma_write_stdout(std::ptr::null(), 10), -1);
+    }
+
+    #[test]
+    fn test_write_stderr_null_safety() {
+        assert_eq!(forma_write_stderr(std::ptr::null(), 10), -1);
+    }
+
+    #[test]
+    fn test_print_null_safety() {
+        forma_print(std::ptr::null());
+    }
+
+    #[test]
+    fn test_debug_print_null_safety() {
+        forma_debug_print(std::ptr::null(), 42);
+    }
+}

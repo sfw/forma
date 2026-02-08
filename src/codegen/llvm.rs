@@ -2298,3 +2298,99 @@ impl<'ctx> LLVMCodegen<'ctx> {
         self.module.print_to_string().to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_empty_main() -> Program {
+        let mut functions = HashMap::new();
+        let entry_block = BasicBlock {
+            id: crate::mir::BlockId(0),
+            stmts: vec![],
+            terminator: Some(Terminator::Return(Some(Operand::Constant(Constant::Int(
+                0,
+            ))))),
+        };
+        let func = Function {
+            name: "main".to_string(),
+            params: vec![],
+            param_names: vec![],
+            param_pass_modes: vec![],
+            return_ty: Ty::Int,
+            locals: vec![],
+            blocks: vec![entry_block],
+            entry_block: crate::mir::BlockId(0),
+            preconditions: vec![],
+            postconditions: vec![],
+        };
+        functions.insert("main".to_string(), func);
+        Program {
+            functions,
+            entry: Some("main".to_string()),
+            enum_variants: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn test_compile_empty_main() {
+        let program = make_empty_main();
+        let ctx = Context::create();
+        let mut codegen = LLVMCodegen::new(&ctx, "test");
+        assert!(codegen.compile(&program).is_ok());
+        let ir = codegen.get_llvm_ir();
+        assert!(
+            ir.contains("define"),
+            "IR should contain function definitions"
+        );
+    }
+
+    #[test]
+    fn test_compile_integer_arithmetic() {
+        let mut functions = HashMap::new();
+        let result_local = crate::mir::Local(0);
+        let entry_block = BasicBlock {
+            id: crate::mir::BlockId(0),
+            stmts: vec![Statement {
+                kind: StatementKind::Assign(
+                    result_local,
+                    Rvalue::BinaryOp(
+                        BinOp::Add,
+                        Operand::Constant(Constant::Int(2)),
+                        Operand::Constant(Constant::Int(3)),
+                    ),
+                ),
+            }],
+            terminator: Some(Terminator::Return(Some(Operand::Local(result_local)))),
+        };
+        let func = Function {
+            name: "main".to_string(),
+            params: vec![],
+            param_names: vec![],
+            param_pass_modes: vec![],
+            return_ty: Ty::Int,
+            locals: vec![crate::mir::LocalDecl {
+                ty: Ty::Int,
+                name: Some("result".to_string()),
+            }],
+            blocks: vec![entry_block],
+            entry_block: crate::mir::BlockId(0),
+            preconditions: vec![],
+            postconditions: vec![],
+        };
+        functions.insert("main".to_string(), func);
+        let program = Program {
+            functions,
+            entry: Some("main".to_string()),
+            enum_variants: HashMap::new(),
+        };
+
+        let ctx = Context::create();
+        let mut codegen = LLVMCodegen::new(&ctx, "test_arith");
+        assert!(codegen.compile(&program).is_ok());
+        let ir = codegen.get_llvm_ir();
+        // LLVM may constant-fold 2+3=5, so just verify compilation succeeded
+        // and produced valid IR with a main function
+        assert!(ir.contains("main"), "IR should contain main function");
+    }
+}

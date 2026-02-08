@@ -145,3 +145,38 @@ pub extern "C" fn forma_mul_overflow_check(a: i64, b: i64) -> i64 {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_assert_passes() {
+        forma_assert(true, std::ptr::null());
+    }
+
+    #[test]
+    fn test_bounds_check_valid() {
+        forma_bounds_check(0, 10);
+        forma_bounds_check(9, 10);
+    }
+
+    #[test]
+    fn test_div_check_valid() {
+        forma_div_check(5);
+        forma_div_check(-1);
+    }
+
+    #[test]
+    fn test_overflow_checks_normal() {
+        assert_eq!(forma_add_overflow_check(1, 2), 3);
+        assert_eq!(forma_sub_overflow_check(5, 3), 2);
+        assert_eq!(forma_mul_overflow_check(3, 4), 12);
+    }
+
+    #[test]
+    fn test_null_check_non_null() {
+        let data: u8 = 42;
+        forma_null_check(&data as *const u8, std::ptr::null());
+    }
+}

@@ -46,170 +46,12 @@ impl FormaLanguageServer {
 
     /// Get diagnostics for a document
     fn get_diagnostics(&self, _uri: &Url, content: &str) -> Vec<Diagnostic> {
-        let mut diagnostics = Vec::new();
-
-        // Lex
-        let scanner = Scanner::new(content);
-        let (tokens, lex_errors) = scanner.scan_all();
-
-        for error in lex_errors {
-            diagnostics.push(Diagnostic {
-                range: span_to_range(error.span),
-                severity: Some(DiagnosticSeverity::ERROR),
-                code: Some(NumberOrString::String("LEX".to_string())),
-                source: Some("forma".to_string()),
-                message: error.message,
-                ..Default::default()
-            });
-        }
-
-        if !diagnostics.is_empty() {
-            return diagnostics;
-        }
-
-        // Parse
-        let parser = Parser::new(&tokens);
-        let ast = match parser.parse() {
-            Ok(ast) => ast,
-            Err(errors) => {
-                for e in errors {
-                    diagnostics.push(Diagnostic {
-                        range: span_to_range(e.span()),
-                        severity: Some(DiagnosticSeverity::ERROR),
-                        code: Some(NumberOrString::String("PARSE".to_string())),
-                        source: Some("forma".to_string()),
-                        message: format!("{}", e),
-                        ..Default::default()
-                    });
-                }
-                return diagnostics;
-            }
-        };
-
-        // Type check
-        let mut type_checker = TypeChecker::new();
-        if let Err(errors) = type_checker.check(&ast) {
-            for error in errors {
-                diagnostics.push(Diagnostic {
-                    range: span_to_range(error.span),
-                    severity: Some(DiagnosticSeverity::ERROR),
-                    code: Some(NumberOrString::String("TYPE".to_string())),
-                    source: Some("forma".to_string()),
-                    message: format!("{}", error),
-                    ..Default::default()
-                });
-            }
-        }
-
-        // Borrow check
-        let mut borrow_checker = BorrowChecker::new();
-        if let Err(errors) = borrow_checker.check(&ast) {
-            for error in errors {
-                diagnostics.push(Diagnostic {
-                    range: span_to_range(error.span),
-                    severity: Some(DiagnosticSeverity::ERROR),
-                    code: Some(NumberOrString::String("BORROW".to_string())),
-                    source: Some("forma".to_string()),
-                    message: format!("{}", error),
-                    ..Default::default()
-                });
-            }
-        }
-
-        diagnostics
+        analyze_diagnostics(content)
     }
 
     /// Get completions at a position
     fn get_completions(&self, content: &str, position: Position) -> Vec<CompletionItem> {
-        let mut completions = Vec::new();
-
-        // Lex the document
-        let scanner = Scanner::new(content);
-        let (tokens, _) = scanner.scan_all();
-
-        // Find context based on position
-        let line = position.line as usize + 1;
-        let col = position.character as usize + 1;
-
-        // Find previous token for context
-        let mut prev_token_kind = None;
-        for token in &tokens {
-            if token.span.line == line && token.span.column <= col {
-                prev_token_kind = Some(format!("{:?}", token.kind));
-            }
-        }
-
-        // Context-aware completions
-        let prev = prev_token_kind.as_deref().unwrap_or("");
-
-        if prev.contains("Assign") || prev.contains("Eq") {
-            // After assignment, suggest expressions
-            completions.extend(vec![
-                completion_item("if", CompletionItemKind::KEYWORD, "if expression"),
-                completion_item("m", CompletionItemKind::KEYWORD, "match expression"),
-                completion_item("true", CompletionItemKind::KEYWORD, "boolean true"),
-                completion_item("false", CompletionItemKind::KEYWORD, "boolean false"),
-            ]);
-        } else if prev.contains("Arrow") {
-            // After ->, suggest types
-            completions.extend(vec![
-                completion_item("Int", CompletionItemKind::CLASS, "Integer type"),
-                completion_item("Float", CompletionItemKind::CLASS, "Float type"),
-                completion_item("Bool", CompletionItemKind::CLASS, "Boolean type"),
-                completion_item("Str", CompletionItemKind::CLASS, "String type"),
-                completion_item("Char", CompletionItemKind::CLASS, "Character type"),
-                completion_item("[T]", CompletionItemKind::CLASS, "List type"),
-                completion_item("T?", CompletionItemKind::CLASS, "Option type"),
-                completion_item("Result[T, E]", CompletionItemKind::CLASS, "Result type"),
-            ]);
-        } else if prev.contains("Dot") {
-            // After dot, suggest method names
-            completions.extend(vec![
-                completion_item("len", CompletionItemKind::METHOD, "Get length"),
-                completion_item("push", CompletionItemKind::METHOD, "Add element"),
-                completion_item("pop", CompletionItemKind::METHOD, "Remove last element"),
-                completion_item("map", CompletionItemKind::METHOD, "Transform elements"),
-                completion_item("filter", CompletionItemKind::METHOD, "Filter elements"),
-            ]);
-        } else {
-            // Default: suggest keywords and common items
-            completions.extend(vec![
-                completion_item("f", CompletionItemKind::KEYWORD, "Define function"),
-                completion_item("s", CompletionItemKind::KEYWORD, "Define struct"),
-                completion_item("e", CompletionItemKind::KEYWORD, "Define enum"),
-                completion_item("t", CompletionItemKind::KEYWORD, "Define trait"),
-                completion_item("impl", CompletionItemKind::KEYWORD, "Implement trait"),
-                completion_item("if", CompletionItemKind::KEYWORD, "If expression"),
-                completion_item("m", CompletionItemKind::KEYWORD, "Match expression"),
-                completion_item("wh", CompletionItemKind::KEYWORD, "While loop"),
-                completion_item("for", CompletionItemKind::KEYWORD, "For loop"),
-                completion_item("ret", CompletionItemKind::KEYWORD, "Return statement"),
-                completion_item("print", CompletionItemKind::FUNCTION, "Print to stdout"),
-                completion_item(
-                    "println",
-                    CompletionItemKind::FUNCTION,
-                    "Print with newline",
-                ),
-            ]);
-        }
-
-        // Add builtins
-        completions.extend(vec![
-            completion_item("vec_new", CompletionItemKind::FUNCTION, "Create new vector"),
-            completion_item("vec_push", CompletionItemKind::FUNCTION, "Push to vector"),
-            completion_item("vec_len", CompletionItemKind::FUNCTION, "Get vector length"),
-            completion_item("str_len", CompletionItemKind::FUNCTION, "Get string length"),
-            completion_item("str_split", CompletionItemKind::FUNCTION, "Split string"),
-            completion_item("map_new", CompletionItemKind::FUNCTION, "Create new map"),
-            completion_item("map_get", CompletionItemKind::FUNCTION, "Get from map"),
-            completion_item(
-                "map_insert",
-                CompletionItemKind::FUNCTION,
-                "Insert into map",
-            ),
-        ]);
-
-        completions
+        analyze_completions(content, position)
     }
 
     /// Get hover information at a position
@@ -504,6 +346,161 @@ fn get_builtin_info(name: &str) -> Option<String> {
     }
 }
 
+/// Get diagnostics for source content (extracted for testability).
+pub fn analyze_diagnostics(content: &str) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+
+    let scanner = Scanner::new(content);
+    let (tokens, lex_errors) = scanner.scan_all();
+
+    for error in lex_errors {
+        diagnostics.push(Diagnostic {
+            range: span_to_range(error.span),
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::String("LEX".to_string())),
+            source: Some("forma".to_string()),
+            message: error.message,
+            ..Default::default()
+        });
+    }
+
+    if !diagnostics.is_empty() {
+        return diagnostics;
+    }
+
+    let parser = Parser::new(&tokens);
+    let ast = match parser.parse() {
+        Ok(ast) => ast,
+        Err(errors) => {
+            for e in errors {
+                diagnostics.push(Diagnostic {
+                    range: span_to_range(e.span()),
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    code: Some(NumberOrString::String("PARSE".to_string())),
+                    source: Some("forma".to_string()),
+                    message: format!("{}", e),
+                    ..Default::default()
+                });
+            }
+            return diagnostics;
+        }
+    };
+
+    let mut type_checker = TypeChecker::new();
+    if let Err(errors) = type_checker.check(&ast) {
+        for error in errors {
+            diagnostics.push(Diagnostic {
+                range: span_to_range(error.span),
+                severity: Some(DiagnosticSeverity::ERROR),
+                code: Some(NumberOrString::String("TYPE".to_string())),
+                source: Some("forma".to_string()),
+                message: format!("{}", error),
+                ..Default::default()
+            });
+        }
+    }
+
+    let mut borrow_checker = BorrowChecker::new();
+    if let Err(errors) = borrow_checker.check(&ast) {
+        for error in errors {
+            diagnostics.push(Diagnostic {
+                range: span_to_range(error.span),
+                severity: Some(DiagnosticSeverity::ERROR),
+                code: Some(NumberOrString::String("BORROW".to_string())),
+                source: Some("forma".to_string()),
+                message: format!("{}", error),
+                ..Default::default()
+            });
+        }
+    }
+
+    diagnostics
+}
+
+/// Get completions for position in source content (extracted for testability).
+pub fn analyze_completions(content: &str, position: Position) -> Vec<CompletionItem> {
+    let mut completions = Vec::new();
+
+    let scanner = Scanner::new(content);
+    let (tokens, _) = scanner.scan_all();
+
+    let line = position.line as usize + 1;
+    let col = position.character as usize + 1;
+
+    let mut prev_token_kind = None;
+    for token in &tokens {
+        if token.span.line == line && token.span.column <= col {
+            prev_token_kind = Some(format!("{:?}", token.kind));
+        }
+    }
+
+    let prev = prev_token_kind.as_deref().unwrap_or("");
+
+    if prev.contains("Assign") || prev.contains("Eq") {
+        completions.extend(vec![
+            completion_item("if", CompletionItemKind::KEYWORD, "if expression"),
+            completion_item("m", CompletionItemKind::KEYWORD, "match expression"),
+            completion_item("true", CompletionItemKind::KEYWORD, "boolean true"),
+            completion_item("false", CompletionItemKind::KEYWORD, "boolean false"),
+        ]);
+    } else if prev.contains("Arrow") {
+        completions.extend(vec![
+            completion_item("Int", CompletionItemKind::CLASS, "Integer type"),
+            completion_item("Float", CompletionItemKind::CLASS, "Float type"),
+            completion_item("Bool", CompletionItemKind::CLASS, "Boolean type"),
+            completion_item("Str", CompletionItemKind::CLASS, "String type"),
+            completion_item("Char", CompletionItemKind::CLASS, "Character type"),
+            completion_item("[T]", CompletionItemKind::CLASS, "List type"),
+            completion_item("T?", CompletionItemKind::CLASS, "Option type"),
+            completion_item("Result[T, E]", CompletionItemKind::CLASS, "Result type"),
+        ]);
+    } else if prev.contains("Dot") {
+        completions.extend(vec![
+            completion_item("len", CompletionItemKind::METHOD, "Get length"),
+            completion_item("push", CompletionItemKind::METHOD, "Add element"),
+            completion_item("pop", CompletionItemKind::METHOD, "Remove last element"),
+            completion_item("map", CompletionItemKind::METHOD, "Transform elements"),
+            completion_item("filter", CompletionItemKind::METHOD, "Filter elements"),
+        ]);
+    } else {
+        completions.extend(vec![
+            completion_item("f", CompletionItemKind::KEYWORD, "Define function"),
+            completion_item("s", CompletionItemKind::KEYWORD, "Define struct"),
+            completion_item("e", CompletionItemKind::KEYWORD, "Define enum"),
+            completion_item("t", CompletionItemKind::KEYWORD, "Define trait"),
+            completion_item("impl", CompletionItemKind::KEYWORD, "Implement trait"),
+            completion_item("if", CompletionItemKind::KEYWORD, "If expression"),
+            completion_item("m", CompletionItemKind::KEYWORD, "Match expression"),
+            completion_item("wh", CompletionItemKind::KEYWORD, "While loop"),
+            completion_item("for", CompletionItemKind::KEYWORD, "For loop"),
+            completion_item("ret", CompletionItemKind::KEYWORD, "Return statement"),
+            completion_item("print", CompletionItemKind::FUNCTION, "Print to stdout"),
+            completion_item(
+                "println",
+                CompletionItemKind::FUNCTION,
+                "Print with newline",
+            ),
+        ]);
+    }
+
+    completions.extend(vec![
+        completion_item("vec_new", CompletionItemKind::FUNCTION, "Create new vector"),
+        completion_item("vec_push", CompletionItemKind::FUNCTION, "Push to vector"),
+        completion_item("vec_len", CompletionItemKind::FUNCTION, "Get vector length"),
+        completion_item("str_len", CompletionItemKind::FUNCTION, "Get string length"),
+        completion_item("str_split", CompletionItemKind::FUNCTION, "Split string"),
+        completion_item("map_new", CompletionItemKind::FUNCTION, "Create new map"),
+        completion_item("map_get", CompletionItemKind::FUNCTION, "Get from map"),
+        completion_item(
+            "map_insert",
+            CompletionItemKind::FUNCTION,
+            "Insert into map",
+        ),
+    ]);
+
+    completions
+}
+
 /// Run the LSP server
 pub async fn run_server() {
     let stdin = tokio::io::stdin();
@@ -511,4 +508,46 @@ pub async fn run_server() {
 
     let (service, socket) = LspService::new(FormaLanguageServer::new);
     Server::new(stdin, stdout, socket).serve(service).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_diagnostics_valid_code() {
+        let diagnostics = analyze_diagnostics("f main() -> Int = 42\n");
+        assert!(
+            diagnostics.is_empty(),
+            "valid code should produce no diagnostics, got: {:?}",
+            diagnostics
+        );
+    }
+
+    #[test]
+    fn test_diagnostics_syntax_error() {
+        let diagnostics = analyze_diagnostics("f main( -> Int\n");
+        assert!(
+            !diagnostics.is_empty(),
+            "syntax error should produce diagnostics"
+        );
+    }
+
+    #[test]
+    fn test_completions_default_keywords() {
+        let completions = analyze_completions(
+            "",
+            Position {
+                line: 0,
+                character: 0,
+            },
+        );
+        let labels: Vec<&str> = completions.iter().map(|c| c.label.as_str()).collect();
+        assert!(labels.contains(&"f"), "should contain 'f' keyword");
+        assert!(labels.contains(&"if"), "should contain 'if' keyword");
+        assert!(
+            labels.contains(&"vec_new"),
+            "should contain 'vec_new' builtin"
+        );
+    }
 }
