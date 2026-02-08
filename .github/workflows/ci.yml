@@ -80,10 +80,10 @@ jobs:
             name=$(basename "$f")
             if ./target/release/forma run "$f" > /dev/null 2>&1; then
               echo "PASS: $name"
-              ((PASS++))
+              PASS=$((PASS + 1))
             else
               echo "FAIL: $name"
-              ((FAIL++))
+              FAIL=$((FAIL + 1))
             fi
           done
           echo ""

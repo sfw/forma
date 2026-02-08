@@ -76,11 +76,7 @@ impl TypeChecker {
 
     /// Build a typed AST with resolved types.
     fn build_typed_ast(&self, ast: &SourceFile) -> TypedAst {
-        let items = ast
-            .items
-            .iter()
-            .map(|item| self.type_item(item))
-            .collect();
+        let items = ast.items.iter().map(|item| self.type_item(item)).collect();
 
         TypedAst { items }
     }
@@ -284,9 +280,10 @@ impl TypeRelations {
             (Ty::Never, _) => true,
 
             // Mutable ref can coerce to immutable ref
-            (Ty::Ref(t1, super::types::Mutability::Mutable), Ty::Ref(t2, super::types::Mutability::Immutable)) => {
-                t1 == t2
-            }
+            (
+                Ty::Ref(t1, super::types::Mutability::Mutable),
+                Ty::Ref(t2, super::types::Mutability::Immutable),
+            ) => t1 == t2,
 
             // Numeric widening (e.g., i32 -> i64)
             (Ty::I8, Ty::I16 | Ty::I32 | Ty::I64 | Ty::I128 | Ty::Int) => true,

@@ -86,8 +86,7 @@ pub enum FnBody {
 }
 
 /// How a parameter is passed: by value (owned), by shared reference, or by mutable reference.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PassMode {
     /// Pass by value (default)
     #[default]
@@ -97,7 +96,6 @@ pub enum PassMode {
     /// Pass by mutable reference (`ref mut`)
     RefMut,
 }
-
 
 #[derive(Debug, Clone)]
 pub struct Param {
@@ -323,12 +321,20 @@ pub struct Type {
 impl Type {
     /// Create a new Type with regular (default) linearity.
     pub fn new(kind: TypeKind, span: Span) -> Self {
-        Self { kind, span, linearity: Linearity::Regular }
+        Self {
+            kind,
+            span,
+            linearity: Linearity::Regular,
+        }
     }
 
     /// Create a new Type with the given linearity.
     pub fn with_linearity(kind: TypeKind, span: Span, linearity: Linearity) -> Self {
-        Self { kind, span, linearity }
+        Self {
+            kind,
+            span,
+            linearity,
+        }
     }
 }
 

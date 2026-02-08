@@ -39,7 +39,10 @@ f example() -> Int
         Some(v) -> v
         None -> 0
 "#;
-    assert!(parse(code).is_ok(), "m should work as variable and match keyword");
+    assert!(
+        parse(code).is_ok(),
+        "m should work as variable and match keyword"
+    );
 }
 
 #[test]
@@ -92,7 +95,10 @@ fn test_t_as_type_parameter() {
 f identity[T](t: T) -> T
     t
 "#;
-    assert!(parse(code).is_ok(), "t should work as type parameter and value");
+    assert!(
+        parse(code).is_ok(),
+        "t should work as type parameter and value"
+    );
 }
 
 #[test]
@@ -107,7 +113,10 @@ s Example
     i: Int
     m: Map[Str, Int]
 "#;
-    assert!(parse(code).is_ok(), "all single-letter keywords should work as struct fields");
+    assert!(
+        parse(code).is_ok(),
+        "all single-letter keywords should work as struct fields"
+    );
 }
 
 #[test]
@@ -118,7 +127,10 @@ f example() -> Int
     (m, s, e) := (1, "hello", true)
     m + str_len(s)
 "#;
-    assert!(parse(code).is_ok(), "keywords should work in tuple destructuring");
+    assert!(
+        parse(code).is_ok(),
+        "keywords should work in tuple destructuring"
+    );
 }
 
 #[test]
@@ -198,7 +210,10 @@ f extract(opt: Int?) -> Int
         Some(m) -> m
         None -> 0
 "#;
-    assert!(parse(code).is_ok(), "m should work as pattern binding in match");
+    assert!(
+        parse(code).is_ok(),
+        "m should work as pattern binding in match"
+    );
 }
 
 #[test]
@@ -212,7 +227,10 @@ f test() -> Int
     s := S(42)
     s.value
 "#;
-    assert!(parse(code).is_ok(), "s should work as variable when struct S exists");
+    assert!(
+        parse(code).is_ok(),
+        "s should work as variable when struct S exists"
+    );
 }
 
 #[test]
@@ -222,7 +240,10 @@ fn test_multiple_keywords_in_expression() {
 f compute(m: Int, s: Int, e: Int, t: Int, i: Int, f: Int) -> Int
     m + s + e + t + i + f
 "#;
-    assert!(parse(code).is_ok(), "multiple keyword identifiers should work in expression");
+    assert!(
+        parse(code).is_ok(),
+        "multiple keyword identifiers should work in expression"
+    );
 }
 
 #[test]
@@ -238,7 +259,10 @@ f test() -> Int
     m := 6
     f + s + e + t + i + m
 "#;
-    assert!(parse(code).is_ok(), "all keywords should work as local variables");
+    assert!(
+        parse(code).is_ok(),
+        "all keywords should work as local variables"
+    );
 }
 
 #[test]
@@ -250,7 +274,10 @@ f test() -> Bool
     s := 20
     m < s && s > 0
 "#;
-    assert!(parse(code).is_ok(), "keywords should work in binary expressions");
+    assert!(
+        parse(code).is_ok(),
+        "keywords should work in binary expressions"
+    );
 }
 
 #[test]
@@ -265,7 +292,10 @@ f test() -> Int
     result = m / 2
     result
 "#;
-    assert!(parse(code).is_ok(), "m followed by operators should be variable");
+    assert!(
+        parse(code).is_ok(),
+        "m followed by operators should be variable"
+    );
 }
 
 #[test]

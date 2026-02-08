@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::lexer::{Scanner, Span};
-use crate::parser::{Parser, Item, ItemKind, SourceFile, UseTree};
+use crate::parser::{Item, ItemKind, Parser, SourceFile, UseTree};
 
 /// Error during module loading.
 #[derive(Debug, Clone)]
@@ -155,7 +155,11 @@ impl ModuleLoader {
             return Err(ModuleError {
                 message: format!(
                     "lexer errors: {}",
-                    lex_errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>().join(", ")
+                    lex_errors
+                        .iter()
+                        .map(|e| e.message.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 ),
                 path: Some(path.to_path_buf()),
             });
@@ -164,7 +168,14 @@ impl ModuleLoader {
         // Parse
         let parser = Parser::new(&tokens);
         let ast = parser.parse().map_err(|errors| ModuleError {
-            message: format!("parse error: {}", errors.iter().map(|e| format!("{}", e)).collect::<Vec<_>>().join("; ")),
+            message: format!(
+                "parse error: {}",
+                errors
+                    .iter()
+                    .map(|e| format!("{}", e))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            ),
             path: Some(path.to_path_buf()),
         })?;
 
@@ -174,10 +185,13 @@ impl ModuleLoader {
         };
 
         // Cache the result
-        self.loaded.insert(path.to_path_buf(), LoadedModule {
-            path: path.to_path_buf(),
-            items: ast.items,
-        });
+        self.loaded.insert(
+            path.to_path_buf(),
+            LoadedModule {
+                path: path.to_path_buf(),
+                items: ast.items,
+            },
+        );
 
         Ok(module)
     }
@@ -191,7 +205,9 @@ impl ModuleLoader {
         }
 
         // Try relative to working directory
-        let cwd_path = PathBuf::from(".").join(module_path.join("/")).with_extension("forma");
+        let cwd_path = PathBuf::from(".")
+            .join(module_path.join("/"))
+            .with_extension("forma");
         if cwd_path.exists() {
             return Ok(cwd_path);
         }
@@ -242,7 +258,11 @@ impl ModuleLoader {
 
     /// Recursively load a module and its transitive imports.
     /// Uses the `loading` set for cycle detection during transitive resolution.
-    fn load_module_recursive(&mut self, path: &Path, items: &mut Vec<Item>) -> Result<(), ModuleError> {
+    fn load_module_recursive(
+        &mut self,
+        path: &Path,
+        items: &mut Vec<Item>,
+    ) -> Result<(), ModuleError> {
         let path_buf = path.to_path_buf();
 
         // Cycle detection FIRST: if this path is currently being resolved, it's circular
@@ -272,7 +292,9 @@ impl ModuleLoader {
         };
 
         // First, recursively resolve any Use items from this module (transitive imports)
-        let use_items: Vec<Item> = module.items.iter()
+        let use_items: Vec<Item> = module
+            .items
+            .iter()
             .filter(|i| matches!(i.kind, ItemKind::Use(_)))
             .cloned()
             .collect();
@@ -311,12 +333,20 @@ impl ModuleLoader {
     }
 
     /// Load a file and all its dependencies, returning a combined AST.
-    pub fn load_with_dependencies(&mut self, source_path: &Path) -> Result<SourceFile, ModuleError> {
+    pub fn load_with_dependencies(
+        &mut self,
+        source_path: &Path,
+    ) -> Result<SourceFile, ModuleError> {
         // Load the main file
         let main_module = self.load_module_file(source_path)?;
         let main_ast = SourceFile {
             items: main_module.items,
-            span: Span { start: 0, end: 0, line: 0, column: 0 },
+            span: Span {
+                start: 0,
+                end: 0,
+                line: 0,
+                column: 0,
+            },
         };
 
         // Load imports
@@ -365,21 +395,38 @@ mod tests {
         let main_path = base.join("main.forma");
         let mut loader = ModuleLoader::from_source_file(&main_path);
         let result = loader.load_with_dependencies(&main_path);
-        assert!(result.is_ok(), "transitive import should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "transitive import should succeed: {:?}",
+            result.err()
+        );
 
         let ast = result.unwrap();
-        let names: Vec<String> = ast.items.iter().filter_map(|item| {
-            if let ItemKind::Function(f) = &item.kind {
-                Some(f.name.name.clone())
-            } else {
-                None
-            }
-        }).collect();
+        let names: Vec<String> = ast
+            .items
+            .iter()
+            .filter_map(|item| {
+                if let ItemKind::Function(f) = &item.kind {
+                    Some(f.name.name.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
 
         // Should contain items from both a and b
-        assert!(names.contains(&"helper".to_string()), "should contain 'helper' from b.forma");
-        assert!(names.contains(&"wrapper".to_string()), "should contain 'wrapper' from a.forma");
-        assert!(names.contains(&"main".to_string()), "should contain 'main' from main.forma");
+        assert!(
+            names.contains(&"helper".to_string()),
+            "should contain 'helper' from b.forma"
+        );
+        assert!(
+            names.contains(&"wrapper".to_string()),
+            "should contain 'wrapper' from a.forma"
+        );
+        assert!(
+            names.contains(&"main".to_string()),
+            "should contain 'main' from main.forma"
+        );
     }
 
     #[test]
@@ -396,7 +443,11 @@ mod tests {
         let result = loader.load_with_dependencies(&main_path);
         assert!(result.is_err(), "circular import should be detected");
         let err = result.unwrap_err();
-        assert!(err.message.contains("circular"), "error should mention circular: {}", err.message);
+        assert!(
+            err.message.contains("circular"),
+            "error should mention circular: {}",
+            err.message
+        );
     }
 
     #[test]
@@ -418,7 +469,9 @@ mod tests {
         let result2 = loader.load_module_file(&bad_path);
         assert!(result2.is_err());
         // Should NOT be a "circular dependency" error
-        assert!(!result2.unwrap_err().message.contains("circular"),
-            "lex error should not poison cycle detection");
+        assert!(
+            !result2.unwrap_err().message.contains("circular"),
+            "lex error should not poison cycle detection"
+        );
     }
 }

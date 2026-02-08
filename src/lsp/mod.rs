@@ -9,10 +9,10 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
+use crate::borrow::BorrowChecker;
 use crate::lexer::{Scanner, Span};
 use crate::parser::Parser;
 use crate::types::TypeChecker;
-use crate::borrow::BorrowChecker;
 
 /// Document state for tracking open files
 #[derive(Debug, Clone)]
@@ -185,7 +185,11 @@ impl FormaLanguageServer {
                 completion_item("for", CompletionItemKind::KEYWORD, "For loop"),
                 completion_item("ret", CompletionItemKind::KEYWORD, "Return statement"),
                 completion_item("print", CompletionItemKind::FUNCTION, "Print to stdout"),
-                completion_item("println", CompletionItemKind::FUNCTION, "Print with newline"),
+                completion_item(
+                    "println",
+                    CompletionItemKind::FUNCTION,
+                    "Print with newline",
+                ),
             ]);
         }
 
@@ -198,7 +202,11 @@ impl FormaLanguageServer {
             completion_item("str_split", CompletionItemKind::FUNCTION, "Split string"),
             completion_item("map_new", CompletionItemKind::FUNCTION, "Create new map"),
             completion_item("map_get", CompletionItemKind::FUNCTION, "Get from map"),
-            completion_item("map_insert", CompletionItemKind::FUNCTION, "Insert into map"),
+            completion_item(
+                "map_insert",
+                CompletionItemKind::FUNCTION,
+                "Insert into map",
+            ),
         ]);
 
         completions
@@ -224,7 +232,9 @@ impl FormaLanguageServer {
                     crate::lexer::TokenKind::Float(n) => format!("Float literal: {}", n),
                     crate::lexer::TokenKind::String(s) => format!("Str literal: \"{}\"", s),
                     crate::lexer::TokenKind::Char(c) => format!("Char literal: '{}'", c),
-                    crate::lexer::TokenKind::True | crate::lexer::TokenKind::False => "Bool".to_string(),
+                    crate::lexer::TokenKind::True | crate::lexer::TokenKind::False => {
+                        "Bool".to_string()
+                    }
                     crate::lexer::TokenKind::F => "keyword: function definition (f)".to_string(),
                     crate::lexer::TokenKind::S => "keyword: struct definition (s)".to_string(),
                     crate::lexer::TokenKind::E => "keyword: enum definition (e)".to_string(),
@@ -234,7 +244,9 @@ impl FormaLanguageServer {
                     crate::lexer::TokenKind::M => "keyword: pattern matching (m)".to_string(),
                     crate::lexer::TokenKind::Wh => "keyword: while loop (wh)".to_string(),
                     crate::lexer::TokenKind::For => "keyword: for loop".to_string(),
-                    crate::lexer::TokenKind::Ret => "keyword: return from function (ret)".to_string(),
+                    crate::lexer::TokenKind::Ret => {
+                        "keyword: return from function (ret)".to_string()
+                    }
                     _ => return None,
                 };
 
@@ -403,7 +415,8 @@ impl LanguageServer for FormaLanguageServer {
             let col = position.character as usize + 1;
 
             // Find identifier at cursor
-            let identifier_name = tokens.iter()
+            let identifier_name = tokens
+                .iter()
                 .find(|token| {
                     let token_end = token.span.column + (token.span.end - token.span.start);
                     token.span.line == line && token.span.column <= col && col <= token_end
@@ -421,13 +434,14 @@ impl LanguageServer for FormaLanguageServer {
                 if let Ok(ast) = parser.parse() {
                     let mut type_checker = crate::types::TypeChecker::new();
                     if type_checker.check(&ast).is_ok()
-                        && let Some((def_span, _)) = type_checker.get_definition_location(&name) {
-                            let location = Location {
-                                uri: uri.clone(),
-                                range: span_to_range(def_span),
-                            };
-                            return Ok(Some(GotoDefinitionResponse::Scalar(location)));
-                        }
+                        && let Some((def_span, _)) = type_checker.get_definition_location(&name)
+                    {
+                        let location = Location {
+                            uri: uri.clone(),
+                            range: span_to_range(def_span),
+                        };
+                        return Ok(Some(GotoDefinitionResponse::Scalar(location)));
+                    }
                 }
             }
         }

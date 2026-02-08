@@ -100,13 +100,14 @@ impl<'a> Parser<'a> {
         if let ItemKind::Function(ref mut func) = kind {
             for attr in &attrs {
                 if (attr.name.name == "pre" || attr.name.name == "post")
-                    && let Some(contract) = Self::extract_contract(attr) {
-                        if attr.name.name == "pre" {
-                            func.preconditions.push(contract);
-                        } else {
-                            func.postconditions.push(contract);
-                        }
+                    && let Some(contract) = Self::extract_contract(attr)
+                {
+                    if attr.name.name == "pre" {
+                        func.preconditions.push(contract);
+                    } else {
+                        func.postconditions.push(contract);
                     }
+                }
             }
         }
 
@@ -131,13 +132,16 @@ impl<'a> Parser<'a> {
         let condition = condition_arg.expr.clone()?;
 
         // Find optional message
-        let message = attr.args.iter()
+        let message = attr
+            .args
+            .iter()
             .find(|a| a.name.name == "message")
             .and_then(|a| {
                 if let Some(lit) = &a.value
-                    && let LiteralKind::String(s) = &lit.kind {
-                        return Some(s.clone());
-                    }
+                    && let LiteralKind::String(s) = &lit.kind
+                {
+                    return Some(s.clone());
+                }
                 None
             });
 
@@ -259,9 +263,14 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_function(&mut self, is_async: bool, is_unsafe: bool, vis: Visibility) -> Result<ItemKind> {
+    fn parse_function(
+        &mut self,
+        is_async: bool,
+        is_unsafe: bool,
+        vis: Visibility,
+    ) -> Result<ItemKind> {
         let start = self.current_span();
-        self.expect_contextual("f")?;  // f is now a contextual keyword
+        self.expect_contextual("f")?; // f is now a contextual keyword
         let name = self.parse_ident()?;
 
         let generics = self.parse_optional_generics()?;
@@ -419,7 +428,7 @@ impl<'a> Parser<'a> {
 
     fn parse_struct(&mut self, vis: Visibility) -> Result<Struct> {
         let start = self.current_span();
-        self.expect_contextual("s")?;  // s is now a contextual keyword
+        self.expect_contextual("s")?; // s is now a contextual keyword
         let name = self.parse_ident()?;
         let generics = self.parse_optional_generics()?;
 
@@ -533,7 +542,7 @@ impl<'a> Parser<'a> {
 
     fn parse_enum(&mut self, vis: Visibility) -> Result<Enum> {
         let start = self.current_span();
-        self.expect_contextual("e")?;  // e is now a contextual keyword
+        self.expect_contextual("e")?; // e is now a contextual keyword
         let name = self.parse_ident()?;
         let generics = self.parse_optional_generics()?;
 
@@ -642,7 +651,7 @@ impl<'a> Parser<'a> {
 
     fn parse_trait(&mut self, is_unsafe: bool, vis: Visibility) -> Result<Trait> {
         let start = self.current_span();
-        self.expect_contextual("t")?;  // t is now a contextual keyword
+        self.expect_contextual("t")?; // t is now a contextual keyword
         let name = self.parse_ident()?;
         let generics = self.parse_optional_generics()?;
 
@@ -719,7 +728,8 @@ impl<'a> Parser<'a> {
                 other => Err(ParseError::new(
                     format!("Expected function in trait, got {:?}", other),
                     self.current_span(),
-                ).into()),
+                )
+                .into()),
             }
         } else {
             Err(self.error("expected trait item (type or f)"))
@@ -728,7 +738,7 @@ impl<'a> Parser<'a> {
 
     fn parse_impl(&mut self, is_unsafe: bool) -> Result<Impl> {
         let start = self.current_span();
-        self.expect_contextual("i")?;  // i is now a contextual keyword
+        self.expect_contextual("i")?; // i is now a contextual keyword
 
         let generics = self.parse_optional_generics()?;
 
@@ -806,7 +816,10 @@ impl<'a> Parser<'a> {
     fn parse_impl_item(&mut self) -> Result<ImplItem> {
         if self.check(TokenKind::Type) {
             Ok(ImplItem::TypeAlias(self.parse_type_alias()?))
-        } else if self.is_function_keyword() || self.check(TokenKind::As) || self.check(TokenKind::Pub) {
+        } else if self.is_function_keyword()
+            || self.check(TokenKind::As)
+            || self.check(TokenKind::Pub)
+        {
             let vis = self.parse_visibility()?;
             let is_async = self.match_token(TokenKind::As);
             match self.parse_function(is_async, false, vis)? {
@@ -814,7 +827,8 @@ impl<'a> Parser<'a> {
                 other => Err(ParseError::new(
                     format!("Expected function in impl, got {:?}", other),
                     self.current_span(),
-                ).into()),
+                )
+                .into()),
             }
         } else {
             Err(self.error("expected impl item (type or f)"))
@@ -884,7 +898,10 @@ impl<'a> Parser<'a> {
                     }
                 }
                 self.expect(TokenKind::RBrace)?;
-                return Ok(UseTree::Path(segments, Some(Box::new(UseTree::Group(trees)))));
+                return Ok(UseTree::Path(
+                    segments,
+                    Some(Box::new(UseTree::Group(trees))),
+                ));
             }
             segments.push(self.parse_ident()?);
         }
@@ -1759,7 +1776,11 @@ impl<'a> Parser<'a> {
         if self.match_token(TokenKind::Amp) {
             let is_mut = self.match_token(TokenKind::Mut);
             let expr = self.parse_unary()?;
-            let op = if is_mut { UnaryOp::RefMut } else { UnaryOp::Ref };
+            let op = if is_mut {
+                UnaryOp::RefMut
+            } else {
+                UnaryOp::Ref
+            };
             return Ok(Expr {
                 kind: ExprKind::Unary(op, Box::new(expr)),
                 span: start.merge(self.previous_span()),
@@ -1812,27 +1833,32 @@ impl<'a> Parser<'a> {
                 // Don't treat ( as function call after block-level expressions
                 // (while, for, loop, if, match) — prevents parsing next-line tuple
                 // as a function call on the control flow expression
-                if matches!(expr.kind,
-                    ExprKind::While(..) | ExprKind::WhileLet(..) |
-                    ExprKind::For(..) | ExprKind::Loop(..) |
-                    ExprKind::If(..) | ExprKind::Match(..) |
-                    ExprKind::Block(..)
+                if matches!(
+                    expr.kind,
+                    ExprKind::While(..)
+                        | ExprKind::WhileLet(..)
+                        | ExprKind::For(..)
+                        | ExprKind::Loop(..)
+                        | ExprKind::If(..)
+                        | ExprKind::Match(..)
+                        | ExprKind::Block(..)
                 ) {
                     break;
                 }
                 // Check if this is a type cast like i32(x) or f64(x)
                 if let ExprKind::Ident(ref name) = expr.kind
-                    && let Some(target_ty) = self.type_name_to_type(&name.name, start) {
-                        // This is a cast expression
-                        self.expect(TokenKind::LParen)?;
-                        let inner = self.parse_expr()?;
-                        self.expect(TokenKind::RParen)?;
-                        expr = Expr {
-                            kind: ExprKind::Cast(Box::new(inner), target_ty),
-                            span: start.merge(self.previous_span()),
-                        };
-                        continue;
-                    }
+                    && let Some(target_ty) = self.type_name_to_type(&name.name, start)
+                {
+                    // This is a cast expression
+                    self.expect(TokenKind::LParen)?;
+                    let inner = self.parse_expr()?;
+                    self.expect(TokenKind::RParen)?;
+                    expr = Expr {
+                        kind: ExprKind::Cast(Box::new(inner), target_ty),
+                        span: start.merge(self.previous_span()),
+                    };
+                    continue;
+                }
                 // Regular function call
                 let args = self.parse_call_args()?;
                 expr = Expr {
@@ -1841,11 +1867,15 @@ impl<'a> Parser<'a> {
                 };
             } else if self.match_token(TokenKind::LBracket) {
                 // Don't treat [ as index after block-level expressions
-                if matches!(expr.kind,
-                    ExprKind::While(..) | ExprKind::WhileLet(..) |
-                    ExprKind::For(..) | ExprKind::Loop(..) |
-                    ExprKind::If(..) | ExprKind::Match(..) |
-                    ExprKind::Block(..)
+                if matches!(
+                    expr.kind,
+                    ExprKind::While(..)
+                        | ExprKind::WhileLet(..)
+                        | ExprKind::For(..)
+                        | ExprKind::Loop(..)
+                        | ExprKind::If(..)
+                        | ExprKind::Match(..)
+                        | ExprKind::Block(..)
                 ) {
                     break;
                 }
@@ -1965,30 +1995,36 @@ impl<'a> Parser<'a> {
 
         // Check for labeled loops: 'label: for/wh/lp
         if let Some(TokenKind::Ident(name)) = self.current().map(|t| &t.kind)
-            && name.starts_with('\'') {
-                let label_name = name.clone();
-                // Peek ahead: is the next token a colon followed by a loop keyword?
-                if self.pos + 1 < self.tokens.len()
-                    && let TokenKind::Colon = &self.tokens[self.pos + 1].kind {
-                        // Check what follows the colon
-                        let has_loop_keyword = self.pos + 2 < self.tokens.len() && matches!(
-                            &self.tokens[self.pos + 2].kind,
-                            TokenKind::For | TokenKind::Wh | TokenKind::Lp
-                        );
-                        if has_loop_keyword {
-                            let label = Ident { name: label_name, span: self.current_span() };
-                            self.advance(); // skip label
-                            self.advance(); // skip colon
-                            if self.match_token(TokenKind::For) {
-                                return self.parse_for_expr_with_label(start, Some(label));
-                            } else if self.check(TokenKind::Wh) {
-                                return self.parse_while_expr_with_label(Some(label));
-                            } else if self.check(TokenKind::Lp) {
-                                return self.parse_loop_expr_with_label(Some(label));
-                            }
-                        }
+            && name.starts_with('\'')
+        {
+            let label_name = name.clone();
+            // Peek ahead: is the next token a colon followed by a loop keyword?
+            if self.pos + 1 < self.tokens.len()
+                && let TokenKind::Colon = &self.tokens[self.pos + 1].kind
+            {
+                // Check what follows the colon
+                let has_loop_keyword = self.pos + 2 < self.tokens.len()
+                    && matches!(
+                        &self.tokens[self.pos + 2].kind,
+                        TokenKind::For | TokenKind::Wh | TokenKind::Lp
+                    );
+                if has_loop_keyword {
+                    let label = Ident {
+                        name: label_name,
+                        span: self.current_span(),
+                    };
+                    self.advance(); // skip label
+                    self.advance(); // skip colon
+                    if self.match_token(TokenKind::For) {
+                        return self.parse_for_expr_with_label(start, Some(label));
+                    } else if self.check(TokenKind::Wh) {
+                        return self.parse_while_expr_with_label(Some(label));
+                    } else if self.check(TokenKind::Lp) {
+                        return self.parse_loop_expr_with_label(Some(label));
                     }
+                }
             }
+        }
 
         if self.match_token(TokenKind::For) {
             return self.parse_for_expr(start);
@@ -2312,7 +2348,12 @@ impl<'a> Parser<'a> {
                                 kind: ExprKind::Ident(Ident::new("str", span)),
                                 span,
                             }),
-                            vec![Arg { name: None, value: expr, pass_mode: PassMode::Owned, span }],
+                            vec![Arg {
+                                name: None,
+                                value: expr,
+                                pass_mode: PassMode::Owned,
+                                span,
+                            }],
                         ),
                         span,
                     };
@@ -2350,8 +2391,9 @@ impl<'a> Parser<'a> {
         if !lex_errors.is_empty() {
             return Err(ParseError::new(
                 format!("error in f-string expression: {}", lex_errors[0].message),
-                span
-            ).into());
+                span,
+            )
+            .into());
         }
 
         // Filter out error tokens
@@ -2360,8 +2402,9 @@ impl<'a> Parser<'a> {
             if let TokenKind::Error(msg) = &tok.kind {
                 return Err(ParseError::new(
                     format!("error in f-string expression: {}", msg),
-                    span
-                ).into());
+                    span,
+                )
+                .into());
             }
             clean_tokens.push(tok);
         }
@@ -2411,7 +2454,9 @@ impl<'a> Parser<'a> {
                         self.advance();
                         self.parse_if_expr(self.current_span())?
                     } else {
-                        return Err(self.error("expected expression or indented block after 'else'"));
+                        return Err(
+                            self.error("expected expression or indented block after 'else'")
+                        );
                     }
                 } else if self.check(TokenKind::If) {
                     // else if on same line
@@ -2428,10 +2473,7 @@ impl<'a> Parser<'a> {
                 // No else branch — restore position so we don't consume
                 // newlines that belong to the parent scope
                 self.pos = saved_pos;
-                (
-                    IfBranch::Expr(Box::new(then_expr)),
-                    None,
-                )
+                (IfBranch::Expr(Box::new(then_expr)), None)
             }
         } else {
             // Block if
@@ -2447,7 +2489,8 @@ impl<'a> Parser<'a> {
                             return Err(ParseError::new(
                                 "Expected if expression after 'else if'",
                                 else_if.span,
-                            ).into());
+                            )
+                            .into());
                         }
                     }
                 } else {
@@ -2472,7 +2515,7 @@ impl<'a> Parser<'a> {
 
     fn parse_match_expr(&mut self) -> Result<Expr> {
         let start = self.current_span();
-        self.expect_contextual("m")?;  // m is now a contextual keyword
+        self.expect_contextual("m")?; // m is now a contextual keyword
         let scrutinee = self.parse_expr()?;
 
         let arms = if self.check(TokenKind::LBrace) {
@@ -3489,8 +3532,12 @@ impl<'a> Parser<'a> {
         // Struct with body: s Name { or s Name[ or s Name(
         matches!(
             self.peek_kind(2),
-            Some(TokenKind::LBrace) | Some(TokenKind::LBracket) | Some(TokenKind::LParen)
-                | Some(TokenKind::Newline) | Some(TokenKind::Eof) | None
+            Some(TokenKind::LBrace)
+                | Some(TokenKind::LBracket)
+                | Some(TokenKind::LParen)
+                | Some(TokenKind::Newline)
+                | Some(TokenKind::Eof)
+                | None
         )
     }
 
@@ -3507,8 +3554,10 @@ impl<'a> Parser<'a> {
         // Inline enum: e Name = Variant | ...
         matches!(
             self.peek_kind(2),
-            Some(TokenKind::LBrace) | Some(TokenKind::LBracket) | Some(TokenKind::Newline)
-                | Some(TokenKind::Eq)  // Inline enum: e Bool = True | False
+            Some(TokenKind::LBrace)
+                | Some(TokenKind::LBracket)
+                | Some(TokenKind::Newline)
+                | Some(TokenKind::Eq) // Inline enum: e Bool = True | False
         )
     }
 
@@ -3523,7 +3572,10 @@ impl<'a> Parser<'a> {
         }
         matches!(
             self.peek_kind(2),
-            Some(TokenKind::LBrace) | Some(TokenKind::LBracket) | Some(TokenKind::Colon) | Some(TokenKind::Newline)
+            Some(TokenKind::LBrace)
+                | Some(TokenKind::LBracket)
+                | Some(TokenKind::Colon)
+                | Some(TokenKind::Newline)
         )
     }
 
@@ -3611,11 +3663,21 @@ impl<'a> Parser<'a> {
         // Check if this is a built-in numeric type that supports casting
         let is_cast_type = matches!(
             name,
-            "i8" | "i16" | "i32" | "i64" | "i128" |
-            "u8" | "u16" | "u32" | "u64" | "u128" |
-            "isize" | "usize" |
-            "f32" | "f64" |
-            "Int" | "Float"
+            "i8" | "i16"
+                | "i32"
+                | "i64"
+                | "i128"
+                | "u8"
+                | "u16"
+                | "u32"
+                | "u64"
+                | "u128"
+                | "isize"
+                | "usize"
+                | "f32"
+                | "f64"
+                | "Int"
+                | "Float"
         );
 
         if is_cast_type {
@@ -3726,24 +3788,25 @@ impl<'a> Parser<'a> {
         while !self.at_end() {
             // If we just passed a newline at column 0, we might be at a new item
             if let Some(prev) = self.tokens.get(self.pos.saturating_sub(1))
-                && prev.kind == TokenKind::Newline {
-                    // Check if current token starts a new item
-                    // Single-letter keywords are now contextual (emitted as Ident)
-                    if self.is_item_start()
-                        || matches!(
-                            self.current_kind(),
-                            Some(TokenKind::Type) // type alias
+                && prev.kind == TokenKind::Newline
+            {
+                // Check if current token starts a new item
+                // Single-letter keywords are now contextual (emitted as Ident)
+                if self.is_item_start()
+                    || matches!(
+                        self.current_kind(),
+                        Some(TokenKind::Type) // type alias
                             | Some(TokenKind::Us)  // use
                             | Some(TokenKind::Md)  // module
                             | Some(TokenKind::At)  // attribute (starts an item)
                             | Some(TokenKind::As)  // async modifier
                             | Some(TokenKind::Un)  // unsafe modifier
                             | Some(TokenKind::Pub) // pub modifier
-                        )
-                    {
-                        return;
-                    }
+                    )
+                {
+                    return;
                 }
+            }
 
             self.advance();
         }

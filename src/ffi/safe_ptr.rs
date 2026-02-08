@@ -25,10 +25,21 @@ impl fmt::Display for PtrError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             PtrError::IndexOutOfBounds { index, len } => {
-                write!(f, "index {} out of bounds for allocation of size {}", index, len)
+                write!(
+                    f,
+                    "index {} out of bounds for allocation of size {}",
+                    index, len
+                )
             }
-            PtrError::UseAfterFree { id, freed_generation } => {
-                write!(f, "use-after-free: allocation {} was freed at generation {}", id, freed_generation)
+            PtrError::UseAfterFree {
+                id,
+                freed_generation,
+            } => {
+                write!(
+                    f,
+                    "use-after-free: allocation {} was freed at generation {}",
+                    id, freed_generation
+                )
             }
             PtrError::NullPointer => write!(f, "null pointer dereference"),
             PtrError::InvalidAllocation { id } => {
@@ -67,19 +78,24 @@ impl<T: Clone> SafePtr<T> {
     /// Get a mutable reference to the element at `index`, with bounds checking.
     pub fn get_mut(&mut self, index: usize) -> Result<&mut T, PtrError> {
         let len = self.data.len();
-        self.data.get_mut(index).ok_or(PtrError::IndexOutOfBounds {
-            index,
-            len,
-        })
+        self.data
+            .get_mut(index)
+            .ok_or(PtrError::IndexOutOfBounds { index, len })
     }
 
     /// Get a slice of the data with bounds checking.
     pub fn slice(&self, start: usize, end: usize) -> Result<&[T], PtrError> {
         if start > self.data.len() {
-            return Err(PtrError::IndexOutOfBounds { index: start, len: self.data.len() });
+            return Err(PtrError::IndexOutOfBounds {
+                index: start,
+                len: self.data.len(),
+            });
         }
         if end > self.data.len() {
-            return Err(PtrError::IndexOutOfBounds { index: end, len: self.data.len() });
+            return Err(PtrError::IndexOutOfBounds {
+                index: end,
+                len: self.data.len(),
+            });
         }
         Ok(&self.data[start..end])
     }
@@ -134,17 +150,26 @@ impl MemoryArena {
         self.next_id += 1;
         let generation = self.current_generation;
 
-        self.allocations.insert(id, AllocationInfo {
-            is_live: true,
-            freed_generation: 0,
-        });
+        self.allocations.insert(
+            id,
+            AllocationInfo {
+                is_live: true,
+                freed_generation: 0,
+            },
+        );
 
-        SafePtr { id, generation, data }
+        SafePtr {
+            id,
+            generation,
+            data,
+        }
     }
 
     /// Free an allocation by ID. Increments the generation counter.
     pub fn free(&mut self, id: u64) -> Result<(), PtrError> {
-        let info = self.allocations.get_mut(&id)
+        let info = self
+            .allocations
+            .get_mut(&id)
             .ok_or(PtrError::InvalidAllocation { id })?;
 
         if !info.is_live {
@@ -162,7 +187,9 @@ impl MemoryArena {
 
     /// Validate that a SafePtr is still valid (not freed).
     pub fn validate<T: Clone>(&self, ptr: &SafePtr<T>) -> Result<(), PtrError> {
-        let info = self.allocations.get(&ptr.id)
+        let info = self
+            .allocations
+            .get(&ptr.id)
             .ok_or(PtrError::InvalidAllocation { id: ptr.id })?;
 
         if !info.is_live {
@@ -203,7 +230,10 @@ mod tests {
 
         assert_eq!(*ptr.get(0).unwrap(), 1);
         assert_eq!(*ptr.get(4).unwrap(), 5);
-        assert!(matches!(ptr.get(5), Err(PtrError::IndexOutOfBounds { index: 5, len: 5 })));
+        assert!(matches!(
+            ptr.get(5),
+            Err(PtrError::IndexOutOfBounds { index: 5, len: 5 })
+        ));
     }
 
     #[test]
@@ -212,7 +242,10 @@ mod tests {
         let ptr = arena.alloc(vec![10, 20, 30, 40, 50]);
 
         assert_eq!(ptr.slice(1, 4).unwrap(), &[20, 30, 40]);
-        assert!(matches!(ptr.slice(0, 6), Err(PtrError::IndexOutOfBounds { .. })));
+        assert!(matches!(
+            ptr.slice(0, 6),
+            Err(PtrError::IndexOutOfBounds { .. })
+        ));
     }
 
     #[test]
@@ -228,7 +261,10 @@ mod tests {
         arena.free(id).unwrap();
 
         // Should detect use-after-free
-        assert!(matches!(arena.validate(&ptr), Err(PtrError::UseAfterFree { .. })));
+        assert!(matches!(
+            arena.validate(&ptr),
+            Err(PtrError::UseAfterFree { .. })
+        ));
     }
 
     #[test]

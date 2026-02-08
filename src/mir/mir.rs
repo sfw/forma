@@ -77,8 +77,7 @@ pub struct MirContract {
 }
 
 /// How a parameter is passed at the MIR level.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PassMode {
     /// Pass by value (default)
     #[default]
@@ -88,7 +87,6 @@ pub enum PassMode {
     /// Pass by mutable reference
     RefMut,
 }
-
 
 /// A function in MIR.
 #[derive(Debug, Clone)]
@@ -455,7 +453,9 @@ impl fmt::Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
             StatementKind::Assign(local, rvalue) => write!(f, "{} = {}", local, rvalue),
-            StatementKind::IndexAssign(local, index, value) => write!(f, "{}[{}] = {}", local, index, value),
+            StatementKind::IndexAssign(local, index, value) => {
+                write!(f, "{}[{}] = {}", local, index, value)
+            }
             StatementKind::Nop => write!(f, "nop"),
         }
     }
@@ -500,7 +500,11 @@ impl fmt::Display for Rvalue {
                 }
                 write!(f, " }}")
             }
-            Rvalue::Enum { type_name, variant, fields } => {
+            Rvalue::Enum {
+                type_name,
+                variant,
+                fields,
+            } => {
                 write!(f, "{}::{}", type_name, variant)?;
                 if !fields.is_empty() {
                     write!(f, "(")?;
@@ -520,7 +524,10 @@ impl fmt::Display for Rvalue {
             Rvalue::TupleField(op, idx) => write!(f, "{}.{}", op, idx),
             Rvalue::Index(base, idx) => write!(f, "{}[{}]", base, idx),
             Rvalue::Cast(op, ty) => write!(f, "{} as {}", op, ty),
-            Rvalue::Closure { func_name, captures } => {
+            Rvalue::Closure {
+                func_name,
+                captures,
+            } => {
                 write!(f, "closure {}(", func_name)?;
                 for (i, cap) in captures.iter().enumerate() {
                     if i > 0 {
@@ -710,8 +717,7 @@ mod tests {
         func.block_mut(else_block).push(Statement {
             kind: StatementKind::Assign(result, Rvalue::Use(Operand::Local(x))),
         });
-        func.block_mut(else_block)
-            .terminate(Terminator::Goto(exit));
+        func.block_mut(else_block).terminate(Terminator::Goto(exit));
 
         // Exit: return result
         func.block_mut(exit)

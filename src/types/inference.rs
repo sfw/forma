@@ -10,9 +10,9 @@ use std::collections::HashMap;
 
 use crate::lexer::Span;
 use crate::parser::{
-    BinOp, Block, Expr, ExprKind, FnBody, GenericParam, Generics, Item, ItemKind,
+    BinOp, Block, Expr, ExprKind, FnBody, GenericArg, GenericParam, Generics, Item, ItemKind,
     LiteralKind, PassMode, Pattern, PatternKind, Stmt, StmtKind, Type as AstType,
-    TypeKind as AstTypeKind, UnaryOp, VariantKind, GenericArg,
+    TypeKind as AstTypeKind, UnaryOp, VariantKind,
 };
 
 use super::types::{Mutability, Substitution, Ty, TypeId, TypeScheme, TypeVar};
@@ -20,12 +20,12 @@ use super::types::{Mutability, Substitution, Ty, TypeId, TypeScheme, TypeVar};
 /// Reserved TypeVar IDs for method type substitution.
 /// These are used to represent generic parameters in builtin method signatures.
 pub mod reserved_type_vars {
-    pub const ELEM_TYPE: u32 = u32::MAX;      // T (element type)
-    pub const KEY_TYPE: u32 = u32::MAX - 1;   // K (key type)
+    pub const ELEM_TYPE: u32 = u32::MAX; // T (element type)
+    pub const KEY_TYPE: u32 = u32::MAX - 1; // K (key type)
     pub const VALUE_TYPE: u32 = u32::MAX - 2; // V (value type)
-    pub const OPTION_T: u32 = u32::MAX - 3;   // Option's T
-    pub const RESULT_T: u32 = u32::MAX - 4;   // Result's T
-    pub const RESULT_E: u32 = u32::MAX - 5;   // Result's E
+    pub const OPTION_T: u32 = u32::MAX - 3; // Option's T
+    pub const RESULT_T: u32 = u32::MAX - 4; // Result's T
+    pub const RESULT_E: u32 = u32::MAX - 5; // Result's E
 }
 
 /// Type error during inference.
@@ -127,7 +127,12 @@ impl TypeEnv {
             TypeDef::Enum {
                 type_params: vec!["T".to_string()],
                 variants: vec![
-                    ("Some".to_string(), vec![Ty::Var(TypeVar { id: reserved_type_vars::OPTION_T })]),
+                    (
+                        "Some".to_string(),
+                        vec![Ty::Var(TypeVar {
+                            id: reserved_type_vars::OPTION_T,
+                        })],
+                    ),
                     ("None".to_string(), vec![]),
                 ],
             },
@@ -142,7 +147,10 @@ impl TypeEnv {
         );
         env.bindings.insert(
             "Some".to_string(),
-            TypeScheme { vars: vec![some_var], ty: some_type },
+            TypeScheme {
+                vars: vec![some_var],
+                ty: some_type,
+            },
         );
 
         // None: Option[T]
@@ -150,7 +158,10 @@ impl TypeEnv {
         let none_type = Ty::Option(Box::new(Ty::Var(none_var)));
         env.bindings.insert(
             "None".to_string(),
-            TypeScheme { vars: vec![none_var], ty: none_type },
+            TypeScheme {
+                vars: vec![none_var],
+                ty: none_type,
+            },
         );
 
         // Add Result type
@@ -159,8 +170,18 @@ impl TypeEnv {
             TypeDef::Enum {
                 type_params: vec!["T".to_string(), "E".to_string()],
                 variants: vec![
-                    ("Ok".to_string(), vec![Ty::Var(TypeVar { id: reserved_type_vars::RESULT_T })]),
-                    ("Err".to_string(), vec![Ty::Var(TypeVar { id: reserved_type_vars::RESULT_E })]),
+                    (
+                        "Ok".to_string(),
+                        vec![Ty::Var(TypeVar {
+                            id: reserved_type_vars::RESULT_T,
+                        })],
+                    ),
+                    (
+                        "Err".to_string(),
+                        vec![Ty::Var(TypeVar {
+                            id: reserved_type_vars::RESULT_E,
+                        })],
+                    ),
                 ],
             },
         );
@@ -175,7 +196,10 @@ impl TypeEnv {
         );
         env.bindings.insert(
             "Ok".to_string(),
-            TypeScheme { vars: vec![ok_t, ok_e], ty: ok_type },
+            TypeScheme {
+                vars: vec![ok_t, ok_e],
+                ty: ok_type,
+            },
         );
 
         // Err: E -> Result[T, E]
@@ -183,18 +207,28 @@ impl TypeEnv {
         let err_e = TypeVar::fresh();
         let err_type = Ty::Fn(
             vec![Ty::Var(err_e)],
-            Box::new(Ty::Result(Box::new(Ty::Var(err_t)), Box::new(Ty::Var(err_e)))),
+            Box::new(Ty::Result(
+                Box::new(Ty::Var(err_t)),
+                Box::new(Ty::Var(err_e)),
+            )),
         );
         env.bindings.insert(
             "Err".to_string(),
-            TypeScheme { vars: vec![err_t, err_e], ty: err_type },
+            TypeScheme {
+                vars: vec![err_t, err_e],
+                ty: err_type,
+            },
         );
 
         // Register variant-to-enum mappings for pattern matching
-        env.variant_to_enum.insert("Some".to_string(), "Option".to_string());
-        env.variant_to_enum.insert("None".to_string(), "Option".to_string());
-        env.variant_to_enum.insert("Ok".to_string(), "Result".to_string());
-        env.variant_to_enum.insert("Err".to_string(), "Result".to_string());
+        env.variant_to_enum
+            .insert("Some".to_string(), "Option".to_string());
+        env.variant_to_enum
+            .insert("None".to_string(), "Option".to_string());
+        env.variant_to_enum
+            .insert("Ok".to_string(), "Result".to_string());
+        env.variant_to_enum
+            .insert("Err".to_string(), "Result".to_string());
 
         // ===== Built-in functions =====
 
@@ -203,14 +237,20 @@ impl TypeEnv {
         let print_var = TypeVar::fresh();
         env.bindings.insert(
             "print".to_string(),
-            TypeScheme { vars: vec![print_var], ty: Ty::Fn(vec![Ty::Var(print_var)], Box::new(Ty::Unit)) },
+            TypeScheme {
+                vars: vec![print_var],
+                ty: Ty::Fn(vec![Ty::Var(print_var)], Box::new(Ty::Unit)),
+            },
         );
 
         // str: T -> Str (convert any value to string)
         let str_var = TypeVar::fresh();
         env.bindings.insert(
             "str".to_string(),
-            TypeScheme { vars: vec![str_var], ty: Ty::Fn(vec![Ty::Var(str_var)], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![str_var],
+                ty: Ty::Fn(vec![Ty::Var(str_var)], Box::new(Ty::Str)),
+            },
         );
 
         // Vec operations
@@ -218,27 +258,42 @@ impl TypeEnv {
         let vec_new_t = TypeVar::fresh();
         env.bindings.insert(
             "vec_new".to_string(),
-            TypeScheme { vars: vec![vec_new_t], ty: Ty::Fn(vec![], Box::new(Ty::List(Box::new(Ty::Var(vec_new_t))))) },
+            TypeScheme {
+                vars: vec![vec_new_t],
+                ty: Ty::Fn(vec![], Box::new(Ty::List(Box::new(Ty::Var(vec_new_t))))),
+            },
         );
 
         // abs: Int -> Int
         env.bindings.insert(
             "abs".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)),
+            },
         );
 
         // len: [T] -> Int (alias for vec_len)
         let len_t = TypeVar::fresh();
         env.bindings.insert(
             "len".to_string(),
-            TypeScheme { vars: vec![len_t], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Var(len_t)))], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![len_t],
+                ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Var(len_t)))], Box::new(Ty::Int)),
+            },
         );
 
         // vec_len: [T] -> Int
         let vec_len_t = TypeVar::fresh();
         env.bindings.insert(
             "vec_len".to_string(),
-            TypeScheme { vars: vec![vec_len_t], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Var(vec_len_t)))], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![vec_len_t],
+                ty: Ty::Fn(
+                    vec![Ty::List(Box::new(Ty::Var(vec_len_t)))],
+                    Box::new(Ty::Int),
+                ),
+            },
         );
 
         // vec_push: ([T], T) -> [T]
@@ -249,8 +304,8 @@ impl TypeEnv {
                 vars: vec![vec_push_t],
                 ty: Ty::Fn(
                     vec![Ty::List(Box::new(Ty::Var(vec_push_t))), Ty::Var(vec_push_t)],
-                    Box::new(Ty::List(Box::new(Ty::Var(vec_push_t))))
-                )
+                    Box::new(Ty::List(Box::new(Ty::Var(vec_push_t)))),
+                ),
             },
         );
 
@@ -264,9 +319,9 @@ impl TypeEnv {
                     vec![Ty::List(Box::new(Ty::Var(vec_pop_t)))],
                     Box::new(Ty::Tuple(vec![
                         Ty::List(Box::new(Ty::Var(vec_pop_t))),
-                        Ty::Option(Box::new(Ty::Var(vec_pop_t)))
-                    ]))
-                )
+                        Ty::Option(Box::new(Ty::Var(vec_pop_t))),
+                    ])),
+                ),
             },
         );
 
@@ -278,8 +333,8 @@ impl TypeEnv {
                 vars: vec![vec_get_t],
                 ty: Ty::Fn(
                     vec![Ty::List(Box::new(Ty::Var(vec_get_t))), Ty::Int],
-                    Box::new(Ty::Option(Box::new(Ty::Var(vec_get_t))))
-                )
+                    Box::new(Ty::Option(Box::new(Ty::Var(vec_get_t)))),
+                ),
             },
         );
 
@@ -290,9 +345,13 @@ impl TypeEnv {
             TypeScheme {
                 vars: vec![vec_set_t],
                 ty: Ty::Fn(
-                    vec![Ty::List(Box::new(Ty::Var(vec_set_t))), Ty::Int, Ty::Var(vec_set_t)],
-                    Box::new(Ty::List(Box::new(Ty::Var(vec_set_t))))
-                )
+                    vec![
+                        Ty::List(Box::new(Ty::Var(vec_set_t))),
+                        Ty::Int,
+                        Ty::Var(vec_set_t),
+                    ],
+                    Box::new(Ty::List(Box::new(Ty::Var(vec_set_t)))),
+                ),
             },
         );
 
@@ -304,8 +363,8 @@ impl TypeEnv {
                 vars: vec![vec_first_t],
                 ty: Ty::Fn(
                     vec![Ty::List(Box::new(Ty::Var(vec_first_t)))],
-                    Box::new(Ty::Option(Box::new(Ty::Var(vec_first_t))))
-                )
+                    Box::new(Ty::Option(Box::new(Ty::Var(vec_first_t)))),
+                ),
             },
         );
 
@@ -317,8 +376,8 @@ impl TypeEnv {
                 vars: vec![vec_last_t],
                 ty: Ty::Fn(
                     vec![Ty::List(Box::new(Ty::Var(vec_last_t)))],
-                    Box::new(Ty::Option(Box::new(Ty::Var(vec_last_t))))
-                )
+                    Box::new(Ty::Option(Box::new(Ty::Var(vec_last_t)))),
+                ),
             },
         );
 
@@ -329,9 +388,12 @@ impl TypeEnv {
             TypeScheme {
                 vars: vec![vec_concat_t],
                 ty: Ty::Fn(
-                    vec![Ty::List(Box::new(Ty::Var(vec_concat_t))), Ty::List(Box::new(Ty::Var(vec_concat_t)))],
-                    Box::new(Ty::List(Box::new(Ty::Var(vec_concat_t))))
-                )
+                    vec![
+                        Ty::List(Box::new(Ty::Var(vec_concat_t))),
+                        Ty::List(Box::new(Ty::Var(vec_concat_t))),
+                    ],
+                    Box::new(Ty::List(Box::new(Ty::Var(vec_concat_t)))),
+                ),
             },
         );
 
@@ -343,8 +405,8 @@ impl TypeEnv {
                 vars: vec![vec_slice_t],
                 ty: Ty::Fn(
                     vec![Ty::List(Box::new(Ty::Var(vec_slice_t))), Ty::Int, Ty::Int],
-                    Box::new(Ty::List(Box::new(Ty::Var(vec_slice_t))))
-                )
+                    Box::new(Ty::List(Box::new(Ty::Var(vec_slice_t)))),
+                ),
             },
         );
 
@@ -356,8 +418,8 @@ impl TypeEnv {
                 vars: vec![vec_reverse_t],
                 ty: Ty::Fn(
                     vec![Ty::List(Box::new(Ty::Var(vec_reverse_t)))],
-                    Box::new(Ty::List(Box::new(Ty::Var(vec_reverse_t))))
-                )
+                    Box::new(Ty::List(Box::new(Ty::Var(vec_reverse_t)))),
+                ),
             },
         );
 
@@ -365,122 +427,191 @@ impl TypeEnv {
         // str_len: Str -> Int
         env.bindings.insert(
             "str_len".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Int)),
+            },
         );
 
         // str_char_at: (Str, Int) -> Char?
         env.bindings.insert(
             "str_char_at".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Int], Box::new(Ty::Option(Box::new(Ty::Char)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str, Ty::Int],
+                    Box::new(Ty::Option(Box::new(Ty::Char))),
+                ),
+            },
         );
 
         // str_slice: (Str, Int, Int) -> Str
         env.bindings.insert(
             "str_slice".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Int, Ty::Int], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str, Ty::Int, Ty::Int], Box::new(Ty::Str)),
+            },
         );
 
         // str_contains: (Str, Str) -> Bool
         env.bindings.insert(
             "str_contains".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Bool)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Bool)),
+            },
         );
 
         // str_starts_with: (Str, Str) -> Bool
         env.bindings.insert(
             "str_starts_with".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Bool)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Bool)),
+            },
         );
 
         // str_ends_with: (Str, Str) -> Bool
         env.bindings.insert(
             "str_ends_with".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Bool)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Bool)),
+            },
         );
 
         // str_split: (Str, Str) -> [Str]
         env.bindings.insert(
             "str_split".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::List(Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str, Ty::Str],
+                    Box::new(Ty::List(Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // str_trim: Str -> Str
         env.bindings.insert(
             "str_trim".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Str)),
+            },
         );
 
         // str_to_int: Str -> Int?
         env.bindings.insert(
             "str_to_int".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Option(Box::new(Ty::Int)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Option(Box::new(Ty::Int)))),
+            },
         );
 
         // int_to_str: Int -> Str
         env.bindings.insert(
             "int_to_str".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Str)),
+            },
         );
 
         // str_to_int_radix: (Str, Int) -> Int?
         env.bindings.insert(
             "str_to_int_radix".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Int], Box::new(Ty::Option(Box::new(Ty::Int)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str, Ty::Int],
+                    Box::new(Ty::Option(Box::new(Ty::Int))),
+                ),
+            },
         );
 
         // str_replace_all: (Str, Str, Str) -> Str
         env.bindings.insert(
             "str_replace_all".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str, Ty::Str], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str, Ty::Str, Ty::Str], Box::new(Ty::Str)),
+            },
         );
 
         // str_concat: (Str, Str) -> Str
         env.bindings.insert(
             "str_concat".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Str)),
+            },
         );
 
         // Char operations
         // char_is_digit: Char -> Bool
         env.bindings.insert(
             "char_is_digit".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Char], Box::new(Ty::Bool)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Char], Box::new(Ty::Bool)),
+            },
         );
 
         // char_is_alpha: Char -> Bool
         env.bindings.insert(
             "char_is_alpha".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Char], Box::new(Ty::Bool)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Char], Box::new(Ty::Bool)),
+            },
         );
 
         // char_is_alphanumeric: Char -> Bool
         env.bindings.insert(
             "char_is_alphanumeric".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Char], Box::new(Ty::Bool)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Char], Box::new(Ty::Bool)),
+            },
         );
 
         // char_is_whitespace: Char -> Bool
         env.bindings.insert(
             "char_is_whitespace".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Char], Box::new(Ty::Bool)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Char], Box::new(Ty::Bool)),
+            },
         );
 
         // char_to_int: Char -> Int
         env.bindings.insert(
             "char_to_int".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Char], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Char], Box::new(Ty::Int)),
+            },
         );
 
         // int_to_char: Int -> Char?
         env.bindings.insert(
             "int_to_char".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Option(Box::new(Ty::Char)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Option(Box::new(Ty::Char)))),
+            },
         );
 
         // char_to_str: Char -> Str
         env.bindings.insert(
             "char_to_str".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Char], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Char], Box::new(Ty::Str)),
+            },
         );
 
         // Map operations (using Str keys for simplicity)
@@ -488,14 +619,26 @@ impl TypeEnv {
         let map_v = TypeVar::fresh();
         env.bindings.insert(
             "map_new".to_string(),
-            TypeScheme { vars: vec![map_v], ty: Ty::Fn(vec![], Box::new(Ty::Named(TypeId::new("Map"), vec![Ty::Var(map_v)]))) },
+            TypeScheme {
+                vars: vec![map_v],
+                ty: Ty::Fn(
+                    vec![],
+                    Box::new(Ty::Named(TypeId::new("Map"), vec![Ty::Var(map_v)])),
+                ),
+            },
         );
 
         // map_len: Map -> Int
         let map_len_v = TypeVar::fresh();
         env.bindings.insert(
             "map_len".to_string(),
-            TypeScheme { vars: vec![map_len_v], ty: Ty::Fn(vec![Ty::Named(TypeId::new("Map"), vec![Ty::Var(map_len_v)])], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![map_len_v],
+                ty: Ty::Fn(
+                    vec![Ty::Named(TypeId::new("Map"), vec![Ty::Var(map_len_v)])],
+                    Box::new(Ty::Int),
+                ),
+            },
         );
 
         // map_get: (Map, Str) -> V?
@@ -505,9 +648,12 @@ impl TypeEnv {
             TypeScheme {
                 vars: vec![map_get_v],
                 ty: Ty::Fn(
-                    vec![Ty::Named(TypeId::new("Map"), vec![Ty::Var(map_get_v)]), Ty::Str],
-                    Box::new(Ty::Option(Box::new(Ty::Var(map_get_v))))
-                )
+                    vec![
+                        Ty::Named(TypeId::new("Map"), vec![Ty::Var(map_get_v)]),
+                        Ty::Str,
+                    ],
+                    Box::new(Ty::Option(Box::new(Ty::Var(map_get_v)))),
+                ),
             },
         );
 
@@ -518,9 +664,13 @@ impl TypeEnv {
             TypeScheme {
                 vars: vec![map_insert_v],
                 ty: Ty::Fn(
-                    vec![Ty::Named(TypeId::new("Map"), vec![Ty::Var(map_insert_v)]), Ty::Str, Ty::Var(map_insert_v)],
-                    Box::new(Ty::Named(TypeId::new("Map"), vec![Ty::Var(map_insert_v)]))
-                )
+                    vec![
+                        Ty::Named(TypeId::new("Map"), vec![Ty::Var(map_insert_v)]),
+                        Ty::Str,
+                        Ty::Var(map_insert_v),
+                    ],
+                    Box::new(Ty::Named(TypeId::new("Map"), vec![Ty::Var(map_insert_v)])),
+                ),
             },
         );
 
@@ -531,9 +681,12 @@ impl TypeEnv {
             TypeScheme {
                 vars: vec![map_contains_v],
                 ty: Ty::Fn(
-                    vec![Ty::Named(TypeId::new("Map"), vec![Ty::Var(map_contains_v)]), Ty::Str],
-                    Box::new(Ty::Bool)
-                )
+                    vec![
+                        Ty::Named(TypeId::new("Map"), vec![Ty::Var(map_contains_v)]),
+                        Ty::Str,
+                    ],
+                    Box::new(Ty::Bool),
+                ),
             },
         );
 
@@ -544,12 +697,15 @@ impl TypeEnv {
             TypeScheme {
                 vars: vec![map_remove_v],
                 ty: Ty::Fn(
-                    vec![Ty::Named(TypeId::new("Map"), vec![Ty::Var(map_remove_v)]), Ty::Str],
+                    vec![
+                        Ty::Named(TypeId::new("Map"), vec![Ty::Var(map_remove_v)]),
+                        Ty::Str,
+                    ],
                     Box::new(Ty::Tuple(vec![
                         Ty::Named(TypeId::new("Map"), vec![Ty::Var(map_remove_v)]),
-                        Ty::Option(Box::new(Ty::Var(map_remove_v)))
-                    ]))
-                )
+                        Ty::Option(Box::new(Ty::Var(map_remove_v))),
+                    ])),
+                ),
             },
         );
 
@@ -561,8 +717,8 @@ impl TypeEnv {
                 vars: vec![map_keys_v],
                 ty: Ty::Fn(
                     vec![Ty::Named(TypeId::new("Map"), vec![Ty::Var(map_keys_v)])],
-                    Box::new(Ty::List(Box::new(Ty::Str)))
-                )
+                    Box::new(Ty::List(Box::new(Ty::Str))),
+                ),
             },
         );
 
@@ -574,8 +730,8 @@ impl TypeEnv {
                 vars: vec![map_values_v],
                 ty: Ty::Fn(
                     vec![Ty::Named(TypeId::new("Map"), vec![Ty::Var(map_values_v)])],
-                    Box::new(Ty::List(Box::new(Ty::Var(map_values_v))))
-                )
+                    Box::new(Ty::List(Box::new(Ty::Var(map_values_v)))),
+                ),
             },
         );
 
@@ -586,9 +742,13 @@ impl TypeEnv {
             TypeScheme {
                 vars: vec![map_set_v],
                 ty: Ty::Fn(
-                    vec![Ty::Named(TypeId::new("Map"), vec![Ty::Var(map_set_v)]), Ty::Str, Ty::Var(map_set_v)],
-                    Box::new(Ty::Unit)
-                )
+                    vec![
+                        Ty::Named(TypeId::new("Map"), vec![Ty::Var(map_set_v)]),
+                        Ty::Str,
+                        Ty::Var(map_set_v),
+                    ],
+                    Box::new(Ty::Unit),
+                ),
             },
         );
 
@@ -600,8 +760,8 @@ impl TypeEnv {
                 vars: vec![map_free_v],
                 ty: Ty::Fn(
                     vec![Ty::Named(TypeId::new("Map"), vec![Ty::Var(map_free_v)])],
-                    Box::new(Ty::Unit)
-                )
+                    Box::new(Ty::Unit),
+                ),
             },
         );
 
@@ -613,8 +773,8 @@ impl TypeEnv {
                 vars: vec![vec_free_v],
                 ty: Ty::Fn(
                     vec![Ty::List(Box::new(Ty::Var(vec_free_v)))],
-                    Box::new(Ty::Unit)
-                )
+                    Box::new(Ty::Unit),
+                ),
             },
         );
 
@@ -623,19 +783,28 @@ impl TypeEnv {
         let type_of_t = TypeVar::fresh();
         env.bindings.insert(
             "type_of".to_string(),
-            TypeScheme { vars: vec![type_of_t], ty: Ty::Fn(vec![Ty::Var(type_of_t)], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![type_of_t],
+                ty: Ty::Fn(vec![Ty::Var(type_of_t)], Box::new(Ty::Str)),
+            },
         );
 
         // panic: Str -> !
         env.bindings.insert(
             "panic".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Never)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Never)),
+            },
         );
 
         // assert: (Bool, Str?) -> Unit
         env.bindings.insert(
             "assert".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Bool], Box::new(Ty::Unit)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Bool], Box::new(Ty::Unit)),
+            },
         );
 
         // unwrap[T]: Option[T] -> T
@@ -645,9 +814,12 @@ impl TypeEnv {
             TypeScheme {
                 vars: vec![unwrap_t],
                 ty: Ty::Fn(
-                    vec![Ty::Named(crate::types::TypeId::new("Option".to_string()), vec![Ty::Var(unwrap_t)])],
-                    Box::new(Ty::Var(unwrap_t))
-                )
+                    vec![Ty::Named(
+                        crate::types::TypeId::new("Option".to_string()),
+                        vec![Ty::Var(unwrap_t)],
+                    )],
+                    Box::new(Ty::Var(unwrap_t)),
+                ),
             },
         );
 
@@ -658,9 +830,15 @@ impl TypeEnv {
             TypeScheme {
                 vars: vec![expect_t],
                 ty: Ty::Fn(
-                    vec![Ty::Named(crate::types::TypeId::new("Option".to_string()), vec![Ty::Var(expect_t)]), Ty::Str],
-                    Box::new(Ty::Var(expect_t))
-                )
+                    vec![
+                        Ty::Named(
+                            crate::types::TypeId::new("Option".to_string()),
+                            vec![Ty::Var(expect_t)],
+                        ),
+                        Ty::Str,
+                    ],
+                    Box::new(Ty::Var(expect_t)),
+                ),
             },
         );
 
@@ -671,9 +849,15 @@ impl TypeEnv {
             TypeScheme {
                 vars: vec![unwrap_or_t],
                 ty: Ty::Fn(
-                    vec![Ty::Named(crate::types::TypeId::new("Option".to_string()), vec![Ty::Var(unwrap_or_t)]), Ty::Var(unwrap_or_t)],
-                    Box::new(Ty::Var(unwrap_or_t))
-                )
+                    vec![
+                        Ty::Named(
+                            crate::types::TypeId::new("Option".to_string()),
+                            vec![Ty::Var(unwrap_or_t)],
+                        ),
+                        Ty::Var(unwrap_or_t),
+                    ],
+                    Box::new(Ty::Var(unwrap_or_t)),
+                ),
             },
         );
 
@@ -684,9 +868,12 @@ impl TypeEnv {
             TypeScheme {
                 vars: vec![is_some_t],
                 ty: Ty::Fn(
-                    vec![Ty::Named(crate::types::TypeId::new("Option".to_string()), vec![Ty::Var(is_some_t)])],
-                    Box::new(Ty::Bool)
-                )
+                    vec![Ty::Named(
+                        crate::types::TypeId::new("Option".to_string()),
+                        vec![Ty::Var(is_some_t)],
+                    )],
+                    Box::new(Ty::Bool),
+                ),
             },
         );
 
@@ -697,9 +884,12 @@ impl TypeEnv {
             TypeScheme {
                 vars: vec![is_none_t],
                 ty: Ty::Fn(
-                    vec![Ty::Named(crate::types::TypeId::new("Option".to_string()), vec![Ty::Var(is_none_t)])],
-                    Box::new(Ty::Bool)
-                )
+                    vec![Ty::Named(
+                        crate::types::TypeId::new("Option".to_string()),
+                        vec![Ty::Var(is_none_t)],
+                    )],
+                    Box::new(Ty::Bool),
+                ),
             },
         );
 
@@ -711,9 +901,12 @@ impl TypeEnv {
             TypeScheme {
                 vars: vec![is_ok_t, is_ok_e],
                 ty: Ty::Fn(
-                    vec![Ty::Named(crate::types::TypeId::new("Result".to_string()), vec![Ty::Var(is_ok_t), Ty::Var(is_ok_e)])],
-                    Box::new(Ty::Bool)
-                )
+                    vec![Ty::Named(
+                        crate::types::TypeId::new("Result".to_string()),
+                        vec![Ty::Var(is_ok_t), Ty::Var(is_ok_e)],
+                    )],
+                    Box::new(Ty::Bool),
+                ),
             },
         );
 
@@ -725,9 +918,12 @@ impl TypeEnv {
             TypeScheme {
                 vars: vec![is_err_t, is_err_e],
                 ty: Ty::Fn(
-                    vec![Ty::Named(crate::types::TypeId::new("Result".to_string()), vec![Ty::Var(is_err_t), Ty::Var(is_err_e)])],
-                    Box::new(Ty::Bool)
-                )
+                    vec![Ty::Named(
+                        crate::types::TypeId::new("Result".to_string()),
+                        vec![Ty::Var(is_err_t), Ty::Var(is_err_e)],
+                    )],
+                    Box::new(Ty::Bool),
+                ),
             },
         );
 
@@ -739,8 +935,11 @@ impl TypeEnv {
                 vars: vec![],
                 ty: Ty::Fn(
                     vec![Ty::Str],
-                    Box::new(Ty::Named(crate::types::TypeId::new("Result".to_string()), vec![Ty::Str, Ty::Str]))
-                )
+                    Box::new(Ty::Named(
+                        crate::types::TypeId::new("Result".to_string()),
+                        vec![Ty::Str, Ty::Str],
+                    )),
+                ),
             },
         );
 
@@ -751,15 +950,21 @@ impl TypeEnv {
                 vars: vec![],
                 ty: Ty::Fn(
                     vec![Ty::Str, Ty::Str],
-                    Box::new(Ty::Named(crate::types::TypeId::new("Result".to_string()), vec![Ty::Unit, Ty::Str]))
-                )
+                    Box::new(Ty::Named(
+                        crate::types::TypeId::new("Result".to_string()),
+                        vec![Ty::Unit, Ty::Str],
+                    )),
+                ),
             },
         );
 
         // file_exists: Str -> Bool
         env.bindings.insert(
             "file_exists".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Bool)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Bool)),
+            },
         );
 
         // file_append: (Str, Str) -> Result[Unit, Str]
@@ -769,8 +974,11 @@ impl TypeEnv {
                 vars: vec![],
                 ty: Ty::Fn(
                     vec![Ty::Str, Ty::Str],
-                    Box::new(Ty::Named(crate::types::TypeId::new("Result".to_string()), vec![Ty::Unit, Ty::Str]))
-                )
+                    Box::new(Ty::Named(
+                        crate::types::TypeId::new("Result".to_string()),
+                        vec![Ty::Unit, Ty::Str],
+                    )),
+                ),
             },
         );
 
@@ -778,7 +986,10 @@ impl TypeEnv {
         // args: () -> [Str]
         env.bindings.insert(
             "args".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![], Box::new(Ty::List(Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![], Box::new(Ty::List(Box::new(Ty::Str)))),
+            },
         );
 
         // env_get: Str -> Option[Str]
@@ -788,40 +999,58 @@ impl TypeEnv {
                 vars: vec![],
                 ty: Ty::Fn(
                     vec![Ty::Str],
-                    Box::new(Ty::Named(crate::types::TypeId::new("Option".to_string()), vec![Ty::Str]))
-                )
+                    Box::new(Ty::Named(
+                        crate::types::TypeId::new("Option".to_string()),
+                        vec![Ty::Str],
+                    )),
+                ),
             },
         );
 
         // exit: Int -> Never
         env.bindings.insert(
             "exit".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Never)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Never)),
+            },
         );
 
         // eprintln: Str -> Unit
         env.bindings.insert(
             "eprintln".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Unit)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Unit)),
+            },
         );
 
         // ===== Random number generation =====
         // random() -> Float
         env.bindings.insert(
             "random".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![], Box::new(Ty::Float)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![], Box::new(Ty::Float)),
+            },
         );
 
         // random_int(min: Int, max: Int) -> Int
         env.bindings.insert(
             "random_int".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int, Ty::Int], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int, Ty::Int], Box::new(Ty::Int)),
+            },
         );
 
         // random_bool() -> Bool
         env.bindings.insert(
             "random_bool".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![], Box::new(Ty::Bool)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![], Box::new(Ty::Bool)),
+            },
         );
 
         // random_choice([T]) -> T
@@ -830,7 +1059,10 @@ impl TypeEnv {
             "random_choice".to_string(),
             TypeScheme {
                 vars: vec![choice_var],
-                ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Var(choice_var)))], Box::new(Ty::Var(choice_var)))
+                ty: Ty::Fn(
+                    vec![Ty::List(Box::new(Ty::Var(choice_var)))],
+                    Box::new(Ty::Var(choice_var)),
+                ),
             },
         );
 
@@ -838,145 +1070,217 @@ impl TypeEnv {
         // sqrt(Float) -> Float
         env.bindings.insert(
             "sqrt".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Float)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Float)),
+            },
         );
 
         // pow(Float, Float) -> Float
         env.bindings.insert(
             "pow".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Float, Ty::Float], Box::new(Ty::Float)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Float, Ty::Float], Box::new(Ty::Float)),
+            },
         );
 
         // sin(Float) -> Float
         env.bindings.insert(
             "sin".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Float)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Float)),
+            },
         );
 
         // cos(Float) -> Float
         env.bindings.insert(
             "cos".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Float)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Float)),
+            },
         );
 
         // tan(Float) -> Float
         env.bindings.insert(
             "tan".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Float)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Float)),
+            },
         );
 
         // log(Float) -> Float (natural log)
         env.bindings.insert(
             "log".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Float)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Float)),
+            },
         );
 
         // log10(Float) -> Float
         env.bindings.insert(
             "log10".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Float)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Float)),
+            },
         );
 
         // exp(Float) -> Float
         env.bindings.insert(
             "exp".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Float)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Float)),
+            },
         );
 
         // floor(Float) -> Int
         env.bindings.insert(
             "floor".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Int)),
+            },
         );
 
         // ceil(Float) -> Int
         env.bindings.insert(
             "ceil".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Int)),
+            },
         );
 
         // round(Float) -> Int
         env.bindings.insert(
             "round".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Int)),
+            },
         );
 
         // abs_float(Float) -> Float
         env.bindings.insert(
             "abs_float".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Float)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Float)),
+            },
         );
 
         // ===== Time functions =====
         // time_now() -> Int
         env.bindings.insert(
             "time_now".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![], Box::new(Ty::Int)),
+            },
         );
 
         // time_now_ms() -> Int
         env.bindings.insert(
             "time_now_ms".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![], Box::new(Ty::Int)),
+            },
         );
 
         // time_sleep(Int) -> ()
         env.bindings.insert(
             "time_sleep".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Unit)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Unit)),
+            },
         );
 
         // sleep_ms(Int) -> () (alias for time_sleep)
         env.bindings.insert(
             "sleep_ms".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Unit)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Unit)),
+            },
         );
 
         // args_count() -> Int
         env.bindings.insert(
             "args_count".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![], Box::new(Ty::Int)),
+            },
         );
 
         // args_get(Int) -> Str
         env.bindings.insert(
             "args_get".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Str)),
+            },
         );
 
         // env_set(Str, Str) -> ()
         env.bindings.insert(
             "env_set".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Unit)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Unit)),
+            },
         );
 
         // ===== Duration functions =====
         // duration_seconds(Int) -> Int (returns milliseconds)
         env.bindings.insert(
             "duration_seconds".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)),
+            },
         );
         // duration_minutes(Int) -> Int (returns milliseconds)
         env.bindings.insert(
             "duration_minutes".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)),
+            },
         );
         // duration_hours(Int) -> Int (returns milliseconds)
         env.bindings.insert(
             "duration_hours".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)),
+            },
         );
         // duration_days(Int) -> Int (returns milliseconds)
         env.bindings.insert(
             "duration_days".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)),
+            },
         );
 
         // ===== Async functions =====
         // sleep_async(Int) -> Future[()]
         env.bindings.insert(
             "sleep_async".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Future(Box::new(Ty::Unit)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Future(Box::new(Ty::Unit)))),
+            },
         );
 
         // timeout(Int, Future[T]) -> Result[T, Str]
@@ -987,8 +1291,8 @@ impl TypeEnv {
                 vars: vec![t],
                 ty: Ty::Fn(
                     vec![Ty::Int, Ty::Future(Box::new(Ty::Var(t)))],
-                    Box::new(Ty::Result(Box::new(Ty::Var(t)), Box::new(Ty::Str)))
-                )
+                    Box::new(Ty::Result(Box::new(Ty::Var(t)), Box::new(Ty::Str))),
+                ),
             },
         );
 
@@ -1000,8 +1304,8 @@ impl TypeEnv {
                 vars: vec![t],
                 ty: Ty::Fn(
                     vec![Ty::List(Box::new(Ty::Task(Box::new(Ty::Var(t)))))],
-                    Box::new(Ty::List(Box::new(Ty::Var(t))))
-                )
+                    Box::new(Ty::List(Box::new(Ty::Var(t)))),
+                ),
             },
         );
 
@@ -1013,8 +1317,8 @@ impl TypeEnv {
                 vars: vec![t],
                 ty: Ty::Fn(
                     vec![Ty::List(Box::new(Ty::Task(Box::new(Ty::Var(t)))))],
-                    Box::new(Ty::Var(t))
-                )
+                    Box::new(Ty::Var(t)),
+                ),
             },
         );
 
@@ -1029,9 +1333,9 @@ impl TypeEnv {
                     vec![Ty::Int],
                     Box::new(Ty::Tuple(vec![
                         Ty::Sender(Box::new(Ty::Var(t))),
-                        Ty::Receiver(Box::new(Ty::Var(t)))
-                    ]))
-                )
+                        Ty::Receiver(Box::new(Ty::Var(t))),
+                    ])),
+                ),
             },
         );
 
@@ -1043,8 +1347,8 @@ impl TypeEnv {
                 vars: vec![t],
                 ty: Ty::Fn(
                     vec![Ty::Sender(Box::new(Ty::Var(t))), Ty::Var(t)],
-                    Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str)))
-                )
+                    Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str))),
+                ),
             },
         );
 
@@ -1056,8 +1360,8 @@ impl TypeEnv {
                 vars: vec![t],
                 ty: Ty::Fn(
                     vec![Ty::Receiver(Box::new(Ty::Var(t)))],
-                    Box::new(Ty::Result(Box::new(Ty::Var(t)), Box::new(Ty::Str)))
-                )
+                    Box::new(Ty::Result(Box::new(Ty::Var(t)), Box::new(Ty::Str))),
+                ),
             },
         );
 
@@ -1069,8 +1373,8 @@ impl TypeEnv {
                 vars: vec![t],
                 ty: Ty::Fn(
                     vec![Ty::Sender(Box::new(Ty::Var(t))), Ty::Var(t)],
-                    Box::new(Ty::Bool)
-                )
+                    Box::new(Ty::Bool),
+                ),
             },
         );
 
@@ -1082,8 +1386,8 @@ impl TypeEnv {
                 vars: vec![t],
                 ty: Ty::Fn(
                     vec![Ty::Receiver(Box::new(Ty::Var(t)))],
-                    Box::new(Ty::Option(Box::new(Ty::Var(t))))
-                )
+                    Box::new(Ty::Option(Box::new(Ty::Var(t)))),
+                ),
             },
         );
 
@@ -1093,10 +1397,7 @@ impl TypeEnv {
             "channel_close".to_string(),
             TypeScheme {
                 vars: vec![t],
-                ty: Ty::Fn(
-                    vec![Ty::Sender(Box::new(Ty::Var(t)))],
-                    Box::new(Ty::Unit)
-                )
+                ty: Ty::Fn(vec![Ty::Sender(Box::new(Ty::Var(t)))], Box::new(Ty::Unit)),
             },
         );
 
@@ -1107,10 +1408,7 @@ impl TypeEnv {
             "mutex_new".to_string(),
             TypeScheme {
                 vars: vec![t],
-                ty: Ty::Fn(
-                    vec![Ty::Var(t)],
-                    Box::new(Ty::Mutex(Box::new(Ty::Var(t))))
-                )
+                ty: Ty::Fn(vec![Ty::Var(t)], Box::new(Ty::Mutex(Box::new(Ty::Var(t))))),
             },
         );
 
@@ -1122,8 +1420,8 @@ impl TypeEnv {
                 vars: vec![t],
                 ty: Ty::Fn(
                     vec![Ty::Mutex(Box::new(Ty::Var(t)))],
-                    Box::new(Ty::MutexGuard(Box::new(Ty::Var(t))))
-                )
+                    Box::new(Ty::MutexGuard(Box::new(Ty::Var(t)))),
+                ),
             },
         );
 
@@ -1135,8 +1433,8 @@ impl TypeEnv {
                 vars: vec![t],
                 ty: Ty::Fn(
                     vec![Ty::Mutex(Box::new(Ty::Var(t)))],
-                    Box::new(Ty::Option(Box::new(Ty::MutexGuard(Box::new(Ty::Var(t))))))
-                )
+                    Box::new(Ty::Option(Box::new(Ty::MutexGuard(Box::new(Ty::Var(t)))))),
+                ),
             },
         );
 
@@ -1148,8 +1446,8 @@ impl TypeEnv {
                 vars: vec![t],
                 ty: Ty::Fn(
                     vec![Ty::MutexGuard(Box::new(Ty::Var(t)))],
-                    Box::new(Ty::Unit)
-                )
+                    Box::new(Ty::Unit),
+                ),
             },
         );
 
@@ -1161,8 +1459,8 @@ impl TypeEnv {
                 vars: vec![t],
                 ty: Ty::Fn(
                     vec![Ty::MutexGuard(Box::new(Ty::Var(t)))],
-                    Box::new(Ty::Var(t))
-                )
+                    Box::new(Ty::Var(t)),
+                ),
             },
         );
 
@@ -1174,8 +1472,8 @@ impl TypeEnv {
                 vars: vec![t],
                 ty: Ty::Fn(
                     vec![Ty::MutexGuard(Box::new(Ty::Var(t))), Ty::Var(t)],
-                    Box::new(Ty::Unit)
-                )
+                    Box::new(Ty::Unit),
+                ),
             },
         );
 
@@ -1183,709 +1481,1251 @@ impl TypeEnv {
         // json_parse: Str -> Result[Json, Str]
         env.bindings.insert(
             "json_parse".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Json), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str],
+                    Box::new(Ty::Result(Box::new(Ty::Json), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // json_stringify: Json -> Str
         env.bindings.insert(
             "json_stringify".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Str)),
+            },
         );
 
         // json_stringify_pretty: Json -> Str
         env.bindings.insert(
             "json_stringify_pretty".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Str)),
+            },
         );
 
         // json_get: (Json, Str) -> Json?
         env.bindings.insert(
             "json_get".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json, Ty::Str], Box::new(Ty::Option(Box::new(Ty::Json)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Json, Ty::Str],
+                    Box::new(Ty::Option(Box::new(Ty::Json))),
+                ),
+            },
         );
 
         // json_get_str: (Json, Str) -> Str?
         env.bindings.insert(
             "json_get_str".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json, Ty::Str], Box::new(Ty::Option(Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Json, Ty::Str],
+                    Box::new(Ty::Option(Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // json_get_int: (Json, Str) -> Int?
         env.bindings.insert(
             "json_get_int".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json, Ty::Str], Box::new(Ty::Option(Box::new(Ty::Int)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Json, Ty::Str],
+                    Box::new(Ty::Option(Box::new(Ty::Int))),
+                ),
+            },
         );
 
         // json_get_float: (Json, Str) -> Float?
         env.bindings.insert(
             "json_get_float".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json, Ty::Str], Box::new(Ty::Option(Box::new(Ty::Float)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Json, Ty::Str],
+                    Box::new(Ty::Option(Box::new(Ty::Float))),
+                ),
+            },
         );
 
         // json_get_bool: (Json, Str) -> Bool?
         env.bindings.insert(
             "json_get_bool".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json, Ty::Str], Box::new(Ty::Option(Box::new(Ty::Bool)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Json, Ty::Str],
+                    Box::new(Ty::Option(Box::new(Ty::Bool))),
+                ),
+            },
         );
 
         // json_get_array: (Json, Str) -> [Json]?
         env.bindings.insert(
             "json_get_array".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json, Ty::Str], Box::new(Ty::Option(Box::new(Ty::List(Box::new(Ty::Json)))))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Json, Ty::Str],
+                    Box::new(Ty::Option(Box::new(Ty::List(Box::new(Ty::Json))))),
+                ),
+            },
         );
 
         // json_array_get: (Json, Int) -> Json?
         env.bindings.insert(
             "json_array_get".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json, Ty::Int], Box::new(Ty::Option(Box::new(Ty::Json)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Json, Ty::Int],
+                    Box::new(Ty::Option(Box::new(Ty::Json))),
+                ),
+            },
         );
 
         // json_array_len: Json -> Int
         env.bindings.insert(
             "json_array_len".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Int)),
+            },
         );
 
         // json_keys: Json -> [Str]
         env.bindings.insert(
             "json_keys".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::List(Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::List(Box::new(Ty::Str)))),
+            },
         );
 
         // json_values: Json -> [Json]
         env.bindings.insert(
             "json_values".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::List(Box::new(Ty::Json)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::List(Box::new(Ty::Json)))),
+            },
         );
 
         // json_has: (Json, Str) -> Bool
         env.bindings.insert(
             "json_has".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json, Ty::Str], Box::new(Ty::Bool)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Json, Ty::Str], Box::new(Ty::Bool)),
+            },
         );
 
         // json_set: (Json, Str, Json) -> Json
         env.bindings.insert(
             "json_set".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json, Ty::Str, Ty::Json], Box::new(Ty::Json)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Json, Ty::Str, Ty::Json], Box::new(Ty::Json)),
+            },
         );
 
         // json_type: Json -> Str
         env.bindings.insert(
             "json_type".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Str)),
+            },
         );
 
         // json_is_null: Json -> Bool
         env.bindings.insert(
             "json_is_null".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Bool)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Bool)),
+            },
         );
 
         // json_is_bool: Json -> Bool
         env.bindings.insert(
             "json_is_bool".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Bool)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Bool)),
+            },
         );
 
         // json_is_number: Json -> Bool
         env.bindings.insert(
             "json_is_number".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Bool)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Bool)),
+            },
         );
 
         // json_is_string: Json -> Bool
         env.bindings.insert(
             "json_is_string".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Bool)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Bool)),
+            },
         );
 
         // json_is_array: Json -> Bool
         env.bindings.insert(
             "json_is_array".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Bool)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Bool)),
+            },
         );
 
         // json_is_object: Json -> Bool
         env.bindings.insert(
             "json_is_object".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Bool)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Bool)),
+            },
         );
 
         // json_from_str: Str -> Json
         env.bindings.insert(
             "json_from_str".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Json)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Json)),
+            },
         );
 
         // json_from_int: Int -> Json
         env.bindings.insert(
             "json_from_int".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Json)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Json)),
+            },
         );
 
         // json_from_float: Float -> Json
         env.bindings.insert(
             "json_from_float".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Json)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::Json)),
+            },
         );
 
         // json_from_bool: Bool -> Json
         env.bindings.insert(
             "json_from_bool".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Bool], Box::new(Ty::Json)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Bool], Box::new(Ty::Json)),
+            },
         );
 
         // json_null: () -> Json
         env.bindings.insert(
             "json_null".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![], Box::new(Ty::Json)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![], Box::new(Ty::Json)),
+            },
         );
 
         // json_object: () -> Json
         env.bindings.insert(
             "json_object".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![], Box::new(Ty::Json)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![], Box::new(Ty::Json)),
+            },
         );
 
         // json_array: () -> Json
         env.bindings.insert(
             "json_array".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![], Box::new(Ty::Json)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![], Box::new(Ty::Json)),
+            },
         );
 
         // json_to_value: Json -> T (returns dynamic value)
         let json_to_value_t = TypeVar::fresh();
         env.bindings.insert(
             "json_to_value".to_string(),
-            TypeScheme { vars: vec![json_to_value_t], ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Var(json_to_value_t))) },
+            TypeScheme {
+                vars: vec![json_to_value_t],
+                ty: Ty::Fn(vec![Ty::Json], Box::new(Ty::Var(json_to_value_t))),
+            },
         );
 
         // ===== Sorting functions =====
         // sort_ints: [Int] -> [Int]
         env.bindings.insert(
             "sort_ints".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Int))], Box::new(Ty::List(Box::new(Ty::Int)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::List(Box::new(Ty::Int))],
+                    Box::new(Ty::List(Box::new(Ty::Int))),
+                ),
+            },
         );
 
         // sort_ints_desc: [Int] -> [Int]
         env.bindings.insert(
             "sort_ints_desc".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Int))], Box::new(Ty::List(Box::new(Ty::Int)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::List(Box::new(Ty::Int))],
+                    Box::new(Ty::List(Box::new(Ty::Int))),
+                ),
+            },
         );
 
         // sort_floats: [Float] -> [Float]
         env.bindings.insert(
             "sort_floats".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Float))], Box::new(Ty::List(Box::new(Ty::Float)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::List(Box::new(Ty::Float))],
+                    Box::new(Ty::List(Box::new(Ty::Float))),
+                ),
+            },
         );
 
         // sort_floats_desc: [Float] -> [Float]
         env.bindings.insert(
             "sort_floats_desc".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Float))], Box::new(Ty::List(Box::new(Ty::Float)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::List(Box::new(Ty::Float))],
+                    Box::new(Ty::List(Box::new(Ty::Float))),
+                ),
+            },
         );
 
         // sort_strings: [Str] -> [Str]
         env.bindings.insert(
             "sort_strings".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Str))], Box::new(Ty::List(Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::List(Box::new(Ty::Str))],
+                    Box::new(Ty::List(Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // sort_strings_desc: [Str] -> [Str]
         env.bindings.insert(
             "sort_strings_desc".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Str))], Box::new(Ty::List(Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::List(Box::new(Ty::Str))],
+                    Box::new(Ty::List(Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // reverse: [T] -> [T]
         let reverse_t = TypeVar::fresh();
         env.bindings.insert(
             "reverse".to_string(),
-            TypeScheme { vars: vec![reverse_t], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Var(reverse_t)))], Box::new(Ty::List(Box::new(Ty::Var(reverse_t))))) },
+            TypeScheme {
+                vars: vec![reverse_t],
+                ty: Ty::Fn(
+                    vec![Ty::List(Box::new(Ty::Var(reverse_t)))],
+                    Box::new(Ty::List(Box::new(Ty::Var(reverse_t)))),
+                ),
+            },
         );
 
         // shuffle: [T] -> [T]
         let shuffle_t = TypeVar::fresh();
         env.bindings.insert(
             "shuffle".to_string(),
-            TypeScheme { vars: vec![shuffle_t], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Var(shuffle_t)))], Box::new(Ty::List(Box::new(Ty::Var(shuffle_t))))) },
+            TypeScheme {
+                vars: vec![shuffle_t],
+                ty: Ty::Fn(
+                    vec![Ty::List(Box::new(Ty::Var(shuffle_t)))],
+                    Box::new(Ty::List(Box::new(Ty::Var(shuffle_t)))),
+                ),
+            },
         );
 
         // min_of: [Int] -> Int?
         env.bindings.insert(
             "min_of".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Int))], Box::new(Ty::Option(Box::new(Ty::Int)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::List(Box::new(Ty::Int))],
+                    Box::new(Ty::Option(Box::new(Ty::Int))),
+                ),
+            },
         );
 
         // max_of: [Int] -> Int?
         env.bindings.insert(
             "max_of".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Int))], Box::new(Ty::Option(Box::new(Ty::Int)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::List(Box::new(Ty::Int))],
+                    Box::new(Ty::Option(Box::new(Ty::Int))),
+                ),
+            },
         );
 
         // sum_of: [Int] -> Int
         env.bindings.insert(
             "sum_of".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Int))], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Int))], Box::new(Ty::Int)),
+            },
         );
 
         // binary_search: ([Int], Int) -> Int?
         env.bindings.insert(
             "binary_search".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Int)), Ty::Int], Box::new(Ty::Option(Box::new(Ty::Int)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::List(Box::new(Ty::Int)), Ty::Int],
+                    Box::new(Ty::Option(Box::new(Ty::Int))),
+                ),
+            },
         );
 
         // ===== DateTime functions =====
         // time_from_parts: (Int, Int, Int, Int, Int, Int) -> Int
         env.bindings.insert(
             "time_from_parts".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int, Ty::Int, Ty::Int, Ty::Int, Ty::Int, Ty::Int], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Int, Ty::Int, Ty::Int, Ty::Int, Ty::Int, Ty::Int],
+                    Box::new(Ty::Int),
+                ),
+            },
         );
 
         // time_format: (Int, Str) -> Str
         env.bindings.insert(
             "time_format".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int, Ty::Str], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int, Ty::Str], Box::new(Ty::Str)),
+            },
         );
 
         // time_format_iso: Int -> Str
         env.bindings.insert(
             "time_format_iso".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Str)),
+            },
         );
 
         // time_format_rfc2822: Int -> Str
         env.bindings.insert(
             "time_format_rfc2822".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Str)),
+            },
         );
 
         // time_parse: (Str, Str) -> Result[Int, Str]
         env.bindings.insert(
             "time_parse".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Result(Box::new(Ty::Int), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str, Ty::Str],
+                    Box::new(Ty::Result(Box::new(Ty::Int), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // time_parse_iso: Str -> Result[Int, Str]
         env.bindings.insert(
             "time_parse_iso".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Int), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str],
+                    Box::new(Ty::Result(Box::new(Ty::Int), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // time_year: Int -> Int
         env.bindings.insert(
             "time_year".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)),
+            },
         );
 
         // time_month: Int -> Int
         env.bindings.insert(
             "time_month".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)),
+            },
         );
 
         // time_day: Int -> Int
         env.bindings.insert(
             "time_day".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)),
+            },
         );
 
         // time_hour: Int -> Int
         env.bindings.insert(
             "time_hour".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)),
+            },
         );
 
         // time_minute: Int -> Int
         env.bindings.insert(
             "time_minute".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)),
+            },
         );
 
         // time_second: Int -> Int
         env.bindings.insert(
             "time_second".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)),
+            },
         );
 
         // time_weekday: Int -> Int
         env.bindings.insert(
             "time_weekday".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)),
+            },
         );
 
         // duration_seconds: Int -> Int
         env.bindings.insert(
             "duration_seconds".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)),
+            },
         );
 
         // duration_minutes: Int -> Int
         env.bindings.insert(
             "duration_minutes".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)),
+            },
         );
 
         // duration_hours: Int -> Int
         env.bindings.insert(
             "duration_hours".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)),
+            },
         );
 
         // duration_days: Int -> Int
         env.bindings.insert(
             "duration_days".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)),
+            },
         );
 
         // time_add: (Int, Int) -> Int
         env.bindings.insert(
             "time_add".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int, Ty::Int], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int, Ty::Int], Box::new(Ty::Int)),
+            },
         );
 
         // time_sub: (Int, Int) -> Int
         env.bindings.insert(
             "time_sub".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int, Ty::Int], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int, Ty::Int], Box::new(Ty::Int)),
+            },
         );
 
         // time_diff: (Int, Int) -> Int
         env.bindings.insert(
             "time_diff".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int, Ty::Int], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int, Ty::Int], Box::new(Ty::Int)),
+            },
         );
 
         // ===== Encoding functions =====
         // base64_encode: Str -> Str
         env.bindings.insert(
             "base64_encode".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Str)),
+            },
         );
 
         // base64_decode: Str -> Result[Str, Str]
         env.bindings.insert(
             "base64_decode".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str],
+                    Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // base64_encode_bytes: [Int] -> Str
         env.bindings.insert(
             "base64_encode_bytes".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Int))], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Int))], Box::new(Ty::Str)),
+            },
         );
 
         // base64_decode_bytes: Str -> Result[[Int], Str]
         env.bindings.insert(
             "base64_decode_bytes".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::List(Box::new(Ty::Int))), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str],
+                    Box::new(Ty::Result(
+                        Box::new(Ty::List(Box::new(Ty::Int))),
+                        Box::new(Ty::Str),
+                    )),
+                ),
+            },
         );
 
         // hex_encode: Str -> Str
         env.bindings.insert(
             "hex_encode".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Str)),
+            },
         );
 
         // hex_decode: Str -> Result[Str, Str]
         env.bindings.insert(
             "hex_decode".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str],
+                    Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // hex_encode_bytes: [Int] -> Str
         env.bindings.insert(
             "hex_encode_bytes".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Int))], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Int))], Box::new(Ty::Str)),
+            },
         );
 
         // hex_decode_bytes: Str -> Result[[Int], Str]
         env.bindings.insert(
             "hex_decode_bytes".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::List(Box::new(Ty::Int))), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str],
+                    Box::new(Ty::Result(
+                        Box::new(Ty::List(Box::new(Ty::Int))),
+                        Box::new(Ty::Str),
+                    )),
+                ),
+            },
         );
 
         // ===== Hashing functions =====
         // sha256: Str -> Str
         env.bindings.insert(
             "sha256".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Str)),
+            },
         );
 
         // sha256_bytes: [Int] -> Str
         env.bindings.insert(
             "sha256_bytes".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Int))], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Int))], Box::new(Ty::Str)),
+            },
         );
 
         // hash_string: Str -> Int
         env.bindings.insert(
             "hash_string".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Int)),
+            },
         );
 
         // ===== UUID functions =====
         // uuid_v4: () -> Str
         env.bindings.insert(
             "uuid_v4".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![], Box::new(Ty::Str)),
+            },
         );
 
         // uuid_parse: Str -> Result[Str, Str]
         env.bindings.insert(
             "uuid_parse".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str],
+                    Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // ===== Regex functions =====
         // regex_match: (Str, Str) -> Bool
         env.bindings.insert(
             "regex_match".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Bool)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Bool)),
+            },
         );
 
         // regex_find: (Str, Str) -> Str?
         env.bindings.insert(
             "regex_find".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Option(Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str, Ty::Str],
+                    Box::new(Ty::Option(Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // regex_find_all: (Str, Str) -> [Str]
         env.bindings.insert(
             "regex_find_all".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::List(Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str, Ty::Str],
+                    Box::new(Ty::List(Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // regex_replace: (Str, Str, Str) -> Str
         env.bindings.insert(
             "regex_replace".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str, Ty::Str], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str, Ty::Str, Ty::Str], Box::new(Ty::Str)),
+            },
         );
 
         // regex_replace_all: (Str, Str, Str) -> Str
         env.bindings.insert(
             "regex_replace_all".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str, Ty::Str], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str, Ty::Str, Ty::Str], Box::new(Ty::Str)),
+            },
         );
 
         // regex_split: (Str, Str) -> [Str]
         env.bindings.insert(
             "regex_split".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::List(Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str, Ty::Str],
+                    Box::new(Ty::List(Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // regex_captures: (Str, Str) -> [Str]?
         env.bindings.insert(
             "regex_captures".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Option(Box::new(Ty::List(Box::new(Ty::Str)))))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str, Ty::Str],
+                    Box::new(Ty::Option(Box::new(Ty::List(Box::new(Ty::Str))))),
+                ),
+            },
         );
 
         // regex_is_valid: Str -> Bool
         env.bindings.insert(
             "regex_is_valid".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Bool)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Bool)),
+            },
         );
 
         // ===== Process functions =====
         // exec: Str -> Result[(Str, Str, Int), Str]
         env.bindings.insert(
             "exec".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Tuple(vec![Ty::Str, Ty::Str, Ty::Int])), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str],
+                    Box::new(Ty::Result(
+                        Box::new(Ty::Tuple(vec![Ty::Str, Ty::Str, Ty::Int])),
+                        Box::new(Ty::Str),
+                    )),
+                ),
+            },
         );
 
         // env_set: (Str, Str) -> ()
         env.bindings.insert(
             "env_set".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Unit)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Unit)),
+            },
         );
 
         // env_remove: Str -> ()
         env.bindings.insert(
             "env_remove".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Unit)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Unit)),
+            },
         );
 
         // env_vars: () -> {Str: Str}
         env.bindings.insert(
             "env_vars".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![], Box::new(Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![],
+                    Box::new(Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // pid: () -> Int
         env.bindings.insert(
             "pid".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![], Box::new(Ty::Int)),
+            },
         );
 
         // cwd: () -> Str
         env.bindings.insert(
             "cwd".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![], Box::new(Ty::Str)),
+            },
         );
 
         // chdir: Str -> Result[(), Str]
         env.bindings.insert(
             "chdir".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str],
+                    Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // home_dir: () -> Str?
         env.bindings.insert(
             "home_dir".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![], Box::new(Ty::Option(Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![], Box::new(Ty::Option(Box::new(Ty::Str)))),
+            },
         );
 
         // temp_dir: () -> Str
         env.bindings.insert(
             "temp_dir".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![], Box::new(Ty::Str)),
+            },
         );
 
         // ===== Path functions =====
         // path_join: [Str] -> Str
         env.bindings.insert(
             "path_join".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Str))], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Str))], Box::new(Ty::Str)),
+            },
         );
 
         // path_parent: Str -> Str?
         env.bindings.insert(
             "path_parent".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Option(Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Option(Box::new(Ty::Str)))),
+            },
         );
 
         // path_filename: Str -> Str?
         env.bindings.insert(
             "path_filename".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Option(Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Option(Box::new(Ty::Str)))),
+            },
         );
 
         // path_stem: Str -> Str?
         env.bindings.insert(
             "path_stem".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Option(Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Option(Box::new(Ty::Str)))),
+            },
         );
 
         // path_extension: Str -> Str?
         env.bindings.insert(
             "path_extension".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Option(Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Option(Box::new(Ty::Str)))),
+            },
         );
 
         // path_is_absolute: Str -> Bool
         env.bindings.insert(
             "path_is_absolute".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Bool)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Bool)),
+            },
         );
 
         // path_is_relative: Str -> Bool
         env.bindings.insert(
             "path_is_relative".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Bool)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Bool)),
+            },
         );
 
         // path_absolute: Str -> Result[Str, Str]
         env.bindings.insert(
             "path_absolute".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str],
+                    Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // file_is_file: Str -> Bool
         env.bindings.insert(
             "file_is_file".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Bool)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Bool)),
+            },
         );
 
         // file_is_dir: Str -> Bool
         env.bindings.insert(
             "file_is_dir".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Bool)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Bool)),
+            },
         );
 
         // file_size: Str -> Result[Int, Str]
         env.bindings.insert(
             "file_size".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Int), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str],
+                    Box::new(Ty::Result(Box::new(Ty::Int), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // dir_create: Str -> Result[(), Str]
         env.bindings.insert(
             "dir_create".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str],
+                    Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // dir_create_all: Str -> Result[(), Str]
         env.bindings.insert(
             "dir_create_all".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str],
+                    Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // dir_remove: Str -> Result[(), Str]
         env.bindings.insert(
             "dir_remove".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str],
+                    Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // dir_remove_all: Str -> Result[(), Str]
         env.bindings.insert(
             "dir_remove_all".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str],
+                    Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // dir_list: Str -> Result[[Str], Str]
         env.bindings.insert(
             "dir_list".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::List(Box::new(Ty::Str))), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str],
+                    Box::new(Ty::Result(
+                        Box::new(Ty::List(Box::new(Ty::Str))),
+                        Box::new(Ty::Str),
+                    )),
+                ),
+            },
         );
 
         // file_copy: (Str, Str) -> Result[(), Str]
         env.bindings.insert(
             "file_copy".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str, Ty::Str],
+                    Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // file_move: (Str, Str) -> Result[(), Str]
         env.bindings.insert(
             "file_move".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str, Ty::Str],
+                    Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // file_remove: Str -> Result[(), Str]
         env.bindings.insert(
             "file_remove".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str],
+                    Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // ===== HTTP functions =====
         // http_get: Str -> Result[(Int, Str, {Str: Str}), Str]
         env.bindings.insert(
             "http_get".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Tuple(vec![Ty::Int, Ty::Str, Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str))])), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str],
+                    Box::new(Ty::Result(
+                        Box::new(Ty::Tuple(vec![
+                            Ty::Int,
+                            Ty::Str,
+                            Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str)),
+                        ])),
+                        Box::new(Ty::Str),
+                    )),
+                ),
+            },
         );
 
         // http_post: (Str, Str) -> Result[(Int, Str, {Str: Str}), Str]
         env.bindings.insert(
             "http_post".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Result(Box::new(Ty::Tuple(vec![Ty::Int, Ty::Str, Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str))])), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str, Ty::Str],
+                    Box::new(Ty::Result(
+                        Box::new(Ty::Tuple(vec![
+                            Ty::Int,
+                            Ty::Str,
+                            Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str)),
+                        ])),
+                        Box::new(Ty::Str),
+                    )),
+                ),
+            },
         );
 
         // http_post_json: (Str, Json) -> Result[(Int, Str, {Str: Str}), Str]
         env.bindings.insert(
             "http_post_json".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Json], Box::new(Ty::Result(Box::new(Ty::Tuple(vec![Ty::Int, Ty::Str, Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str))])), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str, Ty::Json],
+                    Box::new(Ty::Result(
+                        Box::new(Ty::Tuple(vec![
+                            Ty::Int,
+                            Ty::Str,
+                            Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str)),
+                        ])),
+                        Box::new(Ty::Str),
+                    )),
+                ),
+            },
         );
 
         // http_put: (Str, Str) -> Result[(Int, Str, {Str: Str}), Str]
         env.bindings.insert(
             "http_put".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Str], Box::new(Ty::Result(Box::new(Ty::Tuple(vec![Ty::Int, Ty::Str, Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str))])), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str, Ty::Str],
+                    Box::new(Ty::Result(
+                        Box::new(Ty::Tuple(vec![
+                            Ty::Int,
+                            Ty::Str,
+                            Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str)),
+                        ])),
+                        Box::new(Ty::Str),
+                    )),
+                ),
+            },
         );
 
         // http_delete: Str -> Result[(Int, Str, {Str: Str}), Str]
         env.bindings.insert(
             "http_delete".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Tuple(vec![Ty::Int, Ty::Str, Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str))])), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str],
+                    Box::new(Ty::Result(
+                        Box::new(Ty::Tuple(vec![
+                            Ty::Int,
+                            Ty::Str,
+                            Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str)),
+                        ])),
+                        Box::new(Ty::Str),
+                    )),
+                ),
+            },
         );
 
         // ===== HTTP Server functions =====
@@ -1900,8 +2740,14 @@ impl TypeEnv {
                 fields: vec![
                     ("method".to_string(), Ty::Str),
                     ("path".to_string(), Ty::Str),
-                    ("query".to_string(), Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str))),
-                    ("headers".to_string(), Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str))),
+                    (
+                        "query".to_string(),
+                        Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str)),
+                    ),
+                    (
+                        "headers".to_string(),
+                        Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str)),
+                    ),
                     ("body".to_string(), Ty::Str),
                 ],
             },
@@ -1914,7 +2760,10 @@ impl TypeEnv {
                 type_params: vec![],
                 fields: vec![
                     ("status".to_string(), Ty::Int),
-                    ("headers".to_string(), Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str))),
+                    (
+                        "headers".to_string(),
+                        Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str)),
+                    ),
                     ("body".to_string(), Ty::Str),
                 ],
             },
@@ -1928,10 +2777,13 @@ impl TypeEnv {
                 ty: Ty::Fn(
                     vec![Ty::Int, Ty::Str],
                     Box::new(Ty::Named(
-                        crate::types::TypeId { name: "HttpResponse".to_string(), module: None },
-                        vec![]
-                    ))
-                )
+                        crate::types::TypeId {
+                            name: "HttpResponse".to_string(),
+                            module: None,
+                        },
+                        vec![],
+                    )),
+                ),
             },
         );
 
@@ -1941,12 +2793,19 @@ impl TypeEnv {
             TypeScheme {
                 vars: vec![],
                 ty: Ty::Fn(
-                    vec![Ty::Int, Ty::Str, Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str))],
+                    vec![
+                        Ty::Int,
+                        Ty::Str,
+                        Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str)),
+                    ],
                     Box::new(Ty::Named(
-                        crate::types::TypeId { name: "HttpResponse".to_string(), module: None },
-                        vec![]
-                    ))
-                )
+                        crate::types::TypeId {
+                            name: "HttpResponse".to_string(),
+                            module: None,
+                        },
+                        vec![],
+                    )),
+                ),
             },
         );
 
@@ -1958,10 +2817,13 @@ impl TypeEnv {
                 ty: Ty::Fn(
                     vec![Ty::Int, Ty::Json],
                     Box::new(Ty::Named(
-                        crate::types::TypeId { name: "HttpResponse".to_string(), module: None },
-                        vec![]
-                    ))
-                )
+                        crate::types::TypeId {
+                            name: "HttpResponse".to_string(),
+                            module: None,
+                        },
+                        vec![],
+                    )),
+                ),
             },
         );
 
@@ -1973,10 +2835,13 @@ impl TypeEnv {
                 ty: Ty::Fn(
                     vec![Ty::Str],
                     Box::new(Ty::Named(
-                        crate::types::TypeId { name: "HttpResponse".to_string(), module: None },
-                        vec![]
-                    ))
-                )
+                        crate::types::TypeId {
+                            name: "HttpResponse".to_string(),
+                            module: None,
+                        },
+                        vec![],
+                    )),
+                ),
             },
         );
 
@@ -1989,12 +2854,15 @@ impl TypeEnv {
                     vec![Ty::Str],
                     Box::new(Ty::Result(
                         Box::new(Ty::Named(
-                            crate::types::TypeId { name: "HttpResponse".to_string(), module: None },
-                            vec![]
+                            crate::types::TypeId {
+                                name: "HttpResponse".to_string(),
+                                module: None,
+                            },
+                            vec![],
                         )),
-                        Box::new(Ty::Str)
-                    ))
-                )
+                        Box::new(Ty::Str),
+                    )),
+                ),
             },
         );
 
@@ -2005,11 +2873,14 @@ impl TypeEnv {
                 vars: vec![],
                 ty: Ty::Fn(
                     vec![Ty::Named(
-                        crate::types::TypeId { name: "HttpRequest".to_string(), module: None },
-                        vec![]
+                        crate::types::TypeId {
+                            name: "HttpRequest".to_string(),
+                            module: None,
+                        },
+                        vec![],
                     )],
-                    Box::new(Ty::Result(Box::new(Ty::Json), Box::new(Ty::Str)))
-                )
+                    Box::new(Ty::Result(Box::new(Ty::Json), Box::new(Ty::Str))),
+                ),
             },
         );
 
@@ -2020,11 +2891,14 @@ impl TypeEnv {
                 vars: vec![],
                 ty: Ty::Fn(
                     vec![Ty::Named(
-                        crate::types::TypeId { name: "HttpRequest".to_string(), module: None },
-                        vec![]
+                        crate::types::TypeId {
+                            name: "HttpRequest".to_string(),
+                            module: None,
+                        },
+                        vec![],
                     )],
-                    Box::new(Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str)))
-                )
+                    Box::new(Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str))),
+                ),
             },
         );
 
@@ -2036,13 +2910,16 @@ impl TypeEnv {
                 ty: Ty::Fn(
                     vec![
                         Ty::Named(
-                            crate::types::TypeId { name: "HttpRequest".to_string(), module: None },
-                            vec![]
+                            crate::types::TypeId {
+                                name: "HttpRequest".to_string(),
+                                module: None,
+                            },
+                            vec![],
                         ),
-                        Ty::Str
+                        Ty::Str,
                     ],
-                    Box::new(Ty::Option(Box::new(Ty::Str)))
-                )
+                    Box::new(Ty::Option(Box::new(Ty::Str))),
+                ),
             },
         );
 
@@ -2054,13 +2931,16 @@ impl TypeEnv {
                 ty: Ty::Fn(
                     vec![
                         Ty::Named(
-                            crate::types::TypeId { name: "HttpRequest".to_string(), module: None },
-                            vec![]
+                            crate::types::TypeId {
+                                name: "HttpRequest".to_string(),
+                                module: None,
+                            },
+                            vec![],
                         ),
-                        Ty::Str
+                        Ty::Str,
                     ],
-                    Box::new(Ty::Option(Box::new(Ty::Str)))
-                )
+                    Box::new(Ty::Option(Box::new(Ty::Str))),
+                ),
             },
         );
 
@@ -2075,17 +2955,23 @@ impl TypeEnv {
                         Ty::Int,
                         Ty::Fn(
                             vec![Ty::Named(
-                                crate::types::TypeId { name: "HttpRequest".to_string(), module: None },
-                                vec![]
+                                crate::types::TypeId {
+                                    name: "HttpRequest".to_string(),
+                                    module: None,
+                                },
+                                vec![],
                             )],
                             Box::new(Ty::Named(
-                                crate::types::TypeId { name: "HttpResponse".to_string(), module: None },
-                                vec![]
-                            ))
-                        )
+                                crate::types::TypeId {
+                                    name: "HttpResponse".to_string(),
+                                    module: None,
+                                },
+                                vec![],
+                            )),
+                        ),
                     ],
-                    Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str)))
-                )
+                    Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str))),
+                ),
             },
         );
 
@@ -2097,10 +2983,13 @@ impl TypeEnv {
                 ty: Ty::Fn(
                     vec![Ty::Str, Ty::Str, Ty::Str],
                     Box::new(Ty::Named(
-                        crate::types::TypeId { name: "HttpRequest".to_string(), module: None },
-                        vec![]
-                    ))
-                )
+                        crate::types::TypeId {
+                            name: "HttpRequest".to_string(),
+                            module: None,
+                        },
+                        vec![],
+                    )),
+                ),
             },
         );
 
@@ -2109,135 +2998,255 @@ impl TypeEnv {
         // tcp_connect: (Str, Int) -> Result[TcpStream, Str]
         env.bindings.insert(
             "tcp_connect".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Int], Box::new(Ty::Result(Box::new(Ty::TcpStream), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str, Ty::Int],
+                    Box::new(Ty::Result(Box::new(Ty::TcpStream), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // tcp_read: (TcpStream, Int) -> Result[Str, Str]
         env.bindings.insert(
             "tcp_read".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::TcpStream, Ty::Int], Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::TcpStream, Ty::Int],
+                    Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // tcp_read_exact: (TcpStream, Int) -> Result[Str, Str]
         env.bindings.insert(
             "tcp_read_exact".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::TcpStream, Ty::Int], Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::TcpStream, Ty::Int],
+                    Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // tcp_read_line: TcpStream -> Result[Str, Str]
         env.bindings.insert(
             "tcp_read_line".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::TcpStream], Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::TcpStream],
+                    Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // tcp_write: (TcpStream, Str) -> Result[Int, Str]
         env.bindings.insert(
             "tcp_write".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::TcpStream, Ty::Str], Box::new(Ty::Result(Box::new(Ty::Int), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::TcpStream, Ty::Str],
+                    Box::new(Ty::Result(Box::new(Ty::Int), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // tcp_write_all: (TcpStream, Str) -> Result[(), Str]
         env.bindings.insert(
             "tcp_write_all".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::TcpStream, Ty::Str], Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::TcpStream, Ty::Str],
+                    Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // tcp_close: TcpStream -> ()
         env.bindings.insert(
             "tcp_close".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::TcpStream], Box::new(Ty::Unit)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::TcpStream], Box::new(Ty::Unit)),
+            },
         );
 
         // tcp_set_timeout: (TcpStream, Int) -> ()
         env.bindings.insert(
             "tcp_set_timeout".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::TcpStream, Ty::Int], Box::new(Ty::Unit)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::TcpStream, Ty::Int], Box::new(Ty::Unit)),
+            },
         );
 
         // tcp_peer_addr: TcpStream -> Str
         env.bindings.insert(
             "tcp_peer_addr".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::TcpStream], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::TcpStream], Box::new(Ty::Str)),
+            },
         );
 
         // tcp_local_addr: TcpStream -> Str
         env.bindings.insert(
             "tcp_local_addr".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::TcpStream], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::TcpStream], Box::new(Ty::Str)),
+            },
         );
 
         // tcp_listen: (Str, Int) -> Result[TcpListener, Str]
         env.bindings.insert(
             "tcp_listen".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Int], Box::new(Ty::Result(Box::new(Ty::TcpListener), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str, Ty::Int],
+                    Box::new(Ty::Result(Box::new(Ty::TcpListener), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // tcp_accept: TcpListener -> Result[TcpStream, Str]
         env.bindings.insert(
             "tcp_accept".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::TcpListener], Box::new(Ty::Result(Box::new(Ty::TcpStream), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::TcpListener],
+                    Box::new(Ty::Result(Box::new(Ty::TcpStream), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // tcp_listener_close: TcpListener -> ()
         env.bindings.insert(
             "tcp_listener_close".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::TcpListener], Box::new(Ty::Unit)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::TcpListener], Box::new(Ty::Unit)),
+            },
         );
 
         // UDP functions
         // udp_bind: (Str, Int) -> Result[UdpSocket, Str]
         env.bindings.insert(
             "udp_bind".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Int], Box::new(Ty::Result(Box::new(Ty::UdpSocket), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str, Ty::Int],
+                    Box::new(Ty::Result(Box::new(Ty::UdpSocket), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // udp_send_to: (UdpSocket, Str, Int, Str) -> Result[Int, Str]
         env.bindings.insert(
             "udp_send_to".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::UdpSocket, Ty::Str, Ty::Int, Ty::Str], Box::new(Ty::Result(Box::new(Ty::Int), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::UdpSocket, Ty::Str, Ty::Int, Ty::Str],
+                    Box::new(Ty::Result(Box::new(Ty::Int), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // udp_recv_from: (UdpSocket, Int) -> Result[(Str, Str, Int), Str]
         env.bindings.insert(
             "udp_recv_from".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::UdpSocket, Ty::Int], Box::new(Ty::Result(Box::new(Ty::Tuple(vec![Ty::Str, Ty::Str, Ty::Int])), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::UdpSocket, Ty::Int],
+                    Box::new(Ty::Result(
+                        Box::new(Ty::Tuple(vec![Ty::Str, Ty::Str, Ty::Int])),
+                        Box::new(Ty::Str),
+                    )),
+                ),
+            },
         );
 
         // udp_close: UdpSocket -> ()
         env.bindings.insert(
             "udp_close".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::UdpSocket], Box::new(Ty::Unit)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::UdpSocket], Box::new(Ty::Unit)),
+            },
         );
 
         // udp_connect: (UdpSocket, Str, Int) -> Result[(), Str]
         env.bindings.insert(
             "udp_connect".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::UdpSocket, Ty::Str, Ty::Int], Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::UdpSocket, Ty::Str, Ty::Int],
+                    Box::new(Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // udp_send: (UdpSocket, Str) -> Result[Int, Str]
         env.bindings.insert(
             "udp_send".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::UdpSocket, Ty::Str], Box::new(Ty::Result(Box::new(Ty::Int), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::UdpSocket, Ty::Str],
+                    Box::new(Ty::Result(Box::new(Ty::Int), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // udp_recv: (UdpSocket, Int) -> Result[Str, Str]
         env.bindings.insert(
             "udp_recv".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::UdpSocket, Ty::Int], Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::UdpSocket, Ty::Int],
+                    Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // DNS functions
         // dns_lookup: Str -> Result[[Str], Str]
         env.bindings.insert(
             "dns_lookup".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::List(Box::new(Ty::Str))), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str],
+                    Box::new(Ty::Result(
+                        Box::new(Ty::List(Box::new(Ty::Str))),
+                        Box::new(Ty::Str),
+                    )),
+                ),
+            },
         );
 
         // dns_reverse_lookup: Str -> Result[Str, Str]
         env.bindings.insert(
             "dns_reverse_lookup".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str],
+                    Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // ===== C FFI functions =====
@@ -2246,339 +3255,567 @@ impl TypeEnv {
         // ptr_null: () -> *Void
         env.bindings.insert(
             "ptr_null".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![], Box::new(Ty::CVoid)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![], Box::new(Ty::CVoid)),
+            },
         );
 
         // ptr_is_null: *Void -> Bool
         env.bindings.insert(
             "ptr_is_null".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::CVoid], Box::new(Ty::Bool)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::CVoid], Box::new(Ty::Bool)),
+            },
         );
 
         // ptr_offset: (*Void, Int) -> *Void
         env.bindings.insert(
             "ptr_offset".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::CVoid, Ty::Int], Box::new(Ty::CVoid)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::CVoid, Ty::Int], Box::new(Ty::CVoid)),
+            },
         );
 
         // ptr_addr: *Void -> Int
         env.bindings.insert(
             "ptr_addr".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::CVoid], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::CVoid], Box::new(Ty::Int)),
+            },
         );
 
         // ptr_from_addr: Int -> *Void
         env.bindings.insert(
             "ptr_from_addr".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::CVoid)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::CVoid)),
+            },
         );
 
         // String conversion
         // str_to_cstr: Str -> *Void
         env.bindings.insert(
             "str_to_cstr".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::CVoid)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::CVoid)),
+            },
         );
 
         // cstr_to_str: *Void -> Str
         env.bindings.insert(
             "cstr_to_str".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::CVoid], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::CVoid], Box::new(Ty::Str)),
+            },
         );
 
         // cstr_to_str_len: (*Void, Int) -> Str
         env.bindings.insert(
             "cstr_to_str_len".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::CVoid, Ty::Int], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::CVoid, Ty::Int], Box::new(Ty::Str)),
+            },
         );
 
         // cstr_free: *Void -> ()
         env.bindings.insert(
             "cstr_free".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::CVoid], Box::new(Ty::Unit)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::CVoid], Box::new(Ty::Unit)),
+            },
         );
 
         // Memory allocation
         // alloc: Int -> *Void
         env.bindings.insert(
             "alloc".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::CVoid)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::CVoid)),
+            },
         );
 
         // alloc_zeroed: Int -> *Void
         env.bindings.insert(
             "alloc_zeroed".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::CVoid)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::CVoid)),
+            },
         );
 
         // dealloc: (*Void, Int) -> ()
         env.bindings.insert(
             "dealloc".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::CVoid, Ty::Int], Box::new(Ty::Unit)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::CVoid, Ty::Int], Box::new(Ty::Unit)),
+            },
         );
 
         // mem_copy: (*Void, *Void, Int) -> ()
         env.bindings.insert(
             "mem_copy".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::CVoid, Ty::CVoid, Ty::Int], Box::new(Ty::Unit)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::CVoid, Ty::CVoid, Ty::Int], Box::new(Ty::Unit)),
+            },
         );
 
         // mem_set: (*Void, Int, Int) -> ()
         env.bindings.insert(
             "mem_set".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::CVoid, Ty::Int, Ty::Int], Box::new(Ty::Unit)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::CVoid, Ty::Int, Ty::Int], Box::new(Ty::Unit)),
+            },
         );
 
         // C type conversions
         // to_cint: Int -> CInt
         env.bindings.insert(
             "to_cint".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::CInt)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::CInt)),
+            },
         );
 
         // from_cint: CInt -> Int
         env.bindings.insert(
             "from_cint".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::CInt], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::CInt], Box::new(Ty::Int)),
+            },
         );
 
         // to_cuint: Int -> CUInt
         env.bindings.insert(
             "to_cuint".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::CUInt)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::CUInt)),
+            },
         );
 
         // from_cuint: CUInt -> Int
         env.bindings.insert(
             "from_cuint".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::CUInt], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::CUInt], Box::new(Ty::Int)),
+            },
         );
 
         // to_clong: Int -> CLong
         env.bindings.insert(
             "to_clong".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::CLong)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::CLong)),
+            },
         );
 
         // from_clong: CLong -> Int
         env.bindings.insert(
             "from_clong".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::CLong], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::CLong], Box::new(Ty::Int)),
+            },
         );
 
         // to_culong: Int -> CULong
         env.bindings.insert(
             "to_culong".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::CULong)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::CULong)),
+            },
         );
 
         // from_culong: CULong -> Int
         env.bindings.insert(
             "from_culong".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::CULong], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::CULong], Box::new(Ty::Int)),
+            },
         );
 
         // to_cfloat: Float -> CFloat
         env.bindings.insert(
             "to_cfloat".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::CFloat)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::CFloat)),
+            },
         );
 
         // from_cfloat: CFloat -> Float
         env.bindings.insert(
             "from_cfloat".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::CFloat], Box::new(Ty::Float)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::CFloat], Box::new(Ty::Float)),
+            },
         );
 
         // to_cdouble: Float -> CDouble
         env.bindings.insert(
             "to_cdouble".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::CDouble)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Float], Box::new(Ty::CDouble)),
+            },
         );
 
         // from_cdouble: CDouble -> Float
         env.bindings.insert(
             "from_cdouble".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::CDouble], Box::new(Ty::Float)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::CDouble], Box::new(Ty::Float)),
+            },
         );
 
         // to_csize: Int -> CSize
         env.bindings.insert(
             "to_csize".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::CSize)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Int], Box::new(Ty::CSize)),
+            },
         );
 
         // from_csize: CSize -> Int
         env.bindings.insert(
             "from_csize".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::CSize], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::CSize], Box::new(Ty::Int)),
+            },
         );
 
         // sizeof: Str -> Int
         env.bindings.insert(
             "sizeof".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Int)),
+            },
         );
 
         // ===== Logging builtins =====
         // log_debug: Str -> ()
         env.bindings.insert(
             "log_debug".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Unit)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Unit)),
+            },
         );
         // log_info: Str -> ()
         env.bindings.insert(
             "log_info".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Unit)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Unit)),
+            },
         );
         // log_warn: Str -> ()
         env.bindings.insert(
             "log_warn".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Unit)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Unit)),
+            },
         );
         // log_error: Str -> ()
         env.bindings.insert(
             "log_error".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Unit)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Unit)),
+            },
         );
         // log_set_level: Str -> ()
         env.bindings.insert(
             "log_set_level".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Unit)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Unit)),
+            },
         );
         // log_set_format: Str -> ()
         env.bindings.insert(
             "log_set_format".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Unit)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Unit)),
+            },
         );
 
         // ===== TLS builtins =====
         // tls_connect: (Str, Int) -> Result[TlsStream, Str]
         env.bindings.insert(
             "tls_connect".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str, Ty::Int], Box::new(Ty::Result(Box::new(Ty::TlsStream), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str, Ty::Int],
+                    Box::new(Ty::Result(Box::new(Ty::TlsStream), Box::new(Ty::Str))),
+                ),
+            },
         );
         // tls_read: (TlsStream, Int) -> Result[Str, Str]
         env.bindings.insert(
             "tls_read".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::TlsStream, Ty::Int], Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::TlsStream, Ty::Int],
+                    Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str))),
+                ),
+            },
         );
         // tls_write: (TlsStream, Str) -> Result[Int, Str]
         env.bindings.insert(
             "tls_write".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::TlsStream, Ty::Str], Box::new(Ty::Result(Box::new(Ty::Int), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::TlsStream, Ty::Str],
+                    Box::new(Ty::Result(Box::new(Ty::Int), Box::new(Ty::Str))),
+                ),
+            },
         );
         // tls_close: TlsStream -> ()
         env.bindings.insert(
             "tls_close".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::TlsStream], Box::new(Ty::Unit)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::TlsStream], Box::new(Ty::Unit)),
+            },
         );
 
         // ===== Compression builtins =====
         // gzip_compress: Str -> [Int]
         env.bindings.insert(
             "gzip_compress".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::List(Box::new(Ty::Int)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::List(Box::new(Ty::Int)))),
+            },
         );
         // gzip_decompress: [Int] -> Result[Str, Str]
         env.bindings.insert(
             "gzip_decompress".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Int))], Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::List(Box::new(Ty::Int))],
+                    Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str))),
+                ),
+            },
         );
         // zlib_compress: Str -> [Int]
         env.bindings.insert(
             "zlib_compress".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::List(Box::new(Ty::Int)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::List(Box::new(Ty::Int)))),
+            },
         );
         // zlib_decompress: [Int] -> Result[Str, Str]
         env.bindings.insert(
             "zlib_decompress".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::List(Box::new(Ty::Int))], Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::List(Box::new(Ty::Int))],
+                    Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str))),
+                ),
+            },
         );
 
         // ===== SQLite database builtins =====
         // db_open: Str -> Result[Database, Str]
         env.bindings.insert(
             "db_open".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Str], Box::new(Ty::Result(Box::new(Ty::Database), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str],
+                    Box::new(Ty::Result(Box::new(Ty::Database), Box::new(Ty::Str))),
+                ),
+            },
         );
         // db_open_memory: () -> Result[Database, Str]
         env.bindings.insert(
             "db_open_memory".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![], Box::new(Ty::Result(Box::new(Ty::Database), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![],
+                    Box::new(Ty::Result(Box::new(Ty::Database), Box::new(Ty::Str))),
+                ),
+            },
         );
         // db_execute: (Database, Str) -> Result[Int, Str]
         env.bindings.insert(
             "db_execute".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Database, Ty::Str], Box::new(Ty::Result(Box::new(Ty::Int), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Database, Ty::Str],
+                    Box::new(Ty::Result(Box::new(Ty::Int), Box::new(Ty::Str))),
+                ),
+            },
         );
         // db_query: (Database, Str) -> Result[[Row], Str]
         env.bindings.insert(
             "db_query".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Database, Ty::Str], Box::new(Ty::Result(Box::new(Ty::List(Box::new(Ty::DbRow))), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Database, Ty::Str],
+                    Box::new(Ty::Result(
+                        Box::new(Ty::List(Box::new(Ty::DbRow))),
+                        Box::new(Ty::Str),
+                    )),
+                ),
+            },
         );
         // db_query_one: (Database, Str) -> Result[Row?, Str]
         env.bindings.insert(
             "db_query_one".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Database, Ty::Str], Box::new(Ty::Result(Box::new(Ty::Option(Box::new(Ty::DbRow))), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Database, Ty::Str],
+                    Box::new(Ty::Result(
+                        Box::new(Ty::Option(Box::new(Ty::DbRow))),
+                        Box::new(Ty::Str),
+                    )),
+                ),
+            },
         );
         // db_close: Database -> ()
         env.bindings.insert(
             "db_close".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Database], Box::new(Ty::Unit)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::Database], Box::new(Ty::Unit)),
+            },
         );
         // db_prepare: (Database, Str) -> Result[Statement, Str]
         env.bindings.insert(
             "db_prepare".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::Database, Ty::Str], Box::new(Ty::Result(Box::new(Ty::Statement), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Database, Ty::Str],
+                    Box::new(Ty::Result(Box::new(Ty::Statement), Box::new(Ty::Str))),
+                ),
+            },
         );
         // db_execute_prepared: (Statement, [T]) -> Result[Int, Str]
         let exec_t = TypeVar::fresh();
         env.bindings.insert(
             "db_execute_prepared".to_string(),
-            TypeScheme { vars: vec![exec_t], ty: Ty::Fn(vec![Ty::Statement, Ty::List(Box::new(Ty::Var(exec_t)))], Box::new(Ty::Result(Box::new(Ty::Int), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![exec_t],
+                ty: Ty::Fn(
+                    vec![Ty::Statement, Ty::List(Box::new(Ty::Var(exec_t)))],
+                    Box::new(Ty::Result(Box::new(Ty::Int), Box::new(Ty::Str))),
+                ),
+            },
         );
         // db_query_prepared: (Statement, [T]) -> Result[[Row], Str]
         let query_t = TypeVar::fresh();
         env.bindings.insert(
             "db_query_prepared".to_string(),
-            TypeScheme { vars: vec![query_t], ty: Ty::Fn(vec![Ty::Statement, Ty::List(Box::new(Ty::Var(query_t)))], Box::new(Ty::Result(Box::new(Ty::List(Box::new(Ty::DbRow))), Box::new(Ty::Str)))) },
+            TypeScheme {
+                vars: vec![query_t],
+                ty: Ty::Fn(
+                    vec![Ty::Statement, Ty::List(Box::new(Ty::Var(query_t)))],
+                    Box::new(Ty::Result(
+                        Box::new(Ty::List(Box::new(Ty::DbRow))),
+                        Box::new(Ty::Str),
+                    )),
+                ),
+            },
         );
         // row_get: (Row, Int) -> T? (generic)
         let row_get_t = TypeVar::fresh();
         env.bindings.insert(
             "row_get".to_string(),
-            TypeScheme { vars: vec![row_get_t], ty: Ty::Fn(vec![Ty::DbRow, Ty::Int], Box::new(Ty::Option(Box::new(Ty::Var(row_get_t))))) },
+            TypeScheme {
+                vars: vec![row_get_t],
+                ty: Ty::Fn(
+                    vec![Ty::DbRow, Ty::Int],
+                    Box::new(Ty::Option(Box::new(Ty::Var(row_get_t)))),
+                ),
+            },
         );
         // row_get_int: (Row, Int) -> Int
         env.bindings.insert(
             "row_get_int".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::DbRow, Ty::Int], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::DbRow, Ty::Int], Box::new(Ty::Int)),
+            },
         );
         // row_get_str: (Row, Int) -> Str
         env.bindings.insert(
             "row_get_str".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::DbRow, Ty::Int], Box::new(Ty::Str)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::DbRow, Ty::Int], Box::new(Ty::Str)),
+            },
         );
         // row_get_float: (Row, Int) -> Float
         env.bindings.insert(
             "row_get_float".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::DbRow, Ty::Int], Box::new(Ty::Float)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::DbRow, Ty::Int], Box::new(Ty::Float)),
+            },
         );
         // row_get_bool: (Row, Int) -> Bool
         env.bindings.insert(
             "row_get_bool".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::DbRow, Ty::Int], Box::new(Ty::Bool)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::DbRow, Ty::Int], Box::new(Ty::Bool)),
+            },
         );
         // row_is_null: (Row, Int) -> Bool
         env.bindings.insert(
             "row_is_null".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::DbRow, Ty::Int], Box::new(Ty::Bool)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::DbRow, Ty::Int], Box::new(Ty::Bool)),
+            },
         );
         // row_len: Row -> Int
         env.bindings.insert(
             "row_len".to_string(),
-            TypeScheme { vars: vec![], ty: Ty::Fn(vec![Ty::DbRow], Box::new(Ty::Int)) },
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(vec![Ty::DbRow], Box::new(Ty::Int)),
+            },
         );
 
         env
@@ -2599,7 +3836,8 @@ impl TypeEnv {
         // Auto-register variant-to-enum mappings for enum types
         if let TypeDef::Enum { variants, .. } = &def {
             for (variant_name, _) in variants {
-                self.variant_to_enum.insert(variant_name.clone(), name.clone());
+                self.variant_to_enum
+                    .insert(variant_name.clone(), name.clone());
             }
         }
         self.types.insert(name, def);
@@ -2614,9 +3852,10 @@ impl TypeEnv {
     /// Returns the enum name and its TypeDef if the variant is known.
     pub fn get_enum_for_variant(&self, variant_name: &str) -> Option<(&str, &TypeDef)> {
         if let Some(enum_name) = self.variant_to_enum.get(variant_name)
-            && let Some(def) = self.types.get(enum_name) {
-                return Some((enum_name.as_str(), def));
-            }
+            && let Some(def) = self.types.get(enum_name)
+        {
+            return Some((enum_name.as_str(), def));
+        }
         None
     }
 
@@ -2736,9 +3975,10 @@ impl Unifier {
             // Type variable unification
             (Ty::Var(v), t) | (t, Ty::Var(v)) => {
                 if let Ty::Var(v2) = t
-                    && v == v2 {
-                        return Ok(());
-                    }
+                    && v == v2
+                {
+                    return Ok(());
+                }
                 // Occurs check
                 if t.free_vars().contains(v) {
                     return Err(TypeError::new(
@@ -2842,8 +4082,7 @@ impl Unifier {
 
             // Unify Ty::Option with Ty::Named("Option", [...])
             // This allows T? to unify with Option[T]
-            (Ty::Option(inner), Ty::Named(id, args))
-            | (Ty::Named(id, args), Ty::Option(inner))
+            (Ty::Option(inner), Ty::Named(id, args)) | (Ty::Named(id, args), Ty::Option(inner))
                 if id.name == "Option" && args.len() == 1 =>
             {
                 self.unify(inner, &args[0], span)
@@ -3027,14 +4266,22 @@ impl InferenceEngine {
     // ========================================================================
 
     /// Track a new linear or affine variable definition.
-    pub fn track_linear_def(&mut self, name: &str, linearity: super::types::LinearityKind, span: Span) {
+    pub fn track_linear_def(
+        &mut self,
+        name: &str,
+        linearity: super::types::LinearityKind,
+        span: Span,
+    ) {
         if linearity != super::types::LinearityKind::Regular {
-            self.linear_tracking.insert(name.to_string(), LinearVarInfo {
-                linearity,
-                use_count: 0,
-                def_span: span,
-                last_use_span: None,
-            });
+            self.linear_tracking.insert(
+                name.to_string(),
+                LinearVarInfo {
+                    linearity,
+                    use_count: 0,
+                    def_span: span,
+                    last_use_span: None,
+                },
+            );
         }
     }
 
@@ -3096,231 +4343,327 @@ impl InferenceEngine {
 
         // A placeholder type variable for generic element types
         // At call time, we'll substitute this with the actual element type
-        let t_var = Ty::Var(TypeVar { id: reserved_type_vars::ELEM_TYPE });
+        let t_var = Ty::Var(TypeVar {
+            id: reserved_type_vars::ELEM_TYPE,
+        });
 
         // ===== Vec/List methods =====
         // len: [T] -> Int
-        self.builtin_methods.insert(mk("Vec", "len"), MethodSignature {
-            params: vec![],
-            return_type: Ty::Int,
-            uses_receiver_type: false,
-        });
+        self.builtin_methods.insert(
+            mk("Vec", "len"),
+            MethodSignature {
+                params: vec![],
+                return_type: Ty::Int,
+                uses_receiver_type: false,
+            },
+        );
 
         // push: ([T], T) -> [T]
-        self.builtin_methods.insert(mk("Vec", "push"), MethodSignature {
-            params: vec![t_var.clone()],
-            return_type: Ty::List(Box::new(t_var.clone())),
-            uses_receiver_type: true,
-        });
+        self.builtin_methods.insert(
+            mk("Vec", "push"),
+            MethodSignature {
+                params: vec![t_var.clone()],
+                return_type: Ty::List(Box::new(t_var.clone())),
+                uses_receiver_type: true,
+            },
+        );
 
         // pop: [T] -> ([T], T?)
-        self.builtin_methods.insert(mk("Vec", "pop"), MethodSignature {
-            params: vec![],
-            return_type: Ty::Tuple(vec![
-                Ty::List(Box::new(t_var.clone())),
-                Ty::Option(Box::new(t_var.clone())),
-            ]),
-            uses_receiver_type: true,
-        });
+        self.builtin_methods.insert(
+            mk("Vec", "pop"),
+            MethodSignature {
+                params: vec![],
+                return_type: Ty::Tuple(vec![
+                    Ty::List(Box::new(t_var.clone())),
+                    Ty::Option(Box::new(t_var.clone())),
+                ]),
+                uses_receiver_type: true,
+            },
+        );
 
         // get: ([T], Int) -> T?
-        self.builtin_methods.insert(mk("Vec", "get"), MethodSignature {
-            params: vec![Ty::Int],
-            return_type: Ty::Option(Box::new(t_var.clone())),
-            uses_receiver_type: true,
-        });
+        self.builtin_methods.insert(
+            mk("Vec", "get"),
+            MethodSignature {
+                params: vec![Ty::Int],
+                return_type: Ty::Option(Box::new(t_var.clone())),
+                uses_receiver_type: true,
+            },
+        );
 
         // set: ([T], Int, T) -> [T]
-        self.builtin_methods.insert(mk("Vec", "set"), MethodSignature {
-            params: vec![Ty::Int, t_var.clone()],
-            return_type: Ty::List(Box::new(t_var.clone())),
-            uses_receiver_type: true,
-        });
+        self.builtin_methods.insert(
+            mk("Vec", "set"),
+            MethodSignature {
+                params: vec![Ty::Int, t_var.clone()],
+                return_type: Ty::List(Box::new(t_var.clone())),
+                uses_receiver_type: true,
+            },
+        );
 
         // first: [T] -> T?
-        self.builtin_methods.insert(mk("Vec", "first"), MethodSignature {
-            params: vec![],
-            return_type: Ty::Option(Box::new(t_var.clone())),
-            uses_receiver_type: true,
-        });
+        self.builtin_methods.insert(
+            mk("Vec", "first"),
+            MethodSignature {
+                params: vec![],
+                return_type: Ty::Option(Box::new(t_var.clone())),
+                uses_receiver_type: true,
+            },
+        );
 
         // last: [T] -> T?
-        self.builtin_methods.insert(mk("Vec", "last"), MethodSignature {
-            params: vec![],
-            return_type: Ty::Option(Box::new(t_var.clone())),
-            uses_receiver_type: true,
-        });
+        self.builtin_methods.insert(
+            mk("Vec", "last"),
+            MethodSignature {
+                params: vec![],
+                return_type: Ty::Option(Box::new(t_var.clone())),
+                uses_receiver_type: true,
+            },
+        );
 
         // concat: ([T], [T]) -> [T]
-        self.builtin_methods.insert(mk("Vec", "concat"), MethodSignature {
-            params: vec![Ty::List(Box::new(t_var.clone()))],
-            return_type: Ty::List(Box::new(t_var.clone())),
-            uses_receiver_type: true,
-        });
+        self.builtin_methods.insert(
+            mk("Vec", "concat"),
+            MethodSignature {
+                params: vec![Ty::List(Box::new(t_var.clone()))],
+                return_type: Ty::List(Box::new(t_var.clone())),
+                uses_receiver_type: true,
+            },
+        );
 
         // slice: ([T], Int, Int) -> [T]
-        self.builtin_methods.insert(mk("Vec", "slice"), MethodSignature {
-            params: vec![Ty::Int, Ty::Int],
-            return_type: Ty::List(Box::new(t_var.clone())),
-            uses_receiver_type: true,
-        });
+        self.builtin_methods.insert(
+            mk("Vec", "slice"),
+            MethodSignature {
+                params: vec![Ty::Int, Ty::Int],
+                return_type: Ty::List(Box::new(t_var.clone())),
+                uses_receiver_type: true,
+            },
+        );
 
         // reverse: [T] -> [T]
-        self.builtin_methods.insert(mk("Vec", "reverse"), MethodSignature {
-            params: vec![],
-            return_type: Ty::List(Box::new(t_var.clone())),
-            uses_receiver_type: true,
-        });
+        self.builtin_methods.insert(
+            mk("Vec", "reverse"),
+            MethodSignature {
+                params: vec![],
+                return_type: Ty::List(Box::new(t_var.clone())),
+                uses_receiver_type: true,
+            },
+        );
 
         // ===== String methods =====
         // len: Str -> Int
-        self.builtin_methods.insert(mk("Str", "len"), MethodSignature {
-            params: vec![],
-            return_type: Ty::Int,
-            uses_receiver_type: false,
-        });
+        self.builtin_methods.insert(
+            mk("Str", "len"),
+            MethodSignature {
+                params: vec![],
+                return_type: Ty::Int,
+                uses_receiver_type: false,
+            },
+        );
 
         // char_at: (Str, Int) -> Char?
-        self.builtin_methods.insert(mk("Str", "char_at"), MethodSignature {
-            params: vec![Ty::Int],
-            return_type: Ty::Option(Box::new(Ty::Char)),
-            uses_receiver_type: false,
-        });
+        self.builtin_methods.insert(
+            mk("Str", "char_at"),
+            MethodSignature {
+                params: vec![Ty::Int],
+                return_type: Ty::Option(Box::new(Ty::Char)),
+                uses_receiver_type: false,
+            },
+        );
 
         // contains: (Str, Str) -> Bool
-        self.builtin_methods.insert(mk("Str", "contains"), MethodSignature {
-            params: vec![Ty::Str],
-            return_type: Ty::Bool,
-            uses_receiver_type: false,
-        });
+        self.builtin_methods.insert(
+            mk("Str", "contains"),
+            MethodSignature {
+                params: vec![Ty::Str],
+                return_type: Ty::Bool,
+                uses_receiver_type: false,
+            },
+        );
 
         // starts_with: (Str, Str) -> Bool
-        self.builtin_methods.insert(mk("Str", "starts_with"), MethodSignature {
-            params: vec![Ty::Str],
-            return_type: Ty::Bool,
-            uses_receiver_type: false,
-        });
+        self.builtin_methods.insert(
+            mk("Str", "starts_with"),
+            MethodSignature {
+                params: vec![Ty::Str],
+                return_type: Ty::Bool,
+                uses_receiver_type: false,
+            },
+        );
 
         // ends_with: (Str, Str) -> Bool
-        self.builtin_methods.insert(mk("Str", "ends_with"), MethodSignature {
-            params: vec![Ty::Str],
-            return_type: Ty::Bool,
-            uses_receiver_type: false,
-        });
+        self.builtin_methods.insert(
+            mk("Str", "ends_with"),
+            MethodSignature {
+                params: vec![Ty::Str],
+                return_type: Ty::Bool,
+                uses_receiver_type: false,
+            },
+        );
 
         // split: (Str, Str) -> [Str]
-        self.builtin_methods.insert(mk("Str", "split"), MethodSignature {
-            params: vec![Ty::Str],
-            return_type: Ty::List(Box::new(Ty::Str)),
-            uses_receiver_type: false,
-        });
+        self.builtin_methods.insert(
+            mk("Str", "split"),
+            MethodSignature {
+                params: vec![Ty::Str],
+                return_type: Ty::List(Box::new(Ty::Str)),
+                uses_receiver_type: false,
+            },
+        );
 
         // trim: Str -> Str
-        self.builtin_methods.insert(mk("Str", "trim"), MethodSignature {
-            params: vec![],
-            return_type: Ty::Str,
-            uses_receiver_type: false,
-        });
+        self.builtin_methods.insert(
+            mk("Str", "trim"),
+            MethodSignature {
+                params: vec![],
+                return_type: Ty::Str,
+                uses_receiver_type: false,
+            },
+        );
 
         // to_int: Str -> Int?
-        self.builtin_methods.insert(mk("Str", "to_int"), MethodSignature {
-            params: vec![],
-            return_type: Ty::Option(Box::new(Ty::Int)),
-            uses_receiver_type: false,
-        });
+        self.builtin_methods.insert(
+            mk("Str", "to_int"),
+            MethodSignature {
+                params: vec![],
+                return_type: Ty::Option(Box::new(Ty::Int)),
+                uses_receiver_type: false,
+            },
+        );
 
         // ===== Map methods =====
-        let k_var = Ty::Var(TypeVar { id: reserved_type_vars::KEY_TYPE });
-        let v_var = Ty::Var(TypeVar { id: reserved_type_vars::VALUE_TYPE });
+        let k_var = Ty::Var(TypeVar {
+            id: reserved_type_vars::KEY_TYPE,
+        });
+        let v_var = Ty::Var(TypeVar {
+            id: reserved_type_vars::VALUE_TYPE,
+        });
 
         // len: Map[K,V] -> Int
-        self.builtin_methods.insert(mk("Map", "len"), MethodSignature {
-            params: vec![],
-            return_type: Ty::Int,
-            uses_receiver_type: false,
-        });
+        self.builtin_methods.insert(
+            mk("Map", "len"),
+            MethodSignature {
+                params: vec![],
+                return_type: Ty::Int,
+                uses_receiver_type: false,
+            },
+        );
 
         // get: (Map[K,V], K) -> V?
-        self.builtin_methods.insert(mk("Map", "get"), MethodSignature {
-            params: vec![k_var.clone()],
-            return_type: Ty::Option(Box::new(v_var.clone())),
-            uses_receiver_type: true,
-        });
+        self.builtin_methods.insert(
+            mk("Map", "get"),
+            MethodSignature {
+                params: vec![k_var.clone()],
+                return_type: Ty::Option(Box::new(v_var.clone())),
+                uses_receiver_type: true,
+            },
+        );
 
         // insert: (Map[K,V], K, V) -> Map[K,V]
-        self.builtin_methods.insert(mk("Map", "insert"), MethodSignature {
-            params: vec![k_var.clone(), v_var.clone()],
-            return_type: Ty::Map(Box::new(k_var.clone()), Box::new(v_var.clone())),
-            uses_receiver_type: true,
-        });
+        self.builtin_methods.insert(
+            mk("Map", "insert"),
+            MethodSignature {
+                params: vec![k_var.clone(), v_var.clone()],
+                return_type: Ty::Map(Box::new(k_var.clone()), Box::new(v_var.clone())),
+                uses_receiver_type: true,
+            },
+        );
 
         // remove: (Map[K,V], K) -> (Map[K,V], V?)
-        self.builtin_methods.insert(mk("Map", "remove"), MethodSignature {
-            params: vec![k_var.clone()],
-            return_type: Ty::Tuple(vec![
-                Ty::Map(Box::new(k_var.clone()), Box::new(v_var.clone())),
-                Ty::Option(Box::new(v_var.clone())),
-            ]),
-            uses_receiver_type: true,
-        });
+        self.builtin_methods.insert(
+            mk("Map", "remove"),
+            MethodSignature {
+                params: vec![k_var.clone()],
+                return_type: Ty::Tuple(vec![
+                    Ty::Map(Box::new(k_var.clone()), Box::new(v_var.clone())),
+                    Ty::Option(Box::new(v_var.clone())),
+                ]),
+                uses_receiver_type: true,
+            },
+        );
 
         // contains: (Map[K,V], K) -> Bool
-        self.builtin_methods.insert(mk("Map", "contains"), MethodSignature {
-            params: vec![k_var.clone()],
-            return_type: Ty::Bool,
-            uses_receiver_type: true,
-        });
+        self.builtin_methods.insert(
+            mk("Map", "contains"),
+            MethodSignature {
+                params: vec![k_var.clone()],
+                return_type: Ty::Bool,
+                uses_receiver_type: true,
+            },
+        );
 
         // keys: Map[K,V] -> [K]
-        self.builtin_methods.insert(mk("Map", "keys"), MethodSignature {
-            params: vec![],
-            return_type: Ty::List(Box::new(k_var.clone())),
-            uses_receiver_type: true,
-        });
+        self.builtin_methods.insert(
+            mk("Map", "keys"),
+            MethodSignature {
+                params: vec![],
+                return_type: Ty::List(Box::new(k_var.clone())),
+                uses_receiver_type: true,
+            },
+        );
 
         // values: Map[K,V] -> [V]
-        self.builtin_methods.insert(mk("Map", "values"), MethodSignature {
-            params: vec![],
-            return_type: Ty::List(Box::new(v_var.clone())),
-            uses_receiver_type: true,
-        });
+        self.builtin_methods.insert(
+            mk("Map", "values"),
+            MethodSignature {
+                params: vec![],
+                return_type: Ty::List(Box::new(v_var.clone())),
+                uses_receiver_type: true,
+            },
+        );
 
         // ===== Char methods =====
         // is_digit: Char -> Bool
-        self.builtin_methods.insert(mk("Char", "is_digit"), MethodSignature {
-            params: vec![],
-            return_type: Ty::Bool,
-            uses_receiver_type: false,
-        });
+        self.builtin_methods.insert(
+            mk("Char", "is_digit"),
+            MethodSignature {
+                params: vec![],
+                return_type: Ty::Bool,
+                uses_receiver_type: false,
+            },
+        );
 
         // is_alpha: Char -> Bool
-        self.builtin_methods.insert(mk("Char", "is_alpha"), MethodSignature {
-            params: vec![],
-            return_type: Ty::Bool,
-            uses_receiver_type: false,
-        });
+        self.builtin_methods.insert(
+            mk("Char", "is_alpha"),
+            MethodSignature {
+                params: vec![],
+                return_type: Ty::Bool,
+                uses_receiver_type: false,
+            },
+        );
 
         // is_alphanumeric: Char -> Bool
-        self.builtin_methods.insert(mk("Char", "is_alphanumeric"), MethodSignature {
-            params: vec![],
-            return_type: Ty::Bool,
-            uses_receiver_type: false,
-        });
+        self.builtin_methods.insert(
+            mk("Char", "is_alphanumeric"),
+            MethodSignature {
+                params: vec![],
+                return_type: Ty::Bool,
+                uses_receiver_type: false,
+            },
+        );
 
         // is_whitespace: Char -> Bool
-        self.builtin_methods.insert(mk("Char", "is_whitespace"), MethodSignature {
-            params: vec![],
-            return_type: Ty::Bool,
-            uses_receiver_type: false,
-        });
+        self.builtin_methods.insert(
+            mk("Char", "is_whitespace"),
+            MethodSignature {
+                params: vec![],
+                return_type: Ty::Bool,
+                uses_receiver_type: false,
+            },
+        );
 
         // ===== Int methods =====
         // to_str: Int -> Str
-        self.builtin_methods.insert(mk("Int", "to_str"), MethodSignature {
-            params: vec![],
-            return_type: Ty::Str,
-            uses_receiver_type: false,
-        });
+        self.builtin_methods.insert(
+            mk("Int", "to_str"),
+            MethodSignature {
+                params: vec![],
+                return_type: Ty::Str,
+                uses_receiver_type: false,
+            },
+        );
     }
 
     /// Look up a method on a type, returning its signature and element types for substitution.
@@ -3368,9 +4711,13 @@ impl InferenceEngine {
             Ty::Int => ("Int".to_string(), vec![]),
             Ty::Float => ("Float".to_string(), vec![]),
             // Signed integers - treat as Int for method lookup
-            Ty::I8 | Ty::I16 | Ty::I32 | Ty::I64 | Ty::I128 | Ty::Isize => ("Int".to_string(), vec![]),
+            Ty::I8 | Ty::I16 | Ty::I32 | Ty::I64 | Ty::I128 | Ty::Isize => {
+                ("Int".to_string(), vec![])
+            }
             // Unsigned integers - treat as Int for method lookup
-            Ty::UInt | Ty::U8 | Ty::U16 | Ty::U32 | Ty::U64 | Ty::U128 | Ty::Usize => ("Int".to_string(), vec![]),
+            Ty::UInt | Ty::U8 | Ty::U16 | Ty::U32 | Ty::U64 | Ty::U128 | Ty::Usize => {
+                ("Int".to_string(), vec![])
+            }
             // Float types
             Ty::F32 | Ty::F64 => ("Float".to_string(), vec![]),
             Ty::Bool => ("Bool".to_string(), vec![]),
@@ -3399,25 +4746,33 @@ impl InferenceEngine {
                 match tv.id {
                     ELEM_TYPE => elem_types.first().cloned().unwrap_or(Ty::Var(*tv)),
                     KEY_TYPE => elem_types.first().cloned().unwrap_or(Ty::Var(*tv)), // K for maps
-                    VALUE_TYPE => elem_types.get(1).cloned().unwrap_or(Ty::Var(*tv)),  // V for maps
+                    VALUE_TYPE => elem_types.get(1).cloned().unwrap_or(Ty::Var(*tv)), // V for maps
                     _ => Ty::Var(*tv),
                 }
             }
             Ty::List(elem) => Ty::List(Box::new(self.substitute_elem_types(elem, elem_types))),
-            Ty::Option(inner) => Ty::Option(Box::new(self.substitute_elem_types(inner, elem_types))),
+            Ty::Option(inner) => {
+                Ty::Option(Box::new(self.substitute_elem_types(inner, elem_types)))
+            }
             Ty::Result(ok, err) => Ty::Result(
                 Box::new(self.substitute_elem_types(ok, elem_types)),
                 Box::new(self.substitute_elem_types(err, elem_types)),
             ),
             Ty::Tuple(elems) => Ty::Tuple(
-                elems.iter().map(|e| self.substitute_elem_types(e, elem_types)).collect()
+                elems
+                    .iter()
+                    .map(|e| self.substitute_elem_types(e, elem_types))
+                    .collect(),
             ),
             Ty::Map(k, v) => Ty::Map(
                 Box::new(self.substitute_elem_types(k, elem_types)),
                 Box::new(self.substitute_elem_types(v, elem_types)),
             ),
             Ty::Fn(params, ret) => Ty::Fn(
-                params.iter().map(|p| self.substitute_elem_types(p, elem_types)).collect(),
+                params
+                    .iter()
+                    .map(|p| self.substitute_elem_types(p, elem_types))
+                    .collect(),
                 Box::new(self.substitute_elem_types(ret, elem_types)),
             ),
             // All other types remain unchanged
@@ -3437,14 +4792,19 @@ impl InferenceEngine {
                     }
                     return Err(TypeError::new(
                         "'Self' used outside of impl block".to_string(),
-                        span
+                        span,
                     ));
                 }
 
                 // Look up the struct definition in the type environment
-                if let Some(TypeDef::Struct { type_params, fields }) = self.env.get_type(&type_id.name) {
+                if let Some(TypeDef::Struct {
+                    type_params,
+                    fields,
+                }) = self.env.get_type(&type_id.name)
+                {
                     // Find the field
-                    if let Some((_, field_ty)) = fields.iter().find(|(name, _)| name == field_name) {
+                    if let Some((_, field_ty)) = fields.iter().find(|(name, _)| name == field_name)
+                    {
                         // If the struct is generic, substitute type parameters
                         if !type_params.is_empty() && !type_args.is_empty() {
                             let subst: HashMap<String, Ty> = type_params
@@ -3459,15 +4819,19 @@ impl InferenceEngine {
                         // Field not found - list available fields
                         let field_names: Vec<_> = fields.iter().map(|(n, _)| n.as_str()).collect();
                         return Err(TypeError::new(
-                            format!("type '{}' has no field '{}'. Available fields: {}",
-                                    type_id.name, field_name, field_names.join(", ")),
-                            span
+                            format!(
+                                "type '{}' has no field '{}'. Available fields: {}",
+                                type_id.name,
+                                field_name,
+                                field_names.join(", ")
+                            ),
+                            span,
                         ));
                     }
                 }
                 Err(TypeError::new(
                     format!("type '{}' has no field '{}'", type_id.name, field_name),
-                    span
+                    span,
                 ))
             }
 
@@ -3478,16 +4842,21 @@ impl InferenceEngine {
                         return Ok(elem_ty.clone());
                     } else {
                         return Err(TypeError::new(
-                            format!("tuple index {} out of bounds (tuple has {} elements)",
-                                    index, elems.len()),
-                            span
+                            format!(
+                                "tuple index {} out of bounds (tuple has {} elements)",
+                                index,
+                                elems.len()
+                            ),
+                            span,
                         ));
                     }
                 }
                 Err(TypeError::new(
-                    format!("cannot access field '{}' on tuple type (use numeric indices: .0, .1, etc.)",
-                            field_name),
-                    span
+                    format!(
+                        "cannot access field '{}' on tuple type (use numeric indices: .0, .1, etc.)",
+                        field_name
+                    ),
+                    span,
                 ))
             }
 
@@ -3508,8 +4877,8 @@ impl InferenceEngine {
 
             _ => Err(TypeError::new(
                 format!("cannot access field '{}' on type {}", field_name, ty),
-                span
-            ))
+                span,
+            )),
         }
     }
 
@@ -3540,19 +4909,29 @@ impl InferenceEngine {
             Ty::Named(id, args) => {
                 // Check if this is a type parameter reference
                 if args.is_empty()
-                    && let Some(replacement) = subst.get(&id.name) {
-                        return replacement.clone();
-                    }
+                    && let Some(replacement) = subst.get(&id.name)
+                {
+                    return replacement.clone();
+                }
                 // Otherwise, recursively substitute in args
-                let new_args = args.iter()
+                let new_args = args
+                    .iter()
                     .map(|a| self.substitute_type_params(a, subst))
                     .collect();
                 Ty::Named(id.clone(), new_args)
             }
             Ty::List(elem) => Ty::List(Box::new(self.substitute_type_params(elem, subst))),
-            Ty::Tuple(elems) => Ty::Tuple(elems.iter().map(|e| self.substitute_type_params(e, subst)).collect()),
+            Ty::Tuple(elems) => Ty::Tuple(
+                elems
+                    .iter()
+                    .map(|e| self.substitute_type_params(e, subst))
+                    .collect(),
+            ),
             Ty::Fn(params, ret) => Ty::Fn(
-                params.iter().map(|p| self.substitute_type_params(p, subst)).collect(),
+                params
+                    .iter()
+                    .map(|p| self.substitute_type_params(p, subst))
+                    .collect(),
                 Box::new(self.substitute_type_params(ret, subst)),
             ),
             Ty::Option(inner) => Ty::Option(Box::new(self.substitute_type_params(inner, subst))),
@@ -3620,25 +4999,21 @@ impl InferenceEngine {
                 self.type_params = self.setup_type_params(&s.generics);
 
                 let fields = match &s.kind {
-                    crate::parser::StructKind::Named(fields) => {
-                        fields
-                            .iter()
-                            .map(|f| {
-                                let ty = self.ast_type_to_ty(&f.ty)?;
-                                Ok((f.name.name.clone(), ty))
-                            })
-                            .collect::<Result<Vec<_>, TypeError>>()?
-                    }
-                    crate::parser::StructKind::Tuple(types) => {
-                        types
-                            .iter()
-                            .enumerate()
-                            .map(|(i, t)| {
-                                let ty = self.ast_type_to_ty(t)?;
-                                Ok((format!("{}", i), ty))
-                            })
-                            .collect::<Result<Vec<_>, TypeError>>()?
-                    }
+                    crate::parser::StructKind::Named(fields) => fields
+                        .iter()
+                        .map(|f| {
+                            let ty = self.ast_type_to_ty(&f.ty)?;
+                            Ok((f.name.name.clone(), ty))
+                        })
+                        .collect::<Result<Vec<_>, TypeError>>()?,
+                    crate::parser::StructKind::Tuple(types) => types
+                        .iter()
+                        .enumerate()
+                        .map(|(i, t)| {
+                            let ty = self.ast_type_to_ty(t)?;
+                            Ok((format!("{}", i), ty))
+                        })
+                        .collect::<Result<Vec<_>, TypeError>>()?,
                     crate::parser::StructKind::Unit => vec![],
                 };
 
@@ -3646,12 +5021,12 @@ impl InferenceEngine {
                 let current_type_params = std::mem::replace(&mut self.type_params, old_type_params);
 
                 // Build type var mapping for constructor type scheme
-                let type_var_map: Vec<(String, TypeVar)> = current_type_params
-                    .into_iter()
-                    .collect();
+                let type_var_map: Vec<(String, TypeVar)> =
+                    current_type_params.into_iter().collect();
 
                 // Build the struct type with type arguments
-                let struct_ty_args: Vec<Ty> = type_var_map.iter().map(|(_, tv)| Ty::Var(*tv)).collect();
+                let struct_ty_args: Vec<Ty> =
+                    type_var_map.iter().map(|(_, tv)| Ty::Var(*tv)).collect();
                 let struct_ty = Ty::Named(TypeId::new(&struct_name), struct_ty_args);
 
                 // Create constructor type: function from field types to struct type
@@ -3675,7 +5050,10 @@ impl InferenceEngine {
 
                 self.env.insert_type(
                     struct_name.clone(),
-                    TypeDef::Struct { type_params, fields },
+                    TypeDef::Struct {
+                        type_params,
+                        fields,
+                    },
                 );
                 self.symbol_locations.insert(
                     struct_name,
@@ -3696,18 +5074,14 @@ impl InferenceEngine {
                     .map(|v| {
                         let fields = match &v.kind {
                             VariantKind::Unit => vec![],
-                            VariantKind::Tuple(types) => {
-                                types
-                                    .iter()
-                                    .map(|t| self.ast_type_to_ty(t))
-                                    .collect::<Result<Vec<_>, _>>()?
-                            }
-                            VariantKind::Named(fields) => {
-                                fields
-                                    .iter()
-                                    .map(|f| self.ast_type_to_ty(&f.ty))
-                                    .collect::<Result<Vec<_>, _>>()?
-                            }
+                            VariantKind::Tuple(types) => types
+                                .iter()
+                                .map(|t| self.ast_type_to_ty(t))
+                                .collect::<Result<Vec<_>, _>>()?,
+                            VariantKind::Named(fields) => fields
+                                .iter()
+                                .map(|f| self.ast_type_to_ty(&f.ty))
+                                .collect::<Result<Vec<_>, _>>()?,
                         };
                         Ok((v.name.name.clone(), fields))
                     })
@@ -3717,12 +5091,12 @@ impl InferenceEngine {
                 let current_type_params = std::mem::replace(&mut self.type_params, old_type_params);
 
                 // Use the type variables we created for the variant field processing
-                let type_var_map: Vec<(String, TypeVar)> = current_type_params
-                    .into_iter()
-                    .collect();
+                let type_var_map: Vec<(String, TypeVar)> =
+                    current_type_params.into_iter().collect();
 
                 // Build the enum type with fresh type variables
-                let enum_ty_args: Vec<Ty> = type_var_map.iter().map(|(_, tv)| Ty::Var(*tv)).collect();
+                let enum_ty_args: Vec<Ty> =
+                    type_var_map.iter().map(|(_, tv)| Ty::Var(*tv)).collect();
                 let enum_ty = Ty::Named(TypeId::new(&enum_name), enum_ty_args);
 
                 // Add constructor bindings for each variant
@@ -3745,7 +5119,10 @@ impl InferenceEngine {
 
                 self.env.insert_type(
                     enum_name.clone(),
-                    TypeDef::Enum { type_params, variants },
+                    TypeDef::Enum {
+                        type_params,
+                        variants,
+                    },
                 );
                 self.symbol_locations.insert(
                     enum_name,
@@ -3763,7 +5140,10 @@ impl InferenceEngine {
 
                 self.env.insert_type(
                     t.name.name.clone(),
-                    TypeDef::Alias { type_params, target },
+                    TypeDef::Alias {
+                        type_params,
+                        target,
+                    },
                 );
             }
             ItemKind::Trait(t) => {
@@ -3804,11 +5184,14 @@ impl InferenceEngine {
                     }
                 }
 
-                self.env.insert_trait(trait_name.clone(), TraitInfo {
-                    name: trait_name,
-                    type_params,
-                    methods,
-                });
+                self.env.insert_trait(
+                    trait_name.clone(),
+                    TraitInfo {
+                        name: trait_name,
+                        type_params,
+                        methods,
+                    },
+                );
 
                 self.type_params = old_type_params;
             }
@@ -3858,7 +5241,8 @@ impl InferenceEngine {
                 // Track function info for default parameter handling
                 let required_params = f.params.iter().filter(|p| p.default.is_none()).count();
                 let total_params = f.params.len();
-                let param_pass_modes: Vec<PassMode> = f.params.iter().map(|p| p.pass_mode).collect();
+                let param_pass_modes: Vec<PassMode> =
+                    f.params.iter().map(|p| p.pass_mode).collect();
                 self.env.insert_fn_info(
                     f.name.name.clone(),
                     FunctionInfo {
@@ -3895,11 +5279,14 @@ impl InferenceEngine {
 
                         // Register method in builtin_methods for lookup
                         let method_key = (type_name.clone(), f.name.name.clone());
-                        self.builtin_methods.insert(method_key, MethodSignature {
-                            params: param_types,
-                            return_type,
-                            uses_receiver_type: false,
-                        });
+                        self.builtin_methods.insert(
+                            method_key,
+                            MethodSignature {
+                                params: param_types,
+                                return_type,
+                                uses_receiver_type: false,
+                            },
+                        );
                     }
                 }
             }
@@ -3911,9 +5298,11 @@ impl InferenceEngine {
     /// Extract the type name from an AST type (for impl block targets).
     fn get_type_name_from_ast_type(&self, ast_ty: &AstType) -> String {
         match &ast_ty.kind {
-            AstTypeKind::Path(p) => {
-                p.segments.last().map(|s| s.name.name.clone()).unwrap_or_default()
-            }
+            AstTypeKind::Path(p) => p
+                .segments
+                .last()
+                .map(|s| s.name.name.clone())
+                .unwrap_or_default(),
             _ => "Unknown".to_string(),
         }
     }
@@ -3989,14 +5378,17 @@ impl InferenceEngine {
                 // Validate trait implementation
                 if let Some(trait_type) = &i.trait_ {
                     let trait_name = match &trait_type.kind {
-                        crate::parser::TypeKind::Path(p) => p.segments.last()
+                        crate::parser::TypeKind::Path(p) => p
+                            .segments
+                            .last()
                             .map(|s| s.name.name.clone())
                             .unwrap_or_default(),
                         _ => String::new(),
                     };
 
                     if let Some(trait_info) = self.env.get_trait(&trait_name) {
-                        let mut impl_methods: std::collections::HashSet<String> = std::collections::HashSet::new();
+                        let mut impl_methods: std::collections::HashSet<String> =
+                            std::collections::HashSet::new();
                         for impl_item in &i.items {
                             if let crate::parser::ImplItem::Function(f) = impl_item {
                                 impl_methods.insert(f.name.name.clone());
@@ -4019,23 +5411,24 @@ impl InferenceEngine {
                         // Validate method signatures
                         for impl_item in &i.items {
                             if let crate::parser::ImplItem::Function(f) = impl_item
-                                && let Some(trait_method) = trait_info.methods.iter()
-                                    .find(|m| m.name == f.name.name)
-                                {
-                                    let impl_params: Vec<_> = f.params.iter()
-                                        .filter(|p| p.name.name != "self")
-                                        .collect();
+                                && let Some(trait_method) =
+                                    trait_info.methods.iter().find(|m| m.name == f.name.name)
+                            {
+                                let impl_params: Vec<_> =
+                                    f.params.iter().filter(|p| p.name.name != "self").collect();
 
-                                    if impl_params.len() != trait_method.params.len() {
-                                        return Err(TypeError::new(
-                                            format!(
-                                                "method '{}' has {} parameter(s), trait requires {}",
-                                                f.name.name, impl_params.len(), trait_method.params.len()
-                                            ),
-                                            f.span,
-                                        ));
-                                    }
+                                if impl_params.len() != trait_method.params.len() {
+                                    return Err(TypeError::new(
+                                        format!(
+                                            "method '{}' has {} parameter(s), trait requires {}",
+                                            f.name.name,
+                                            impl_params.len(),
+                                            trait_method.params.len()
+                                        ),
+                                        f.span,
+                                    ));
                                 }
+                            }
                         }
                     }
                 }
@@ -4080,9 +5473,7 @@ impl InferenceEngine {
 
                 Ok(Ty::Unit)
             }
-            StmtKind::Expr(e) => {
-                self.infer_expr(e)
-            }
+            StmtKind::Expr(e) => self.infer_expr(e),
             StmtKind::Item(item) => {
                 self.check_item(item)?;
                 Ok(Ty::Unit)
@@ -4182,142 +5573,165 @@ impl InferenceEngine {
 
                 // Check if callee is an identifier with function info (for default params)
                 if let ExprKind::Ident(name) = &callee.kind
-                    && let Some(fn_info) = self.env.get_fn_info(&name.name) {
-                        let provided = arg_types.len();
-                        let required = fn_info.required_params;
-                        let total = fn_info.total_params;
+                    && let Some(fn_info) = self.env.get_fn_info(&name.name)
+                {
+                    let provided = arg_types.len();
+                    let required = fn_info.required_params;
+                    let total = fn_info.total_params;
 
-                        // Check if we have enough arguments
-                        if provided < required {
-                            return Err(TypeError::new(
-                                format!(
-                                    "function '{}' requires at least {} argument(s), found {}",
-                                    name.name, required, provided
-                                ),
-                                expr.span,
-                            ));
-                        }
+                    // Check if we have enough arguments
+                    if provided < required {
+                        return Err(TypeError::new(
+                            format!(
+                                "function '{}' requires at least {} argument(s), found {}",
+                                name.name, required, provided
+                            ),
+                            expr.span,
+                        ));
+                    }
 
-                        if provided > total {
-                            return Err(TypeError::new(
-                                format!(
-                                    "function '{}' takes at most {} argument(s), found {}",
-                                    name.name, total, provided
-                                ),
-                                expr.span,
-                            ));
-                        }
+                    if provided > total {
+                        return Err(TypeError::new(
+                            format!(
+                                "function '{}' takes at most {} argument(s), found {}",
+                                name.name, total, provided
+                            ),
+                            expr.span,
+                        ));
+                    }
 
-                        // Validate pass modes match between call site and declaration
-                        let param_modes = &fn_info.param_pass_modes;
-                        for (i, arg) in args.iter().enumerate().take(provided) {
-                            if i < param_modes.len() {
-                                let expected = param_modes[i];
-                                let actual = arg.pass_mode;
-                                match (expected, actual) {
-                                    (PassMode::Owned, PassMode::Owned) => {}
-                                    (PassMode::Ref, PassMode::Ref) => {
-                                        // Verify argument is a place expression
-                                        if !Self::is_place_expr(&arg.value) {
-                                            return Err(TypeError::new(
+                    // Validate pass modes match between call site and declaration
+                    let param_modes = &fn_info.param_pass_modes;
+                    for (i, arg) in args.iter().enumerate().take(provided) {
+                        if i < param_modes.len() {
+                            let expected = param_modes[i];
+                            let actual = arg.pass_mode;
+                            match (expected, actual) {
+                                (PassMode::Owned, PassMode::Owned) => {}
+                                (PassMode::Ref, PassMode::Ref) => {
+                                    // Verify argument is a place expression
+                                    if !Self::is_place_expr(&arg.value) {
+                                        return Err(TypeError::new(
                                                 "'ref' argument must be a variable, field access, or index expression".to_string(),
                                                 arg.span,
                                             ));
-                                        }
                                     }
-                                    (PassMode::RefMut, PassMode::RefMut) => {
-                                        // Verify argument is a place expression
-                                        if !Self::is_place_expr(&arg.value) {
-                                            return Err(TypeError::new(
+                                }
+                                (PassMode::RefMut, PassMode::RefMut) => {
+                                    // Verify argument is a place expression
+                                    if !Self::is_place_expr(&arg.value) {
+                                        return Err(TypeError::new(
                                                 "'ref mut' argument must be a variable, field access, or index expression".to_string(),
                                                 arg.span,
                                             ));
-                                        }
                                     }
-                                    (PassMode::Ref, PassMode::Owned) | (PassMode::RefMut, PassMode::Owned) => {
-                                        let mode_str = if expected == PassMode::Ref { "ref" } else { "ref mut" };
-                                        return Err(TypeError::new(
-                                            format!(
-                                                "parameter 'argument {}' of '{}' requires '{}' at call site",
-                                                i + 1, name.name, mode_str
-                                            ),
-                                            arg.span,
-                                        ));
-                                    }
-                                    (PassMode::Owned, PassMode::Ref) | (PassMode::Owned, PassMode::RefMut) => {
-                                        let mode_str = if actual == PassMode::Ref { "ref" } else { "ref mut" };
-                                        return Err(TypeError::new(
-                                            format!(
-                                                "unexpected '{}' on argument {} of '{}' (parameter is not a reference)",
-                                                mode_str, i + 1, name.name
-                                            ),
-                                            arg.span,
-                                        ));
-                                    }
-                                    (PassMode::Ref, PassMode::RefMut) => {
-                                        return Err(TypeError::new(
-                                            format!(
-                                                "parameter {} of '{}' expects 'ref' but got 'ref mut'",
-                                                i + 1, name.name
-                                            ),
-                                            arg.span,
-                                        ));
-                                    }
-                                    (PassMode::RefMut, PassMode::Ref) => {
-                                        return Err(TypeError::new(
-                                            format!(
-                                                "parameter {} of '{}' expects 'ref mut' but got 'ref'",
-                                                i + 1, name.name
-                                            ),
-                                            arg.span,
-                                        ));
-                                    }
+                                }
+                                (PassMode::Ref, PassMode::Owned)
+                                | (PassMode::RefMut, PassMode::Owned) => {
+                                    let mode_str = if expected == PassMode::Ref {
+                                        "ref"
+                                    } else {
+                                        "ref mut"
+                                    };
+                                    return Err(TypeError::new(
+                                        format!(
+                                            "parameter 'argument {}' of '{}' requires '{}' at call site",
+                                            i + 1,
+                                            name.name,
+                                            mode_str
+                                        ),
+                                        arg.span,
+                                    ));
+                                }
+                                (PassMode::Owned, PassMode::Ref)
+                                | (PassMode::Owned, PassMode::RefMut) => {
+                                    let mode_str = if actual == PassMode::Ref {
+                                        "ref"
+                                    } else {
+                                        "ref mut"
+                                    };
+                                    return Err(TypeError::new(
+                                        format!(
+                                            "unexpected '{}' on argument {} of '{}' (parameter is not a reference)",
+                                            mode_str,
+                                            i + 1,
+                                            name.name
+                                        ),
+                                        arg.span,
+                                    ));
+                                }
+                                (PassMode::Ref, PassMode::RefMut) => {
+                                    return Err(TypeError::new(
+                                        format!(
+                                            "parameter {} of '{}' expects 'ref' but got 'ref mut'",
+                                            i + 1,
+                                            name.name
+                                        ),
+                                        arg.span,
+                                    ));
+                                }
+                                (PassMode::RefMut, PassMode::Ref) => {
+                                    return Err(TypeError::new(
+                                        format!(
+                                            "parameter {} of '{}' expects 'ref mut' but got 'ref'",
+                                            i + 1,
+                                            name.name
+                                        ),
+                                        arg.span,
+                                    ));
                                 }
                             }
                         }
-
-                        // Basic borrow check: reject same variable as ref mut in multiple args
-                        {
-                            let mut ref_mut_vars: Vec<(String, usize)> = Vec::new();
-                            for (i, arg) in args.iter().enumerate().take(provided) {
-                                if arg.pass_mode == PassMode::RefMut
-                                    && let ExprKind::Ident(ident) = &arg.value.kind {
-                                        for &(ref prev_name, prev_idx) in &ref_mut_vars {
-                                            if *prev_name == ident.name {
-                                                return Err(TypeError::new(
-                                                    format!(
-                                                        "cannot pass '{}' as 'ref mut' to both argument {} and argument {} of '{}'",
-                                                        ident.name, prev_idx + 1, i + 1, name.name
-                                                    ),
-                                                    arg.span,
-                                                ));
-                                            }
-                                        }
-                                        ref_mut_vars.push((ident.name.clone(), i));
-                                    }
-                            }
-                        }
-
-                        // Build a function type with all params (using defaults for missing ones)
-                        let full_arg_types: Vec<Ty> = fn_info.param_types.iter()
-                            .enumerate()
-                            .map(|(i, param_ty)| {
-                                if i < provided {
-                                    // Use provided argument type
-                                    arg_types[i].clone()
-                                } else {
-                                    // Use parameter type (from default)
-                                    param_ty.clone()
-                                }
-                            })
-                            .collect();
-
-                        let callee_ty = self.infer_expr(callee)?;
-                        let result_ty = Ty::fresh_var();
-                        let expected_fn = Ty::Fn(full_arg_types, Box::new(result_ty.clone()));
-                        self.unifier.unify(&callee_ty, &expected_fn, expr.span)?;
-                        return Ok(result_ty);
                     }
+
+                    // Basic borrow check: reject same variable as ref mut in multiple args
+                    {
+                        let mut ref_mut_vars: Vec<(String, usize)> = Vec::new();
+                        for (i, arg) in args.iter().enumerate().take(provided) {
+                            if arg.pass_mode == PassMode::RefMut
+                                && let ExprKind::Ident(ident) = &arg.value.kind
+                            {
+                                for &(ref prev_name, prev_idx) in &ref_mut_vars {
+                                    if *prev_name == ident.name {
+                                        return Err(TypeError::new(
+                                            format!(
+                                                "cannot pass '{}' as 'ref mut' to both argument {} and argument {} of '{}'",
+                                                ident.name,
+                                                prev_idx + 1,
+                                                i + 1,
+                                                name.name
+                                            ),
+                                            arg.span,
+                                        ));
+                                    }
+                                }
+                                ref_mut_vars.push((ident.name.clone(), i));
+                            }
+                        }
+                    }
+
+                    // Build a function type with all params (using defaults for missing ones)
+                    let full_arg_types: Vec<Ty> = fn_info
+                        .param_types
+                        .iter()
+                        .enumerate()
+                        .map(|(i, param_ty)| {
+                            if i < provided {
+                                // Use provided argument type
+                                arg_types[i].clone()
+                            } else {
+                                // Use parameter type (from default)
+                                param_ty.clone()
+                            }
+                        })
+                        .collect();
+
+                    let callee_ty = self.infer_expr(callee)?;
+                    let result_ty = Ty::fresh_var();
+                    let expected_fn = Ty::Fn(full_arg_types, Box::new(result_ty.clone()));
+                    self.unifier.unify(&callee_ty, &expected_fn, expr.span)?;
+                    return Ok(result_ty);
+                }
 
                 // Standard case: no function info (builtins, closures, etc.)
                 let callee_ty = self.infer_expr(callee)?;
@@ -4334,11 +5748,14 @@ impl InferenceEngine {
                 let resolved_ty = receiver_ty.apply(&self.unifier.subst);
 
                 // Look up the method based on receiver type
-                let (method_sig, elem_types) = self.lookup_method(&resolved_ty, &method.name)
-                    .ok_or_else(|| TypeError::new(
-                        format!("type {} has no method '{}'", resolved_ty, method.name),
-                        method.span
-                    ))?;
+                let (method_sig, elem_types) = self
+                    .lookup_method(&resolved_ty, &method.name)
+                    .ok_or_else(|| {
+                        TypeError::new(
+                            format!("type {} has no method '{}'", resolved_ty, method.name),
+                            method.span,
+                        )
+                    })?;
 
                 // Infer argument types
                 let arg_types: Vec<Ty> = args
@@ -4349,9 +5766,13 @@ impl InferenceEngine {
                 // Check argument count
                 if arg_types.len() != method_sig.params.len() {
                     return Err(TypeError::new(
-                        format!("method '{}' expects {} arguments, found {}",
-                                method.name, method_sig.params.len(), arg_types.len()),
-                        expr.span
+                        format!(
+                            "method '{}' expects {} arguments, found {}",
+                            method.name,
+                            method_sig.params.len(),
+                            arg_types.len()
+                        ),
+                        expr.span,
                     ));
                 }
 
@@ -4384,7 +5805,11 @@ impl InferenceEngine {
                         return Ok(elems[*index].clone());
                     }
                     return Err(TypeError::new(
-                        format!("Tuple index {} out of bounds (tuple has {} elements)", index, elems.len()),
+                        format!(
+                            "Tuple index {} out of bounds (tuple has {} elements)",
+                            index,
+                            elems.len()
+                        ),
                         expr.span,
                     ));
                 }
@@ -4444,7 +5869,10 @@ impl InferenceEngine {
             ExprKind::MapOrSet(entries) => {
                 if entries.is_empty() {
                     // Empty - could be map or set
-                    Ok(Ty::Map(Box::new(Ty::fresh_var()), Box::new(Ty::fresh_var())))
+                    Ok(Ty::Map(
+                        Box::new(Ty::fresh_var()),
+                        Box::new(Ty::fresh_var()),
+                    ))
                 } else if entries.first().map(|e| e.value.is_some()).unwrap_or(false) {
                     // Map
                     let key_ty = Ty::fresh_var();
@@ -4483,8 +5911,7 @@ impl InferenceEngine {
                         crate::parser::ElseBranch::Expr(e) => self.infer_expr(e)?,
                         crate::parser::ElseBranch::Block(b) => self.infer_block(b)?,
                         crate::parser::ElseBranch::ElseIf(elif) => {
-                            let elif_expr = Expr::new(ExprKind::If(elif.clone()), elif.span,
-                            );
+                            let elif_expr = Expr::new(ExprKind::If(elif.clone()), elif.span);
                             self.infer_expr(&elif_expr)?
                         }
                     };
@@ -4642,16 +6069,25 @@ impl InferenceEngine {
             }
 
             ExprKind::Struct(path, fields, base) => {
-                let type_name = path.segments.last().map(|s| s.name.name.as_str()).unwrap_or("");
+                let type_name = path
+                    .segments
+                    .last()
+                    .map(|s| s.name.name.as_str())
+                    .unwrap_or("");
                 let type_id = TypeId::new(type_name);
 
                 // Look up the struct definition to get type parameters and field types
-                if let Some(TypeDef::Struct { type_params, fields: def_fields }) = self.env.get_type(type_name).cloned() {
+                if let Some(TypeDef::Struct {
+                    type_params,
+                    fields: def_fields,
+                }) = self.env.get_type(type_name).cloned()
+                {
                     // Create fresh type variables for each type parameter
                     let type_args: Vec<Ty> = type_params.iter().map(|_| Ty::fresh_var()).collect();
 
                     // Build substitution from param names to fresh type vars
-                    let subst: HashMap<String, Ty> = type_params.iter()
+                    let subst: HashMap<String, Ty> = type_params
+                        .iter()
                         .zip(type_args.iter())
                         .map(|(name, ty)| (name.clone(), ty.clone()))
                         .collect();
@@ -4662,7 +6098,9 @@ impl InferenceEngine {
                             let value_ty = self.infer_expr(value)?;
 
                             // Find the field in the definition
-                            if let Some((_, def_field_ty)) = def_fields.iter().find(|(n, _)| n == &field.name.name) {
+                            if let Some((_, def_field_ty)) =
+                                def_fields.iter().find(|(n, _)| n == &field.name.name)
+                            {
                                 // Apply type parameter substitution to the definition type
                                 let expected_ty = self.substitute_type_params(def_field_ty, &subst);
                                 self.unifier.unify(&value_ty, &expected_ty, expr.span)?;
@@ -4672,7 +6110,11 @@ impl InferenceEngine {
 
                     if let Some(b) = base {
                         let base_ty = self.infer_expr(b)?;
-                        self.unifier.unify(&base_ty, &Ty::Named(type_id.clone(), type_args.clone()), expr.span)?;
+                        self.unifier.unify(
+                            &base_ty,
+                            &Ty::Named(type_id.clone(), type_args.clone()),
+                            expr.span,
+                        )?;
                     }
 
                     Ok(Ty::Named(type_id, type_args))
@@ -4691,7 +6133,11 @@ impl InferenceEngine {
             }
 
             ExprKind::Path(p) => {
-                let name = p.segments.last().map(|s| s.name.clone()).unwrap_or_default();
+                let name = p
+                    .segments
+                    .last()
+                    .map(|s| s.name.clone())
+                    .unwrap_or_default();
 
                 if let Some(scheme) = self.env.get(&name) {
                     Ok(scheme.instantiate())
@@ -4787,7 +6233,10 @@ impl InferenceEngine {
                     } else {
                         self.unifier.restore(checkpoint2);
                         Err(TypeError::new(
-                            format!("Cannot await non-async type {:?}", inner_ty.apply(&self.unifier.subst)),
+                            format!(
+                                "Cannot await non-async type {:?}",
+                                inner_ty.apply(&self.unifier.subst)
+                            ),
                             expr.span,
                         ))
                     }
@@ -4825,9 +6274,7 @@ impl InferenceEngine {
                 Ok(Ty::Future(Box::new(block_ty)))
             }
 
-            ExprKind::Unsafe(block) => {
-                self.infer_block(block)
-            }
+            ExprKind::Unsafe(block) => self.infer_block(block),
 
             ExprKind::FieldShorthand(_field) => {
                 // Field shorthand like .field is a closure taking one argument
@@ -4858,7 +6305,7 @@ impl InferenceEngine {
                         // Logical ops: both sides Bool
                         (Ty::Bool, Ty::Bool)
                     }
-                    _ => (Ty::fresh_var(), Ty::fresh_var())
+                    _ => (Ty::fresh_var(), Ty::fresh_var()),
                 };
                 Ok(Ty::Fn(vec![arg_ty], Box::new(result_ty)))
             }
@@ -4923,13 +6370,16 @@ impl InferenceEngine {
             }
             PatternKind::Struct(path, fields, rest) => {
                 // Get the struct name from the path
-                let struct_name = path.segments.last()
+                let struct_name = path
+                    .segments
+                    .last()
                     .map(|s| s.name.name.clone())
                     .unwrap_or_default();
 
                 // Look up the struct definition
                 // First try direct lookup, then check if it's a variant name
-                let (resolved_name, struct_def) = if let Some(def) = self.env.get_type(&struct_name) {
+                let (resolved_name, struct_def) = if let Some(def) = self.env.get_type(&struct_name)
+                {
                     (struct_name.clone(), Some(def.clone()))
                 } else if path.segments.len() == 1 {
                     // Single segment path might be a variant name (e.g., "Some", "Ok")
@@ -4943,15 +6393,17 @@ impl InferenceEngine {
                 };
 
                 match struct_def {
-                    Some(TypeDef::Struct { type_params, fields: struct_fields }) => {
+                    Some(TypeDef::Struct {
+                        type_params,
+                        fields: struct_fields,
+                    }) => {
                         // Unify expected type with struct type
                         let struct_ty = if type_params.is_empty() {
                             Ty::Named(TypeId::new(&resolved_name), vec![])
                         } else {
                             // For generic structs, create fresh type variables
-                            let type_args: Vec<Ty> = type_params.iter()
-                                .map(|_| Ty::fresh_var())
-                                .collect();
+                            let type_args: Vec<Ty> =
+                                type_params.iter().map(|_| Ty::fresh_var()).collect();
                             Ty::Named(TypeId::new(&resolved_name), type_args)
                         };
                         self.unifier.unify(&struct_ty, ty, pattern.span)?;
@@ -4960,7 +6412,8 @@ impl InferenceEngine {
                         let mut matched_fields = std::collections::HashSet::new();
                         for field_pat in fields {
                             // Find the field in the struct definition
-                            let field_def = struct_fields.iter()
+                            let field_def = struct_fields
+                                .iter()
                                 .find(|(name, _)| name == &field_pat.name.name);
 
                             if let Some((_, field_ty)) = field_def {
@@ -4972,13 +6425,16 @@ impl InferenceEngine {
                                 }
                             } else {
                                 // Field not found
-                                let available: Vec<_> = struct_fields.iter()
-                                    .map(|(n, _)| n.as_str())
-                                    .collect();
+                                let available: Vec<_> =
+                                    struct_fields.iter().map(|(n, _)| n.as_str()).collect();
                                 return Err(TypeError::new(
-                                    format!("struct '{}' has no field '{}'. Available: {}",
-                                            struct_name, field_pat.name.name, available.join(", ")),
-                                    field_pat.name.span
+                                    format!(
+                                        "struct '{}' has no field '{}'. Available: {}",
+                                        struct_name,
+                                        field_pat.name.name,
+                                        available.join(", ")
+                                    ),
+                                    field_pat.name.span,
                                 ));
                             }
                         }
@@ -4988,9 +6444,11 @@ impl InferenceEngine {
                             for (field_name, _) in &struct_fields {
                                 if !matched_fields.contains(field_name) {
                                     return Err(TypeError::new(
-                                        format!("pattern missing field '{}' (use .. to ignore remaining fields)",
-                                                field_name),
-                                        pattern.span
+                                        format!(
+                                            "pattern missing field '{}' (use .. to ignore remaining fields)",
+                                            field_name
+                                        ),
+                                        pattern.span,
                                     ));
                                 }
                             }
@@ -4998,14 +6456,16 @@ impl InferenceEngine {
 
                         Ok(())
                     }
-                    Some(TypeDef::Enum { type_params, variants }) => {
+                    Some(TypeDef::Enum {
+                        type_params,
+                        variants,
+                    }) => {
                         // This is an enum pattern like Some(x) or Color::Red
                         let enum_ty = if type_params.is_empty() {
                             Ty::Named(TypeId::new(&resolved_name), vec![])
                         } else {
-                            let type_args: Vec<Ty> = type_params.iter()
-                                .map(|_| Ty::fresh_var())
-                                .collect();
+                            let type_args: Vec<Ty> =
+                                type_params.iter().map(|_| Ty::fresh_var()).collect();
                             Ty::Named(TypeId::new(&resolved_name), type_args)
                         };
                         self.unifier.unify(&enum_ty, ty, pattern.span)?;
@@ -5016,14 +6476,19 @@ impl InferenceEngine {
                         let variant_name = if struct_name != resolved_name {
                             struct_name.clone()
                         } else if path.segments.len() >= 2 {
-                            path.segments.last().map(|s| s.name.name.clone()).unwrap_or_default()
+                            path.segments
+                                .last()
+                                .map(|s| s.name.name.clone())
+                                .unwrap_or_default()
                         } else {
-                            fields.first().map(|f| f.name.name.clone()).unwrap_or_default()
+                            fields
+                                .first()
+                                .map(|f| f.name.name.clone())
+                                .unwrap_or_default()
                         };
 
                         // Find variant in enum definition
-                        let variant = variants.iter()
-                            .find(|(name, _)| name == &variant_name);
+                        let variant = variants.iter().find(|(name, _)| name == &variant_name);
 
                         if let Some((_, field_types)) = variant {
                             // Validate field count
@@ -5032,7 +6497,10 @@ impl InferenceEngine {
                                 return Err(TypeError::new(
                                     format!(
                                         "variant '{}::{}' has {} field(s), pattern has {}",
-                                        resolved_name, variant_name, field_types.len(), pattern_field_count
+                                        resolved_name,
+                                        variant_name,
+                                        field_types.len(),
+                                        pattern_field_count
                                     ),
                                     pattern.span,
                                 ));
@@ -5041,25 +6509,29 @@ impl InferenceEngine {
                             // Apply current substitution to get concrete field types.
                             // Without this, generic enum variants like Some(T) would
                             // have unresolved type variables in field_types.
-                            let concrete_field_types: Vec<Ty> = field_types.iter()
+                            let concrete_field_types: Vec<Ty> = field_types
+                                .iter()
                                 .map(|ft| ft.apply(self.unifier.substitution()))
                                 .collect();
 
                             // Validate field types using concrete types
-                            for (field, expected_ty) in fields.iter().zip(concrete_field_types.iter()) {
+                            for (field, expected_ty) in
+                                fields.iter().zip(concrete_field_types.iter())
+                            {
                                 if let Some(nested_pat) = &field.pattern {
                                     self.check_pattern(nested_pat, expected_ty)?;
                                 }
                             }
                             Ok(())
                         } else {
-                            let available: Vec<_> = variants.iter()
-                                .map(|(name, _)| name.as_str())
-                                .collect();
+                            let available: Vec<_> =
+                                variants.iter().map(|(name, _)| name.as_str()).collect();
                             Err(TypeError::new(
                                 format!(
                                     "enum '{}' has no variant '{}'. Available: {}",
-                                    resolved_name, variant_name, available.join(", ")
+                                    resolved_name,
+                                    variant_name,
+                                    available.join(", ")
                                 ),
                                 pattern.span,
                             ))
@@ -5136,7 +6608,9 @@ impl InferenceEngine {
             }
             PatternKind::Struct(path, fields, _rest) => {
                 // Try to get field types from the struct/enum definition
-                let struct_name = path.segments.last()
+                let struct_name = path
+                    .segments
+                    .last()
                     .map(|s| s.name.name.clone())
                     .unwrap_or_default();
 
@@ -5146,7 +6620,7 @@ impl InferenceEngine {
                 } else if path.segments.len() == 1 {
                     // Single segment path might be a variant name (e.g., "Some", "Ok")
                     if let Some((_enum_name, def)) = self.env.get_enum_for_variant(&struct_name) {
-                        Some((struct_name.clone(), def.clone()))  // struct_name is the variant
+                        Some((struct_name.clone(), def.clone())) // struct_name is the variant
                     } else {
                         None
                     }
@@ -5158,13 +6632,19 @@ impl InferenceEngine {
                     Some((_name, TypeDef::Struct { fields: sf, .. })) => {
                         // Handle struct pattern
                         for field in fields {
-                            let field_ty = sf.iter()
+                            let field_ty = sf
+                                .iter()
                                 .find(|(n, _)| n == &field.name.name)
                                 .map(|(_, ty)| ty.clone())
-                                .ok_or_else(|| TypeError::new(
-                                    format!("Unknown field '{}' in struct pattern", field.name.name),
-                                    field.name.span,
-                                ))?;
+                                .ok_or_else(|| {
+                                    TypeError::new(
+                                        format!(
+                                            "Unknown field '{}' in struct pattern",
+                                            field.name.name
+                                        ),
+                                        field.name.span,
+                                    )
+                                })?;
 
                             if let Some(p) = &field.pattern {
                                 self.collect_pattern_bindings(p, &field_ty, env)?;
@@ -5181,34 +6661,38 @@ impl InferenceEngine {
 
                         // Extract field types directly from the concrete type
                         // This handles built-in Option/Result with their actual type arguments
-                        let concrete_field_types: Vec<Ty> = match (&resolved_ty, variant_name.as_str()) {
-                            (Ty::Option(inner), "Some") => vec![(**inner).clone()],
-                            (Ty::Option(_), "None") => vec![],
-                            (Ty::Result(ok_ty, _), "Ok") => vec![(**ok_ty).clone()],
-                            (Ty::Result(_, err_ty), "Err") => vec![(**err_ty).clone()],
-                            (Ty::Named(_, args), _) => {
-                                // For user-defined enums, get field types from definition
-                                // and substitute type args if needed
-                                if let Some((_, tys)) = variants.iter().find(|(n, _)| n == &variant_name) {
-                                    // TODO: Properly substitute type params with args
-                                    // For now, use args directly if they match field count
-                                    if !args.is_empty() && tys.len() <= args.len() {
-                                        args.iter().take(tys.len()).cloned().collect()
+                        let concrete_field_types: Vec<Ty> =
+                            match (&resolved_ty, variant_name.as_str()) {
+                                (Ty::Option(inner), "Some") => vec![(**inner).clone()],
+                                (Ty::Option(_), "None") => vec![],
+                                (Ty::Result(ok_ty, _), "Ok") => vec![(**ok_ty).clone()],
+                                (Ty::Result(_, err_ty), "Err") => vec![(**err_ty).clone()],
+                                (Ty::Named(_, args), _) => {
+                                    // For user-defined enums, get field types from definition
+                                    // and substitute type args if needed
+                                    if let Some((_, tys)) =
+                                        variants.iter().find(|(n, _)| n == &variant_name)
+                                    {
+                                        // TODO: Properly substitute type params with args
+                                        // For now, use args directly if they match field count
+                                        if !args.is_empty() && tys.len() <= args.len() {
+                                            args.iter().take(tys.len()).cloned().collect()
+                                        } else {
+                                            tys.clone()
+                                        }
                                     } else {
-                                        tys.clone()
+                                        vec![]
                                     }
-                                } else {
-                                    vec![]
                                 }
-                            }
-                            _ => {
-                                // Fall back to enum definition's field types
-                                variants.iter()
-                                    .find(|(n, _)| n == &variant_name)
-                                    .map(|(_, tys)| tys.clone())
-                                    .unwrap_or_default()
-                            }
-                        };
+                                _ => {
+                                    // Fall back to enum definition's field types
+                                    variants
+                                        .iter()
+                                        .find(|(n, _)| n == &variant_name)
+                                        .map(|(_, tys)| tys.clone())
+                                        .unwrap_or_default()
+                                }
+                            };
 
                         // Bind each field pattern to its CONCRETE type
                         for (field, concrete_ty) in fields.iter().zip(concrete_field_types.iter()) {
@@ -5216,7 +6700,10 @@ impl InferenceEngine {
                                 self.collect_pattern_bindings(p, concrete_ty, env)?;
                             } else {
                                 // The field name is the binding
-                                env.insert(field.name.name.clone(), TypeScheme::mono(concrete_ty.clone()));
+                                env.insert(
+                                    field.name.name.clone(),
+                                    TypeScheme::mono(concrete_ty.clone()),
+                                );
                             }
                         }
                     }
@@ -5247,7 +6734,8 @@ impl InferenceEngine {
     fn bind_pattern(&mut self, pattern: &Pattern, ty: &Ty) -> Result<(), TypeError> {
         match &pattern.kind {
             PatternKind::Ident(ident, _mutable, _subpattern) => {
-                self.env.insert(ident.name.clone(), TypeScheme::mono(ty.clone()));
+                self.env
+                    .insert(ident.name.clone(), TypeScheme::mono(ty.clone()));
             }
             PatternKind::Tuple(elems) => {
                 if let Ty::Tuple(elem_tys) = ty.apply(&self.unifier.subst) {
@@ -5265,7 +6753,11 @@ impl InferenceEngine {
     pub fn ast_type_to_ty(&self, ast_ty: &AstType) -> Result<Ty, TypeError> {
         match &ast_ty.kind {
             AstTypeKind::Path(p) => {
-                let name = p.segments.last().map(|s| s.name.name.as_str()).unwrap_or("");
+                let name = p
+                    .segments
+                    .last()
+                    .map(|s| s.name.name.as_str())
+                    .unwrap_or("");
                 let args: Vec<Ty> = p
                     .segments
                     .last()
@@ -5436,13 +6928,19 @@ impl InferenceEngine {
         &self.env
     }
 
-    pub fn get_symbol_location(&self, name: &str) -> Option<(Span, super::checker::DefinitionKind)> {
+    pub fn get_symbol_location(
+        &self,
+        name: &str,
+    ) -> Option<(Span, super::checker::DefinitionKind)> {
         self.symbol_locations.get(name).copied()
     }
 
     /// Check whether an expression is a "place" (lvalue) that can be passed by reference.
     fn is_place_expr(expr: &Expr) -> bool {
-        matches!(&expr.kind, ExprKind::Ident(_) | ExprKind::Field(_, _) | ExprKind::Index(_, _))
+        matches!(
+            &expr.kind,
+            ExprKind::Ident(_) | ExprKind::Field(_, _) | ExprKind::Index(_, _)
+        )
     }
 
     /// Find a similar variable name for typo suggestions.
@@ -5473,16 +6971,28 @@ impl InferenceEngine {
         let m = a_chars.len();
         let n = b_chars.len();
 
-        if m == 0 { return n; }
-        if n == 0 { return m; }
+        if m == 0 {
+            return n;
+        }
+        if n == 0 {
+            return m;
+        }
 
         let mut dp = vec![vec![0; n + 1]; m + 1];
-        for (i, row) in dp.iter_mut().enumerate().take(m + 1) { row[0] = i; }
-        for (j, val) in dp[0].iter_mut().enumerate().take(n + 1) { *val = j; }
+        for (i, row) in dp.iter_mut().enumerate().take(m + 1) {
+            row[0] = i;
+        }
+        for (j, val) in dp[0].iter_mut().enumerate().take(n + 1) {
+            *val = j;
+        }
 
         for i in 1..=m {
             for j in 1..=n {
-                let cost = if a_chars[i - 1] == b_chars[j - 1] { 0 } else { 1 };
+                let cost = if a_chars[i - 1] == b_chars[j - 1] {
+                    0
+                } else {
+                    1
+                };
                 dp[i][j] = (dp[i - 1][j] + 1)
                     .min(dp[i][j - 1] + 1)
                     .min(dp[i - 1][j - 1] + cost);

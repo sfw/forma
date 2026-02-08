@@ -29,11 +29,10 @@ pub mod inference;
 pub mod types;
 
 // Re-export main types
-pub use checker::{TypeChecker, TypedAst, TypedItem, TypedItemKind, BoundsChecker, TypeRelations};
-pub use inference::{InferenceEngine, TypeEnv, TypeError, Unifier, TypeDef};
+pub use checker::{BoundsChecker, TypeChecker, TypeRelations, TypedAst, TypedItem, TypedItemKind};
+pub use inference::{InferenceEngine, TypeDef, TypeEnv, TypeError, Unifier};
 pub use types::{
-    Capability, EnvCapability, FileCapability, LinearityKind, Mutability, NetworkCapability,
-    Substitution, Ty, TypeId, TypeScheme, TypeVar,
-    EnumInfo, FunctionInfo, MethodInfo, StructInfo, TraitBound, TraitInfo, VariantFields, VariantInfo,
-    fresh_type_var_id, reset_type_var_counter,
+    Capability, EnumInfo, EnvCapability, FileCapability, FunctionInfo, LinearityKind, MethodInfo,
+    Mutability, NetworkCapability, StructInfo, Substitution, TraitBound, TraitInfo, Ty, TypeId,
+    TypeScheme, TypeVar, VariantFields, VariantInfo, fresh_type_var_id, reset_type_var_counter,
 };

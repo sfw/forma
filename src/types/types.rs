@@ -462,9 +462,7 @@ impl Ty {
             Ty::Alias(id, args) => {
                 Ty::Alias(id.clone(), args.iter().map(|t| t.apply(subst)).collect())
             }
-            Ty::Associated(ty, name) => {
-                Ty::Associated(Box::new(ty.apply(subst)), name.clone())
-            }
+            Ty::Associated(ty, name) => Ty::Associated(Box::new(ty.apply(subst)), name.clone()),
             _ => self.clone(),
         }
     }
@@ -750,10 +748,7 @@ impl TypeScheme {
     /// Generalize a type over the given free variables.
     pub fn generalize(ty: Ty, env_vars: &[TypeVar]) -> Self {
         let free = ty.free_vars();
-        let vars: Vec<_> = free
-            .into_iter()
-            .filter(|v| !env_vars.contains(v))
-            .collect();
+        let vars: Vec<_> = free.into_iter().filter(|v| !env_vars.contains(v)).collect();
         Self { vars, ty }
     }
 }
@@ -866,10 +861,7 @@ mod tests {
     fn test_type_display() {
         assert_eq!(format!("{}", Ty::Int), "Int");
         assert_eq!(format!("{}", Ty::List(Box::new(Ty::Int))), "[Int]");
-        assert_eq!(
-            format!("{}", Ty::Option(Box::new(Ty::Str))),
-            "Str?"
-        );
+        assert_eq!(format!("{}", Ty::Option(Box::new(Ty::Str))), "Str?");
         assert_eq!(
             format!("{}", Ty::Result(Box::new(Ty::Int), Box::new(Ty::Str))),
             "Int!Str"
@@ -888,10 +880,7 @@ mod tests {
         let ty = Ty::Tuple(vec![Ty::Var(v1), Ty::Var(v2)]);
         let result = ty.apply(&subst);
 
-        assert_eq!(
-            result,
-            Ty::Tuple(vec![Ty::Int, Ty::Var(v2)])
-        );
+        assert_eq!(result, Ty::Tuple(vec![Ty::Int, Ty::Var(v2)]));
     }
 
     #[test]

@@ -93,7 +93,8 @@ fn test_all_keywords() {
         assert!(
             matches!(toks[0], TokenKind::Ident(ref s) if s == expected_name),
             "contextual keyword '{}' should produce Ident(\"{}\")",
-            source, expected_name
+            source,
+            expected_name
         );
     }
 
@@ -374,7 +375,10 @@ f main
     result = [1, 2, 3] | map(* 2) | sum
 "#;
 
-    assert!(!has_errors(source), "complete program should have no errors");
+    assert!(
+        !has_errors(source),
+        "complete program should have no errors"
+    );
 }
 
 // Test that single-letter keywords can be used as variable names
@@ -386,6 +390,9 @@ fn test_contextual_keywords_as_variables() {
 
     // All should be Ident tokens
     for tok in &toks[..6] {
-        assert!(matches!(tok, TokenKind::Ident(_)), "single-letter should be Ident");
+        assert!(
+            matches!(tok, TokenKind::Ident(_)),
+            "single-letter should be Ident"
+        );
     }
 }

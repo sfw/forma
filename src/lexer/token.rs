@@ -81,12 +81,12 @@ impl Span {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
     // Keywords (single character)
-    F,      // function
-    S,      // struct
-    E,      // enum
-    T,      // trait / true shortcut (context-dependent)
-    I,      // impl
-    M,      // match
+    F, // function
+    S, // struct
+    E, // enum
+    T, // trait / true shortcut (context-dependent)
+    I, // impl
+    M, // match
 
     // Keywords (multi-character)
     If,
@@ -117,7 +117,7 @@ pub enum TokenKind {
     // Boolean/None literals (can also be keywords)
     True,
     False,
-    None,   // N or none
+    None, // N or none
 
     // Built-in type constructors
     Some,
@@ -125,62 +125,62 @@ pub enum TokenKind {
     Err,
 
     // Arithmetic operators
-    Plus,       // +
-    Minus,      // -
-    Star,       // *
-    Slash,      // /
-    Percent,    // %
+    Plus,    // +
+    Minus,   // -
+    Star,    // *
+    Slash,   // /
+    Percent, // %
 
     // Comparison operators
-    EqEq,       // ==
-    BangEq,     // !=
-    Lt,         // <
-    LtEq,       // <=
-    Gt,         // >
-    GtEq,       // >=
+    EqEq,   // ==
+    BangEq, // !=
+    Lt,     // <
+    LtEq,   // <=
+    Gt,     // >
+    GtEq,   // >=
 
     // Logical operators
-    AmpAmp,     // &&
-    PipePipe,   // ||
-    Bang,       // !
+    AmpAmp,   // &&
+    PipePipe, // ||
+    Bang,     // !
 
     // Bitwise operators
-    Amp,        // &
-    Pipe,       // |
-    Caret,      // ^
-    LtLt,       // <<
-    GtGt,       // >>
+    Amp,   // &
+    Pipe,  // |
+    Caret, // ^
+    LtLt,  // <<
+    GtGt,  // >>
 
     // Assignment operators
-    Eq,         // =
-    ColonEq,    // :=
-    PlusEq,     // +=
-    MinusEq,    // -=
-    StarEq,     // *=
-    SlashEq,    // /=
-    PercentEq,  // %=
+    Eq,        // =
+    ColonEq,   // :=
+    PlusEq,    // +=
+    MinusEq,   // -=
+    StarEq,    // *=
+    SlashEq,   // /=
+    PercentEq, // %=
 
     // Special operators
-    Question,       // ?
+    Question,         // ?
     QuestionQuestion, // ??
-    Arrow,          // ->
-    FatArrow,       // =>
-    DotDot,         // ..
-    DotDotEq,       // ..=
-    ColonColon,     // ::
-    Dot,            // .
-    Comma,          // ,
-    At,             // @
+    Arrow,            // ->
+    FatArrow,         // =>
+    DotDot,           // ..
+    DotDotEq,         // ..=
+    ColonColon,       // ::
+    Dot,              // .
+    Comma,            // ,
+    At,               // @
 
     // Delimiters
-    LParen,     // (
-    RParen,     // )
-    LBracket,   // [
-    RBracket,   // ]
-    LBrace,     // {
-    RBrace,     // }
-    Colon,      // :
-    Semicolon,  // ;
+    LParen,    // (
+    RParen,    // )
+    LBracket,  // [
+    RBracket,  // ]
+    LBrace,    // {
+    RBrace,    // }
+    Colon,     // :
+    Semicolon, // ;
 
     // Literals
     Int(i128),

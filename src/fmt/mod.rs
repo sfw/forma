@@ -272,7 +272,9 @@ impl Formatter {
             TypeKind::Fn(params, ret) => {
                 self.write("(");
                 for (i, param) in params.iter().enumerate() {
-                    if i > 0 { self.write(", "); }
+                    if i > 0 {
+                        self.write(", ");
+                    }
                     self.format_type(param);
                 }
                 self.write(") -> ");
@@ -280,7 +282,9 @@ impl Formatter {
             }
             TypeKind::Ptr(inner, is_mut) => {
                 self.write("*");
-                if *is_mut { self.write("mut "); }
+                if *is_mut {
+                    self.write("mut ");
+                }
                 self.format_type(inner);
             }
         }
@@ -406,7 +410,9 @@ impl Formatter {
             }
             ExprKind::Path(path) => {
                 for (i, seg) in path.segments.iter().enumerate() {
-                    if i > 0 { self.write("."); }
+                    if i > 0 {
+                        self.write(".");
+                    }
                     self.write(&seg.name);
                 }
             }
@@ -416,7 +422,9 @@ impl Formatter {
                 self.write(&method.name);
                 self.write("(");
                 for (i, arg) in args.iter().enumerate() {
-                    if i > 0 { self.write(", "); }
+                    if i > 0 {
+                        self.write(", ");
+                    }
                     self.format_expr(&arg.value);
                 }
                 self.write(")");
@@ -435,7 +443,9 @@ impl Formatter {
             ExprKind::Closure(closure) => {
                 self.write("|");
                 for (i, param) in closure.params.iter().enumerate() {
-                    if i > 0 { self.write(", "); }
+                    if i > 0 {
+                        self.write(", ");
+                    }
                     self.write(&param.name.name);
                 }
                 self.write("| ");
@@ -725,11 +735,15 @@ impl Formatter {
             PatternKind::List(pats, rest) => {
                 self.write("[");
                 for (i, p) in pats.iter().enumerate() {
-                    if i > 0 { self.write(", "); }
+                    if i > 0 {
+                        self.write(", ");
+                    }
                     self.format_pattern(p);
                 }
                 if let Some(rest_pat) = rest {
-                    if !pats.is_empty() { self.write(", "); }
+                    if !pats.is_empty() {
+                        self.write(", ");
+                    }
                     self.write("..");
                     self.format_pattern(rest_pat);
                 }
@@ -737,12 +751,16 @@ impl Formatter {
             }
             PatternKind::Struct(path, fields, _) => {
                 for (i, seg) in path.segments.iter().enumerate() {
-                    if i > 0 { self.write("::"); }
+                    if i > 0 {
+                        self.write("::");
+                    }
                     self.write(&seg.name.name);
                 }
                 self.write(" { ");
                 for (i, field) in fields.iter().enumerate() {
-                    if i > 0 { self.write(", "); }
+                    if i > 0 {
+                        self.write(", ");
+                    }
                     self.write(&field.name.name);
                     if let Some(pat) = &field.pattern {
                         self.write(": ");
@@ -753,18 +771,26 @@ impl Formatter {
             }
             PatternKind::Or(pats) => {
                 for (i, p) in pats.iter().enumerate() {
-                    if i > 0 { self.write(" | "); }
+                    if i > 0 {
+                        self.write(" | ");
+                    }
                     self.format_pattern(p);
                 }
             }
             PatternKind::Range(start, end, inclusive) => {
-                if let Some(s) = start { self.format_pattern(s); }
+                if let Some(s) = start {
+                    self.format_pattern(s);
+                }
                 self.write(if *inclusive { "..=" } else { ".." });
-                if let Some(e) = end { self.format_pattern(e); }
+                if let Some(e) = end {
+                    self.format_pattern(e);
+                }
             }
             PatternKind::Ref(pat, is_mut) => {
                 self.write("&");
-                if *is_mut { self.write("mut "); }
+                if *is_mut {
+                    self.write("mut ");
+                }
                 self.format_pattern(pat);
             }
             PatternKind::Rest => self.write(".."),
@@ -775,7 +801,9 @@ impl Formatter {
         match tree {
             UseTree::Path(segments, sub) => {
                 for (i, seg) in segments.iter().enumerate() {
-                    if i > 0 { self.write("."); }
+                    if i > 0 {
+                        self.write(".");
+                    }
                     self.write(&seg.name);
                 }
                 if let Some(sub_tree) = sub {
@@ -785,7 +813,9 @@ impl Formatter {
             }
             UseTree::Rename(segments, alias) => {
                 for (i, seg) in segments.iter().enumerate() {
-                    if i > 0 { self.write("."); }
+                    if i > 0 {
+                        self.write(".");
+                    }
                     self.write(&seg.name);
                 }
                 self.write(" -> ");
@@ -794,7 +824,9 @@ impl Formatter {
             UseTree::Group(trees) => {
                 self.write("{");
                 for (i, t) in trees.iter().enumerate() {
-                    if i > 0 { self.write(", "); }
+                    if i > 0 {
+                        self.write(", ");
+                    }
                     self.format_use_tree(t);
                 }
                 self.write("}");

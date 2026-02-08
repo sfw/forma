@@ -11,8 +11,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::lexer::Span;
 use crate::parser::{
-    Block, Expr, ExprKind, FnBody, Item, ItemKind, Pattern, PatternKind, SourceFile,
-    Stmt, StmtKind, Type as AstType, TypeKind as AstTypeKind, UnaryOp,
+    Block, Expr, ExprKind, FnBody, Item, ItemKind, Pattern, PatternKind, SourceFile, Stmt,
+    StmtKind, Type as AstType, TypeKind as AstTypeKind, UnaryOp,
 };
 
 /// Borrow checking error.
@@ -68,18 +68,10 @@ impl std::fmt::Display for BorrowError {
                 write!(f, "cannot store reference in collection")
             }
             BorrowErrorKind::ReturnLocalReference { name } => {
-                write!(
-                    f,
-                    "cannot return reference to local variable `{}`",
-                    name
-                )
+                write!(f, "cannot return reference to local variable `{}`", name)
             }
             BorrowErrorKind::BorrowWhileMutBorrow { name } => {
-                write!(
-                    f,
-                    "cannot borrow `{}` while mutable borrow is active",
-                    name
-                )
+                write!(f, "cannot borrow `{}` while mutable borrow is active", name)
             }
             BorrowErrorKind::MoveWhileBorrowed { name } => {
                 write!(f, "cannot move `{}` while borrowed", name)
@@ -316,7 +308,8 @@ impl BorrowChecker {
 
             // For the last statement, if it's an expression and the function
             // returns a reference, check it as a return value
-            if is_last && self.returns_ref
+            if is_last
+                && self.returns_ref
                 && let StmtKind::Expr(expr) = &stmt.kind
             {
                 self.check_return_ref(expr, fn_span);
@@ -497,8 +490,7 @@ impl BorrowChecker {
                         crate::parser::ElseBranch::Expr(e) => self.check_expr(e),
                         crate::parser::ElseBranch::Block(b) => self.check_block(b),
                         crate::parser::ElseBranch::ElseIf(elif) => {
-                            let elif_expr = Expr::new(ExprKind::If(elif.clone()), elif.span,
-                            );
+                            let elif_expr = Expr::new(ExprKind::If(elif.clone()), elif.span);
                             self.check_expr(&elif_expr);
                         }
                     }
@@ -550,7 +542,11 @@ impl BorrowChecker {
             ExprKind::Closure(closure) => {
                 self.push_scope();
                 for param in &closure.params {
-                    let is_ref = param.ty.as_ref().map(|t| self.is_ref_type(t)).unwrap_or(false);
+                    let is_ref = param
+                        .ty
+                        .as_ref()
+                        .map(|t| self.is_ref_type(t))
+                        .unwrap_or(false);
                     self.vars.insert(
                         param.name.name.clone(),
                         VarInfo {
@@ -667,30 +663,32 @@ impl BorrowChecker {
                 // Must be a reference parameter
                 if !self.ref_params.contains(&ident.name)
                     && let Some(info) = self.vars.get(&ident.name)
-                        && !info.is_ref_param {
-                            self.errors.push(
-                                BorrowError::new(
-                                    BorrowErrorKind::ReturnLocalReference {
-                                        name: ident.name.clone(),
-                                    },
-                                    error_span,
-                                )
-                                .with_help("return value must be derived from a reference parameter"),
-                            );
-                        }
+                    && !info.is_ref_param
+                {
+                    self.errors.push(
+                        BorrowError::new(
+                            BorrowErrorKind::ReturnLocalReference {
+                                name: ident.name.clone(),
+                            },
+                            error_span,
+                        )
+                        .with_help("return value must be derived from a reference parameter"),
+                    );
+                }
             }
             ExprKind::Unary(UnaryOp::Ref | UnaryOp::RefMut, inner) => {
                 // Check that inner is derived from ref param
                 if let Some(name) = self.get_root_name(inner)
-                    && !self.ref_params.contains(&name) {
-                        self.errors.push(
-                            BorrowError::new(
-                                BorrowErrorKind::ReturnLocalReference { name },
-                                error_span,
-                            )
-                            .with_help("cannot return reference to local variable"),
-                        );
-                    }
+                    && !self.ref_params.contains(&name)
+                {
+                    self.errors.push(
+                        BorrowError::new(
+                            BorrowErrorKind::ReturnLocalReference { name },
+                            error_span,
+                        )
+                        .with_help("cannot return reference to local variable"),
+                    );
+                }
             }
             ExprKind::Field(base, _) | ExprKind::TupleField(base, _) => {
                 // Field of a borrowed value is OK if base is from ref param
@@ -705,9 +703,10 @@ impl BorrowChecker {
             ExprKind::Block(block) => {
                 // Check last expression in block
                 if let Some(last) = block.stmts.last()
-                    && let StmtKind::Expr(e) = &last.kind {
-                        self.check_return_ref(e, error_span);
-                    }
+                    && let StmtKind::Expr(e) = &last.kind
+                {
+                    self.check_return_ref(e, error_span);
+                }
             }
             ExprKind::If(if_expr) => {
                 // Both branches must return valid refs
@@ -715,9 +714,10 @@ impl BorrowChecker {
                     crate::parser::IfBranch::Expr(e) => self.check_return_ref(e, error_span),
                     crate::parser::IfBranch::Block(b) => {
                         if let Some(last) = b.stmts.last()
-                            && let StmtKind::Expr(e) = &last.kind {
-                                self.check_return_ref(e, error_span);
-                            }
+                            && let StmtKind::Expr(e) = &last.kind
+                        {
+                            self.check_return_ref(e, error_span);
+                        }
                     }
                 }
                 if let Some(else_branch) = &if_expr.else_branch {
@@ -725,13 +725,13 @@ impl BorrowChecker {
                         crate::parser::ElseBranch::Expr(e) => self.check_return_ref(e, error_span),
                         crate::parser::ElseBranch::Block(b) => {
                             if let Some(last) = b.stmts.last()
-                                && let StmtKind::Expr(e) = &last.kind {
-                                    self.check_return_ref(e, error_span);
-                                }
+                                && let StmtKind::Expr(e) = &last.kind
+                            {
+                                self.check_return_ref(e, error_span);
+                            }
                         }
                         crate::parser::ElseBranch::ElseIf(elif) => {
-                            let elif_expr = Expr::new(ExprKind::If(elif.clone()), elif.span,
-                            );
+                            let elif_expr = Expr::new(ExprKind::If(elif.clone()), elif.span);
                             self.check_return_ref(&elif_expr, error_span);
                         }
                     }

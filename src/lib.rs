@@ -39,9 +39,9 @@ pub mod types;
 
 pub use borrow::{BorrowChecker, BorrowError, BorrowErrorKind};
 pub use errors::{CompileError, Result};
+pub use fmt::Formatter;
 pub use lexer::{Scanner, Span, Token, TokenKind};
 pub use mir::{Interpreter, Lowerer, Program, Value};
-pub use module::{ModuleLoader, ModuleError};
+pub use module::{ModuleError, ModuleLoader};
 pub use parser::{Parser, SourceFile};
-pub use types::{TypeChecker, Ty, TypeError};
-pub use fmt::Formatter;
+pub use types::{Ty, TypeChecker, TypeError};

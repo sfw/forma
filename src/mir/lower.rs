@@ -7,15 +7,15 @@ use std::collections::HashMap;
 
 use crate::lexer::Span;
 use crate::parser::{
-    BinOp as AstBinOp, Block as AstBlock, Expr, ExprKind, FnBody, Function as AstFunction,
-    IfBranch, ElseBranch, Item, ItemKind, Literal, LiteralKind, Pattern, PatternKind,
+    BinOp as AstBinOp, Block as AstBlock, ElseBranch, Expr, ExprKind, FnBody,
+    Function as AstFunction, IfBranch, Item, ItemKind, Literal, LiteralKind, Pattern, PatternKind,
     SourceFile, StmtKind, UnaryOp as AstUnaryOp,
 };
 use crate::types::Ty;
 
 use super::mir::{
-    BinOp, BlockId, Constant, Function, Local, MirContract, Mutability, Operand, PassMode,
-    Program, Rvalue, Statement, StatementKind, Terminator, UnOp,
+    BinOp, BlockId, Constant, Function, Local, MirContract, Mutability, Operand, PassMode, Program,
+    Rvalue, Statement, StatementKind, Terminator, UnOp,
 };
 
 /// Convert AST PassMode to MIR PassMode.
@@ -36,7 +36,11 @@ pub struct LowerError {
 
 impl std::fmt::Display for LowerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "lowering error at line {}: {}", self.span.line, self.message)
+        write!(
+            f,
+            "lowering error at line {}: {}",
+            self.span.line, self.message
+        )
     }
 }
 
@@ -106,7 +110,12 @@ impl Lowerer {
     fn current_block_id(&self) -> Result<BlockId, LowerError> {
         self.current_block.ok_or_else(|| LowerError {
             message: "internal error: no current block".to_string(),
-            span: Span { start: 0, end: 0, line: 0, column: 0 },
+            span: Span {
+                start: 0,
+                end: 0,
+                line: 0,
+                column: 0,
+            },
         })
     }
 
@@ -114,7 +123,12 @@ impl Lowerer {
     fn current_function(&self) -> Result<&Function, LowerError> {
         self.current_fn.as_ref().ok_or_else(|| LowerError {
             message: "internal error: no current function".to_string(),
-            span: Span { start: 0, end: 0, line: 0, column: 0 },
+            span: Span {
+                start: 0,
+                end: 0,
+                line: 0,
+                column: 0,
+            },
         })
     }
 
@@ -122,7 +136,12 @@ impl Lowerer {
     fn current_function_mut(&mut self) -> Result<&mut Function, LowerError> {
         self.current_fn.as_mut().ok_or_else(|| LowerError {
             message: "internal error: no current function".to_string(),
-            span: Span { start: 0, end: 0, line: 0, column: 0 },
+            span: Span {
+                start: 0,
+                end: 0,
+                line: 0,
+                column: 0,
+            },
         })
     }
 
@@ -138,15 +157,12 @@ impl Lowerer {
                         crate::parser::VariantKind::Tuple(fields) => fields.len(),
                         crate::parser::VariantKind::Named(fields) => fields.len(),
                     };
-                    self.enum_variants.insert(
-                        variant.name.name.clone(),
-                        (enum_name.clone(), field_count),
-                    );
+                    self.enum_variants
+                        .insert(variant.name.name.clone(), (enum_name.clone(), field_count));
                     // Register in program for runtime discriminant lookup
-                    self.program.enum_variants.insert(
-                        (enum_name.clone(), variant.name.name.clone()),
-                        idx,
-                    );
+                    self.program
+                        .enum_variants
+                        .insert((enum_name.clone(), variant.name.name.clone()), idx);
                 }
             }
         }
@@ -179,19 +195,21 @@ impl Lowerer {
                 // Lower methods in impl block
                 for impl_item in &impl_block.items {
                     if let crate::parser::ImplItem::Function(f) = impl_item
-                        && let Some(mir_fn) = self.lower_function(f) {
-                            // Use qualified name for methods
-                            let qualified_name = format!("{}::{}",
-                                self.type_to_string(&impl_block.self_type),
-                                mir_fn.name
-                            );
-                            // Track method -> qualified name mapping for method resolution
-                            self.impl_methods
-                                .entry(mir_fn.name.clone())
-                                .or_default()
-                                .push(qualified_name.clone());
-                            self.program.functions.insert(qualified_name, mir_fn);
-                        }
+                        && let Some(mir_fn) = self.lower_function(f)
+                    {
+                        // Use qualified name for methods
+                        let qualified_name = format!(
+                            "{}::{}",
+                            self.type_to_string(&impl_block.self_type),
+                            mir_fn.name
+                        );
+                        // Track method -> qualified name mapping for method resolution
+                        self.impl_methods
+                            .entry(mir_fn.name.clone())
+                            .or_default()
+                            .push(qualified_name.clone());
+                        self.program.functions.insert(qualified_name, mir_fn);
+                    }
                 }
             }
             ItemKind::Enum(e) => {
@@ -203,10 +221,8 @@ impl Lowerer {
                         crate::parser::VariantKind::Tuple(fields) => fields.len(),
                         crate::parser::VariantKind::Named(fields) => fields.len(),
                     };
-                    self.enum_variants.insert(
-                        variant.name.name.clone(),
-                        (enum_name.clone(), field_count),
-                    );
+                    self.enum_variants
+                        .insert(variant.name.name.clone(), (enum_name.clone(), field_count));
                 }
             }
             // Other items don't generate MIR directly
@@ -216,31 +232,29 @@ impl Lowerer {
 
     fn type_to_string(&self, ty: &crate::parser::Type) -> String {
         match &ty.kind {
-            crate::parser::TypeKind::Path(path) => {
-                path.segments.iter()
-                    .map(|s| s.name.name.clone())
-                    .collect::<Vec<_>>()
-                    .join("::")
-            }
+            crate::parser::TypeKind::Path(path) => path
+                .segments
+                .iter()
+                .map(|s| s.name.name.clone())
+                .collect::<Vec<_>>()
+                .join("::"),
             _ => "Unknown".to_string(),
         }
     }
 
     /// Pretty-print an expression for contract error messages
     fn expr_to_string(&self, expr: &Expr) -> String {
-        use crate::parser::ast::{ExprKind, BinOp, UnaryOp};
+        use crate::parser::ast::{BinOp, ExprKind, UnaryOp};
 
         match &expr.kind {
-            ExprKind::Literal(lit) => {
-                match &lit.kind {
-                    crate::parser::ast::LiteralKind::Int(n) => n.to_string(),
-                    crate::parser::ast::LiteralKind::Float(f) => f.to_string(),
-                    crate::parser::ast::LiteralKind::String(s) => format!("\"{}\"", s),
-                    crate::parser::ast::LiteralKind::Char(c) => format!("'{}'", c),
-                    crate::parser::ast::LiteralKind::Bool(b) => b.to_string(),
-                    crate::parser::ast::LiteralKind::None => "None".to_string(),
-                }
-            }
+            ExprKind::Literal(lit) => match &lit.kind {
+                crate::parser::ast::LiteralKind::Int(n) => n.to_string(),
+                crate::parser::ast::LiteralKind::Float(f) => f.to_string(),
+                crate::parser::ast::LiteralKind::String(s) => format!("\"{}\"", s),
+                crate::parser::ast::LiteralKind::Char(c) => format!("'{}'", c),
+                crate::parser::ast::LiteralKind::Bool(b) => b.to_string(),
+                crate::parser::ast::LiteralKind::None => "None".to_string(),
+            },
             ExprKind::Ident(ident) => ident.name.clone(),
             ExprKind::Binary(left, op, right) => {
                 let op_str = match op {
@@ -263,7 +277,12 @@ impl Lowerer {
                     BinOp::Shl => "<<",
                     BinOp::Shr => ">>",
                 };
-                format!("{} {} {}", self.expr_to_string(left), op_str, self.expr_to_string(right))
+                format!(
+                    "{} {} {}",
+                    self.expr_to_string(left),
+                    op_str,
+                    self.expr_to_string(right)
+                )
             }
             ExprKind::Unary(op, operand) => {
                 let op_str = match op {
@@ -279,16 +298,19 @@ impl Lowerer {
                 format!("{}.{}", self.expr_to_string(receiver), field.name)
             }
             ExprKind::Call(callee, args) => {
-                let args_str: Vec<String> = args.iter()
-                    .map(|a| self.expr_to_string(&a.value))
-                    .collect();
+                let args_str: Vec<String> =
+                    args.iter().map(|a| self.expr_to_string(&a.value)).collect();
                 format!("{}({})", self.expr_to_string(callee), args_str.join(", "))
             }
             ExprKind::MethodCall(receiver, method, args) => {
-                let args_str: Vec<String> = args.iter()
-                    .map(|a| self.expr_to_string(&a.value))
-                    .collect();
-                format!("{}.{}({})", self.expr_to_string(receiver), method.name, args_str.join(", "))
+                let args_str: Vec<String> =
+                    args.iter().map(|a| self.expr_to_string(&a.value)).collect();
+                format!(
+                    "{}.{}({})",
+                    self.expr_to_string(receiver),
+                    method.name,
+                    args_str.join(", ")
+                )
             }
             _ => format!("{:?}", expr.kind),
         }
@@ -299,9 +321,7 @@ impl Lowerer {
         let body = f.body.as_ref()?;
 
         // Store default parameter expressions for later use when lowering calls
-        let defaults: Vec<Option<Expr>> = f.params.iter()
-            .map(|p| p.default.clone())
-            .collect();
+        let defaults: Vec<Option<Expr>> = f.params.iter().map(|p| p.default.clone()).collect();
         if defaults.iter().any(|d| d.is_some()) {
             self.fn_defaults.insert(f.name.name.clone(), defaults);
         }
@@ -311,7 +331,9 @@ impl Lowerer {
         self.loop_stack.clear();
 
         // Determine return type
-        let return_ty = f.return_type.as_ref()
+        let return_ty = f
+            .return_type
+            .as_ref()
             .map(|t| self.lower_type(t))
             .unwrap_or(Ty::Unit);
 
@@ -324,7 +346,9 @@ impl Lowerer {
             let local = mir_fn.add_local(ty.clone(), Some(param.name.name.clone()));
             mir_fn.params.push((local, ty.clone()));
             mir_fn.param_names.push((param.name.name.clone(), ty));
-            mir_fn.param_pass_modes.push(lower_pass_mode(param.pass_mode));
+            mir_fn
+                .param_pass_modes
+                .push(lower_pass_mode(param.pass_mode));
             self.vars.insert(param.name.name.clone(), local);
         }
 
@@ -344,12 +368,24 @@ impl Lowerer {
         // Add return
         if let Some(result) = result {
             let block = self.current_block_id().ok()?;
-            if self.current_function().ok()?.block(block).terminator.is_none() {
+            if self
+                .current_function()
+                .ok()?
+                .block(block)
+                .terminator
+                .is_none()
+            {
                 self.terminate(Terminator::Return(Some(result)));
             }
         } else {
             let block = self.current_block_id().ok()?;
-            if self.current_function().ok()?.block(block).terminator.is_none() {
+            if self
+                .current_function()
+                .ok()?
+                .block(block)
+                .terminator
+                .is_none()
+            {
                 self.terminate(Terminator::Return(None));
             }
         }
@@ -388,9 +424,10 @@ impl Lowerer {
                     if let Some(op) = init {
                         // Record the type if we inferred one and the pattern is an identifier
                         if let Some(type_name) = inferred_type
-                            && let PatternKind::Ident(ident, _, _) = &let_stmt.pattern.kind {
-                                self.var_types.insert(ident.name.clone(), type_name);
-                            }
+                            && let PatternKind::Ident(ident, _, _) = &let_stmt.pattern.kind
+                        {
+                            self.var_types.insert(ident.name.clone(), type_name);
+                        }
                         self.bind_pattern(&let_stmt.pattern, op);
                     }
                     last_value = None;
@@ -416,9 +453,7 @@ impl Lowerer {
 
     fn lower_expr(&mut self, expr: &Expr) -> Option<Operand> {
         match &expr.kind {
-            ExprKind::Literal(lit) => {
-                Some(Operand::Constant(self.lower_literal(lit)))
-            }
+            ExprKind::Literal(lit) => Some(Operand::Constant(self.lower_literal(lit))),
 
             ExprKind::Ident(ident) => {
                 if let Some(&local) = self.vars.get(&ident.name) {
@@ -440,23 +475,25 @@ impl Lowerer {
                         }
                         _ => {
                             // Check for user-defined unit enum variants
-                            if let Some((enum_name, field_count)) = self.enum_variants.get(&ident.name).cloned()
-                                && field_count == 0 {
-                                    // Unit variant
-                                    let result = self.new_temp(Ty::Named(
-                                        crate::types::TypeId::new(&enum_name),
-                                        vec![],
-                                    ));
-                                    self.emit(StatementKind::Assign(
-                                        result,
-                                        Rvalue::Enum {
-                                            type_name: enum_name,
-                                            variant: ident.name.clone(),
-                                            fields: vec![],
-                                        },
-                                    ));
-                                    return Some(Operand::Local(result));
-                                }
+                            if let Some((enum_name, field_count)) =
+                                self.enum_variants.get(&ident.name).cloned()
+                                && field_count == 0
+                            {
+                                // Unit variant
+                                let result = self.new_temp(Ty::Named(
+                                    crate::types::TypeId::new(&enum_name),
+                                    vec![],
+                                ));
+                                self.emit(StatementKind::Assign(
+                                    result,
+                                    Rvalue::Enum {
+                                        type_name: enum_name,
+                                        variant: ident.name.clone(),
+                                        fields: vec![],
+                                    },
+                                ));
+                                return Some(Operand::Local(result));
+                            }
 
                             // Check for similar variable names to provide helpful suggestions
                             let similar = self.find_similar_name(&ident.name);
@@ -502,7 +539,10 @@ impl Lowerer {
 
                         // Short-circuit: left was false, result is false
                         self.current_block = Some(short_circuit_block);
-                        self.emit(StatementKind::Assign(result, Rvalue::Use(Operand::Constant(Constant::Bool(false)))));
+                        self.emit(StatementKind::Assign(
+                            result,
+                            Rvalue::Use(Operand::Constant(Constant::Bool(false))),
+                        ));
                         self.terminate(Terminator::Goto(merge_block));
 
                         self.current_block = Some(merge_block);
@@ -526,7 +566,10 @@ impl Lowerer {
 
                         // Short-circuit: left was true, result is true
                         self.current_block = Some(short_circuit_block);
-                        self.emit(StatementKind::Assign(result, Rvalue::Use(Operand::Constant(Constant::Bool(true)))));
+                        self.emit(StatementKind::Assign(
+                            result,
+                            Rvalue::Use(Operand::Constant(Constant::Bool(true))),
+                        ));
                         self.terminate(Terminator::Goto(merge_block));
 
                         // Evaluate right operand
@@ -545,66 +588,81 @@ impl Lowerer {
                         let bin_op = self.lower_bin_op(*op);
                         let result_ty = self.binary_op_result_type(bin_op, &l, &r);
                         let result = self.new_temp(result_ty);
-                        self.emit(StatementKind::Assign(result, Rvalue::BinaryOp(bin_op, l, r)));
+                        self.emit(StatementKind::Assign(
+                            result,
+                            Rvalue::BinaryOp(bin_op, l, r),
+                        ));
                         Some(Operand::Local(result))
                     }
                 }
             }
 
-            ExprKind::Unary(op, operand) => {
-                match op {
-                    AstUnaryOp::Neg => {
-                        let operand_ty = self.infer_expr_type(operand);
-                        let op = self.lower_expr(operand)?;
-                        let result = self.new_temp(operand_ty);
-                        self.emit(StatementKind::Assign(result, Rvalue::UnaryOp(UnOp::Neg, op)));
-                        Some(Operand::Local(result))
-                    }
-                    AstUnaryOp::Not => {
-                        let op = self.lower_expr(operand)?;
-                        let result = self.new_temp(Ty::Bool);
-                        self.emit(StatementKind::Assign(result, Rvalue::UnaryOp(UnOp::Not, op)));
-                        Some(Operand::Local(result))
-                    }
-                    AstUnaryOp::Ref => {
-                        if let ExprKind::Ident(ident) = &operand.kind
-                            && let Some(&local) = self.vars.get(&ident.name) {
-                                let inner_ty = self.local_types.get(&local).cloned().unwrap_or(Ty::Unit);
-                                let result = self.new_temp(Ty::Ref(Box::new(inner_ty), crate::types::Mutability::Immutable));
-                                self.emit(StatementKind::Assign(
-                                    result,
-                                    Rvalue::Ref(local, Mutability::Immutable),
-                                ));
-                                return Some(Operand::Local(result));
-                            }
-                        self.lower_expr(operand)
-                    }
-                    AstUnaryOp::RefMut => {
-                        if let ExprKind::Ident(ident) = &operand.kind
-                            && let Some(&local) = self.vars.get(&ident.name) {
-                                let inner_ty = self.local_types.get(&local).cloned().unwrap_or(Ty::Unit);
-                                let result = self.new_temp(Ty::Ref(Box::new(inner_ty), crate::types::Mutability::Mutable));
-                                self.emit(StatementKind::Assign(
-                                    result,
-                                    Rvalue::Ref(local, Mutability::Mutable),
-                                ));
-                                return Some(Operand::Local(result));
-                            }
-                        self.lower_expr(operand)
-                    }
-                    AstUnaryOp::Deref => {
-                        let operand_ty = self.infer_expr_type(operand);
-                        let inner_ty = match operand_ty {
-                            Ty::Ref(inner, _) => *inner,
-                            _ => Ty::Unit,
-                        };
-                        let op = self.lower_expr(operand)?;
-                        let result = self.new_temp(inner_ty);
-                        self.emit(StatementKind::Assign(result, Rvalue::Deref(op)));
-                        Some(Operand::Local(result))
-                    }
+            ExprKind::Unary(op, operand) => match op {
+                AstUnaryOp::Neg => {
+                    let operand_ty = self.infer_expr_type(operand);
+                    let op = self.lower_expr(operand)?;
+                    let result = self.new_temp(operand_ty);
+                    self.emit(StatementKind::Assign(
+                        result,
+                        Rvalue::UnaryOp(UnOp::Neg, op),
+                    ));
+                    Some(Operand::Local(result))
                 }
-            }
+                AstUnaryOp::Not => {
+                    let op = self.lower_expr(operand)?;
+                    let result = self.new_temp(Ty::Bool);
+                    self.emit(StatementKind::Assign(
+                        result,
+                        Rvalue::UnaryOp(UnOp::Not, op),
+                    ));
+                    Some(Operand::Local(result))
+                }
+                AstUnaryOp::Ref => {
+                    if let ExprKind::Ident(ident) = &operand.kind
+                        && let Some(&local) = self.vars.get(&ident.name)
+                    {
+                        let inner_ty = self.local_types.get(&local).cloned().unwrap_or(Ty::Unit);
+                        let result = self.new_temp(Ty::Ref(
+                            Box::new(inner_ty),
+                            crate::types::Mutability::Immutable,
+                        ));
+                        self.emit(StatementKind::Assign(
+                            result,
+                            Rvalue::Ref(local, Mutability::Immutable),
+                        ));
+                        return Some(Operand::Local(result));
+                    }
+                    self.lower_expr(operand)
+                }
+                AstUnaryOp::RefMut => {
+                    if let ExprKind::Ident(ident) = &operand.kind
+                        && let Some(&local) = self.vars.get(&ident.name)
+                    {
+                        let inner_ty = self.local_types.get(&local).cloned().unwrap_or(Ty::Unit);
+                        let result = self.new_temp(Ty::Ref(
+                            Box::new(inner_ty),
+                            crate::types::Mutability::Mutable,
+                        ));
+                        self.emit(StatementKind::Assign(
+                            result,
+                            Rvalue::Ref(local, Mutability::Mutable),
+                        ));
+                        return Some(Operand::Local(result));
+                    }
+                    self.lower_expr(operand)
+                }
+                AstUnaryOp::Deref => {
+                    let operand_ty = self.infer_expr_type(operand);
+                    let inner_ty = match operand_ty {
+                        Ty::Ref(inner, _) => *inner,
+                        _ => Ty::Unit,
+                    };
+                    let op = self.lower_expr(operand)?;
+                    let result = self.new_temp(inner_ty);
+                    self.emit(StatementKind::Assign(result, Rvalue::Deref(op)));
+                    Some(Operand::Local(result))
+                }
+            },
 
             ExprKind::Call(callee, args) => {
                 // Check if this is an enum constructor call like Some(x) or Ok(x)
@@ -641,30 +699,31 @@ impl Lowerer {
 
                 // Check if callee is a path like EnumType::Variant(args)
                 if let ExprKind::Path(path) = &callee.kind
-                    && path.segments.len() == 2 {
-                        let type_name = &path.segments[0].name;
-                        let variant = &path.segments[1].name;
+                    && path.segments.len() == 2
+                {
+                    let type_name = &path.segments[0].name;
+                    let variant = &path.segments[1].name;
 
-                        // Lower arguments as enum fields
-                        let field_operands: Vec<Operand> = args
-                            .iter()
-                            .filter_map(|arg| self.lower_expr(&arg.value))
-                            .collect();
+                    // Lower arguments as enum fields
+                    let field_operands: Vec<Operand> = args
+                        .iter()
+                        .filter_map(|arg| self.lower_expr(&arg.value))
+                        .collect();
 
-                        let result = self.new_temp(Ty::Named(
-                            crate::types::TypeId::new(type_name.clone()),
-                            vec![],
-                        ));
-                        self.emit(StatementKind::Assign(
-                            result,
-                            Rvalue::Enum {
-                                type_name: type_name.clone(),
-                                variant: variant.clone(),
-                                fields: field_operands,
-                            },
-                        ));
-                        return Some(Operand::Local(result));
-                    }
+                    let result = self.new_temp(Ty::Named(
+                        crate::types::TypeId::new(type_name.clone()),
+                        vec![],
+                    ));
+                    self.emit(StatementKind::Assign(
+                        result,
+                        Rvalue::Enum {
+                            type_name: type_name.clone(),
+                            variant: variant.clone(),
+                            fields: field_operands,
+                        },
+                    ));
+                    return Some(Operand::Local(result));
+                }
 
                 // Determine if this is a direct function call or an indirect call (closure/HOF)
                 let (is_direct, func_name) = match &callee.kind {
@@ -683,13 +742,15 @@ impl Lowerer {
                         }
                     }
                     ExprKind::Path(path) => {
-                        let name = path.segments.iter()
+                        let name = path
+                            .segments
+                            .iter()
                             .map(|s| s.name.clone())
                             .collect::<Vec<_>>()
                             .join("::");
                         (true, Some(name))
                     }
-                    _ => (false, None),  // Expression that evaluates to closure
+                    _ => (false, None), // Expression that evaluates to closure
                 };
 
                 // Lower arguments
@@ -705,15 +766,17 @@ impl Lowerer {
                 // Fill in default arguments if needed
                 if is_direct
                     && let Some(fn_name_ref) = &func_name
-                        && let Some(defaults) = self.fn_defaults.get(fn_name_ref).cloned() {
-                            // Add default values for missing arguments
-                            for i in mir_args.len()..defaults.len() {
-                                if let Some(Some(default_expr)) = defaults.get(i)
-                                    && let Some(op) = self.lower_expr(default_expr) {
-                                        mir_args.push(op);
-                                    }
-                            }
+                    && let Some(defaults) = self.fn_defaults.get(fn_name_ref).cloned()
+                {
+                    // Add default values for missing arguments
+                    for i in mir_args.len()..defaults.len() {
+                        if let Some(Some(default_expr)) = defaults.get(i)
+                            && let Some(op) = self.lower_expr(default_expr)
+                        {
+                            mir_args.push(op);
                         }
+                    }
+                }
 
                 // Get return type for the function
                 let return_ty = if let Some(ref name) = func_name {
@@ -729,7 +792,10 @@ impl Lowerer {
                     let func = match func_name {
                         Some(name) => name,
                         None => {
-                            eprintln!("Internal error: function call without function name at {:?}", expr.span);
+                            eprintln!(
+                                "Internal error: function call without function name at {:?}",
+                                expr.span
+                            );
                             return None;
                         }
                     };
@@ -773,7 +839,8 @@ impl Lowerer {
                 let receiver_type = self.infer_receiver_type(receiver);
 
                 // Resolve method name to built-in function or qualified name
-                let func_name = self.resolve_method_with_type(&method.name, receiver_type.as_deref());
+                let func_name =
+                    self.resolve_method_with_type(&method.name, receiver_type.as_deref());
 
                 // Create call with proper return type
                 let return_ty = self.get_method_return_type(&method.name);
@@ -791,29 +858,30 @@ impl Lowerer {
                 Some(Operand::Local(result))
             }
 
-            ExprKind::If(if_expr) => {
-                self.lower_if(if_expr, expr.span)
-            }
+            ExprKind::If(if_expr) => self.lower_if(if_expr, expr.span),
 
-            ExprKind::Match(scrutinee, arms) => {
-                self.lower_match(scrutinee, arms, expr.span)
-            }
+            ExprKind::Match(scrutinee, arms) => self.lower_match(scrutinee, arms, expr.span),
 
-            ExprKind::For(label, pattern, iter, body) => {
-                self.lower_for(label.as_ref().map(|l| l.name.clone()), pattern, iter, body, expr.span)
-            }
+            ExprKind::For(label, pattern, iter, body) => self.lower_for(
+                label.as_ref().map(|l| l.name.clone()),
+                pattern,
+                iter,
+                body,
+                expr.span,
+            ),
 
-            ExprKind::While(label, cond, body) => {
-                self.lower_while(label.as_ref().map(|l| l.name.clone()), cond, body, expr.span)
-            }
+            ExprKind::While(label, cond, body) => self.lower_while(
+                label.as_ref().map(|l| l.name.clone()),
+                cond,
+                body,
+                expr.span,
+            ),
 
             ExprKind::Loop(label, body) => {
                 self.lower_loop(label.as_ref().map(|l| l.name.clone()), body, expr.span)
             }
 
-            ExprKind::Block(block) => {
-                self.lower_block(block)
-            }
+            ExprKind::Block(block) => self.lower_block(block),
 
             ExprKind::Return(value) => {
                 let op = value.as_ref().and_then(|v| self.lower_expr(v));
@@ -824,7 +892,9 @@ impl Lowerer {
             ExprKind::Break(label, value) => {
                 // Find the target loop context by label
                 let target_ctx = if let Some(label_ident) = label {
-                    self.loop_stack.iter().rev()
+                    self.loop_stack
+                        .iter()
+                        .rev()
                         .find(|ctx| ctx.label.as_ref() == Some(&label_ident.name))
                         .cloned()
                 } else {
@@ -833,12 +903,16 @@ impl Lowerer {
 
                 if let Some(ctx) = target_ctx {
                     if let Some(val) = value.as_ref().and_then(|v| self.lower_expr(v))
-                        && let Some(result_local) = ctx.result_local {
-                            self.emit(StatementKind::Assign(result_local, Rvalue::Use(val)));
-                        }
+                        && let Some(result_local) = ctx.result_local
+                    {
+                        self.emit(StatementKind::Assign(result_local, Rvalue::Use(val)));
+                    }
                     self.terminate(Terminator::Goto(ctx.break_block));
                 } else if let Some(label_ident) = label {
-                    self.error(format!("break label '{}' not found", label_ident.name), expr.span);
+                    self.error(
+                        format!("break label '{}' not found", label_ident.name),
+                        expr.span,
+                    );
                 }
                 None
             }
@@ -846,7 +920,9 @@ impl Lowerer {
             ExprKind::Continue(label) => {
                 // Find the target loop context by label
                 let target_ctx = if let Some(label_ident) = label {
-                    self.loop_stack.iter().rev()
+                    self.loop_stack
+                        .iter()
+                        .rev()
                         .find(|ctx| ctx.label.as_ref() == Some(&label_ident.name))
                         .cloned()
                 } else {
@@ -856,16 +932,18 @@ impl Lowerer {
                 if let Some(ctx) = target_ctx {
                     self.terminate(Terminator::Goto(ctx.continue_block));
                 } else if let Some(label_ident) = label {
-                    self.error(format!("continue label '{}' not found", label_ident.name), expr.span);
+                    self.error(
+                        format!("continue label '{}' not found", label_ident.name),
+                        expr.span,
+                    );
                 }
                 None
             }
 
             ExprKind::Tuple(elements) => {
                 // Collect element types for tuple type
-                let elem_types: Vec<Ty> = elements.iter()
-                    .map(|e| self.infer_expr_type(e))
-                    .collect();
+                let elem_types: Vec<Ty> =
+                    elements.iter().map(|e| self.infer_expr_type(e)).collect();
                 let mut ops = Vec::new();
                 for elem in elements {
                     if let Some(op) = self.lower_expr(elem) {
@@ -879,7 +957,8 @@ impl Lowerer {
 
             ExprKind::Array(elements) => {
                 // Get element type from first element
-                let elem_ty = elements.first()
+                let elem_ty = elements
+                    .first()
                     .map(|e| self.infer_expr_type(e))
                     .unwrap_or(Ty::Unit);
                 let mut ops = Vec::new();
@@ -904,7 +983,10 @@ impl Lowerer {
                 let base_op = self.lower_expr(base)?;
                 let index_op = self.lower_expr(index)?;
                 let result = self.new_temp(elem_ty);
-                self.emit(StatementKind::Assign(result, Rvalue::Index(base_op, index_op)));
+                self.emit(StatementKind::Assign(
+                    result,
+                    Rvalue::Index(base_op, index_op),
+                ));
                 Some(Operand::Local(result))
             }
 
@@ -958,11 +1040,12 @@ impl Lowerer {
                 // Handle index assignment: arr[i] := value
                 if let ExprKind::Index(base, idx) = &target.kind
                     && let ExprKind::Ident(ident) = &base.kind
-                        && let Some(&local) = self.vars.get(&ident.name) {
-                            let idx_op = self.lower_expr(idx)?;
-                            self.emit(StatementKind::IndexAssign(local, idx_op, val));
-                            return Some(Operand::Constant(Constant::Unit));
-                        }
+                    && let Some(&local) = self.vars.get(&ident.name)
+                {
+                    let idx_op = self.lower_expr(idx)?;
+                    self.emit(StatementKind::IndexAssign(local, idx_op, val));
+                    return Some(Operand::Constant(Constant::Unit));
+                }
 
                 None
             }
@@ -973,28 +1056,36 @@ impl Lowerer {
                 let bin_op = self.lower_bin_op(*op);
 
                 if let ExprKind::Ident(ident) = &target.kind
-                    && let Some(&local) = self.vars.get(&ident.name) {
-                        let result = self.new_temp(Ty::Int);
-                        self.emit(StatementKind::Assign(
-                            result,
-                            Rvalue::BinaryOp(bin_op, target_op, val),
-                        ));
-                        self.emit(StatementKind::Assign(local, Rvalue::Use(Operand::Local(result))));
-                        return Some(Operand::Local(local));
-                    }
+                    && let Some(&local) = self.vars.get(&ident.name)
+                {
+                    let result = self.new_temp(Ty::Int);
+                    self.emit(StatementKind::Assign(
+                        result,
+                        Rvalue::BinaryOp(bin_op, target_op, val),
+                    ));
+                    self.emit(StatementKind::Assign(
+                        local,
+                        Rvalue::Use(Operand::Local(result)),
+                    ));
+                    return Some(Operand::Local(local));
+                }
 
                 None
             }
 
             ExprKind::Struct(path, fields, base) => {
-                let name = path.segments.iter()
+                let name = path
+                    .segments
+                    .iter()
                     .map(|s| s.name.name.clone())
                     .collect::<Vec<_>>()
                     .join("::");
 
                 let mut mir_fields = Vec::new();
                 for field in fields {
-                    let value = field.value.as_ref()
+                    let value = field
+                        .value
+                        .as_ref()
                         .and_then(|v| self.lower_expr(v))
                         .or_else(|| self.vars.get(&field.name.name).map(|&l| Operand::Local(l)));
 
@@ -1010,9 +1101,8 @@ impl Lowerer {
 
                     // Get struct field names from type info
                     if let Some(struct_fields) = self.get_struct_fields(&name) {
-                        let existing_field_names: std::collections::HashSet<_> = mir_fields.iter()
-                            .map(|(n, _)| n.clone())
-                            .collect();
+                        let existing_field_names: std::collections::HashSet<_> =
+                            mir_fields.iter().map(|(n, _)| n.clone()).collect();
 
                         // Copy fields from base that aren't explicitly set
                         for (field_name, field_ty) in struct_fields {
@@ -1031,7 +1121,10 @@ impl Lowerer {
                 // Use proper struct type
                 let struct_ty = Ty::Named(crate::types::TypeId::new(&name), vec![]);
                 let result = self.new_temp(struct_ty);
-                self.emit(StatementKind::Assign(result, Rvalue::Struct(name, mir_fields)));
+                self.emit(StatementKind::Assign(
+                    result,
+                    Rvalue::Struct(name, mir_fields),
+                ));
                 Some(Operand::Local(result))
             }
 
@@ -1043,9 +1136,8 @@ impl Lowerer {
                 self.closure_counter += 1;
 
                 // Find free variables (captured from enclosing scope)
-                let param_names: std::collections::HashSet<_> = closure.params.iter()
-                    .map(|p| p.name.name.clone())
-                    .collect();
+                let param_names: std::collections::HashSet<_> =
+                    closure.params.iter().map(|p| p.name.name.clone()).collect();
                 let free_vars = self.find_free_vars(&closure.body, &param_names);
 
                 // Build captured value operands (from current scope)
@@ -1063,10 +1155,18 @@ impl Lowerer {
                 let saved_local_types = std::mem::take(&mut self.local_types);
 
                 // Infer closure parameter and return types
-                let param_types: Vec<Ty> = closure.params.iter()
-                    .map(|p| p.ty.as_ref().map(|t| self.lower_type(t)).unwrap_or(Ty::Unit))
+                let param_types: Vec<Ty> = closure
+                    .params
+                    .iter()
+                    .map(|p| {
+                        p.ty.as_ref()
+                            .map(|t| self.lower_type(t))
+                            .unwrap_or(Ty::Unit)
+                    })
                     .collect();
-                let return_ty = closure.return_type.as_ref()
+                let return_ty = closure
+                    .return_type
+                    .as_ref()
                     .map(|t| self.lower_type(t))
                     .unwrap_or(Ty::Unit);
 
@@ -1076,7 +1176,11 @@ impl Lowerer {
 
                 // Add captured variables as parameters first
                 for var_name in &free_vars {
-                    let captured_ty = self.var_full_types.get(var_name).cloned().unwrap_or(Ty::Unit);
+                    let captured_ty = self
+                        .var_full_types
+                        .get(var_name)
+                        .cloned()
+                        .unwrap_or(Ty::Unit);
                     let local = new_fn.add_local(captured_ty.clone(), Some(var_name.clone()));
                     params.push((local, captured_ty));
                     self.vars.insert(var_name.clone(), local);
@@ -1106,7 +1210,9 @@ impl Lowerer {
 
                 // Finalize and add the lifted function
                 if let Some(finished_fn) = self.current_fn.take() {
-                    self.program.functions.insert(func_name.clone(), finished_fn);
+                    self.program
+                        .functions
+                        .insert(func_name.clone(), finished_fn);
                 }
 
                 // Restore lowering state
@@ -1118,10 +1224,13 @@ impl Lowerer {
                 // Create closure value with proper type
                 let closure_ty = Ty::Fn(param_types, Box::new(return_ty));
                 let result = self.new_temp(closure_ty);
-                self.emit(StatementKind::Assign(result, Rvalue::Closure {
-                    func_name,
-                    captures,
-                }));
+                self.emit(StatementKind::Assign(
+                    result,
+                    Rvalue::Closure {
+                        func_name,
+                        captures,
+                    },
+                ));
                 Some(Operand::Local(result))
             }
 
@@ -1190,7 +1299,7 @@ impl Lowerer {
                 self.emit(StatementKind::Assign(disc, Rvalue::Discriminant(scrutinee)));
 
                 // Create blocks
-                let some_ok_block = self.new_block();  // Some or Ok
+                let some_ok_block = self.new_block(); // Some or Ok
                 let none_err_block = self.new_block(); // None or Err
                 let continue_block = self.new_block();
 
@@ -1209,13 +1318,21 @@ impl Lowerer {
                     // Result: Ok has discriminant 0
                     self.emit(StatementKind::Assign(
                         has_value,
-                        Rvalue::BinaryOp(BinOp::Eq, Operand::Copy(disc), Operand::Constant(Constant::Int(0))),
+                        Rvalue::BinaryOp(
+                            BinOp::Eq,
+                            Operand::Copy(disc),
+                            Operand::Constant(Constant::Int(0)),
+                        ),
                     ));
                 } else {
                     // Option: Some has discriminant 1
                     self.emit(StatementKind::Assign(
                         has_value,
-                        Rvalue::BinaryOp(BinOp::Gt, Operand::Copy(disc), Operand::Constant(Constant::Int(0))),
+                        Rvalue::BinaryOp(
+                            BinOp::Gt,
+                            Operand::Copy(disc),
+                            Operand::Constant(Constant::Int(0)),
+                        ),
                     ));
                 }
                 self.terminate(Terminator::If {
@@ -1231,7 +1348,10 @@ impl Lowerer {
                 // Some/Ok block: extract the value and continue
                 self.current_block = Some(some_ok_block);
                 let extracted = self.new_temp(Ty::Int);
-                self.emit(StatementKind::Assign(extracted, Rvalue::EnumField(scrutinee, 0)));
+                self.emit(StatementKind::Assign(
+                    extracted,
+                    Rvalue::EnumField(scrutinee, 0),
+                ));
                 self.terminate(Terminator::Goto(continue_block));
 
                 self.current_block = Some(continue_block);
@@ -1253,8 +1373,8 @@ impl Lowerer {
                 self.emit(StatementKind::Assign(disc, Rvalue::Discriminant(scrutinee)));
 
                 // Create blocks
-                let some_block = self.new_block();   // Left is Some - extract value
-                let none_block = self.new_block();   // Left is None - use right
+                let some_block = self.new_block(); // Left is Some - extract value
+                let none_block = self.new_block(); // Left is None - use right
                 let continue_block = self.new_block();
 
                 // Result variable (use same type as left's inner type, or Int as fallback)
@@ -1265,7 +1385,11 @@ impl Lowerer {
                 let has_value = self.new_temp(Ty::Bool);
                 self.emit(StatementKind::Assign(
                     has_value,
-                    Rvalue::BinaryOp(BinOp::Gt, Operand::Copy(disc), Operand::Constant(Constant::Int(0))),
+                    Rvalue::BinaryOp(
+                        BinOp::Gt,
+                        Operand::Copy(disc),
+                        Operand::Constant(Constant::Int(0)),
+                    ),
                 ));
                 self.terminate(Terminator::If {
                     cond: Operand::Local(has_value),
@@ -1276,8 +1400,14 @@ impl Lowerer {
                 // Some block: extract the inner value
                 self.current_block = Some(some_block);
                 let extracted = self.new_temp(Ty::Int);
-                self.emit(StatementKind::Assign(extracted, Rvalue::EnumField(scrutinee, 0)));
-                self.emit(StatementKind::Assign(result, Rvalue::Use(Operand::Local(extracted))));
+                self.emit(StatementKind::Assign(
+                    extracted,
+                    Rvalue::EnumField(scrutinee, 0),
+                ));
+                self.emit(StatementKind::Assign(
+                    result,
+                    Rvalue::Use(Operand::Local(extracted)),
+                ));
                 self.terminate(Terminator::Goto(continue_block));
 
                 // None block: evaluate and use the right expression
@@ -1291,9 +1421,7 @@ impl Lowerer {
                 Some(Operand::Local(result))
             }
 
-            ExprKind::Paren(inner) => {
-                self.lower_expr(inner)
-            }
+            ExprKind::Paren(inner) => self.lower_expr(inner),
 
             ExprKind::Cast(inner, target_ty) => {
                 let operand = self.lower_expr(inner)?;
@@ -1350,7 +1478,7 @@ impl Lowerer {
 
             ExprKind::Async(block) => {
                 // Lower async block - for now, just lower the block and wrap in Future
-                
+
                 self.lower_block(block)
             }
 
@@ -1412,33 +1540,77 @@ impl Lowerer {
                 // Check if pattern matches (simplified: only Some(x) supported)
                 match &pattern.kind {
                     PatternKind::Struct(path, fields, _) => {
-                        let variant_name = path.segments.last().map(|s| s.name.name.as_str()).unwrap_or("");
+                        let variant_name = path
+                            .segments
+                            .last()
+                            .map(|s| s.name.name.as_str())
+                            .unwrap_or("");
                         let disc = self.new_temp(Ty::Int);
-                        self.emit(StatementKind::Assign(disc, Rvalue::Discriminant(scrut_local)));
+                        self.emit(StatementKind::Assign(
+                            disc,
+                            Rvalue::Discriminant(scrut_local),
+                        ));
                         let expected = self.get_variant_discriminant(variant_name);
                         let exp_local = self.new_temp(Ty::Int);
-                        self.emit(StatementKind::Assign(exp_local, Rvalue::Use(Operand::Constant(Constant::Int(expected)))));
+                        self.emit(StatementKind::Assign(
+                            exp_local,
+                            Rvalue::Use(Operand::Constant(Constant::Int(expected))),
+                        ));
                         let cond = self.new_temp(Ty::Bool);
-                        self.emit(StatementKind::Assign(cond, Rvalue::BinaryOp(BinOp::Eq, Operand::Copy(disc), Operand::Copy(exp_local))));
-                        self.terminate(Terminator::If { cond: Operand::Copy(cond), then_block: body_block, else_block: exit_block });
+                        self.emit(StatementKind::Assign(
+                            cond,
+                            Rvalue::BinaryOp(
+                                BinOp::Eq,
+                                Operand::Copy(disc),
+                                Operand::Copy(exp_local),
+                            ),
+                        ));
+                        self.terminate(Terminator::If {
+                            cond: Operand::Copy(cond),
+                            then_block: body_block,
+                            else_block: exit_block,
+                        });
 
                         // Bind fields in body block
                         self.current_block = Some(body_block);
                         for (idx, field) in fields.iter().enumerate() {
-                            let field_local = self.new_local(Ty::Unit, Some(field.name.name.clone()));
+                            let field_local =
+                                self.new_local(Ty::Unit, Some(field.name.name.clone()));
                             self.vars.insert(field.name.name.clone(), field_local);
-                            self.emit(StatementKind::Assign(field_local, Rvalue::EnumField(scrut_local, idx)));
+                            self.emit(StatementKind::Assign(
+                                field_local,
+                                Rvalue::EnumField(scrut_local, idx),
+                            ));
                         }
                     }
-                    PatternKind::Ident(ident, _, _) if ident.name == "Some" || self.enum_variants.contains_key(&ident.name) => {
+                    PatternKind::Ident(ident, _, _)
+                        if ident.name == "Some" || self.enum_variants.contains_key(&ident.name) =>
+                    {
                         let disc = self.new_temp(Ty::Int);
-                        self.emit(StatementKind::Assign(disc, Rvalue::Discriminant(scrut_local)));
+                        self.emit(StatementKind::Assign(
+                            disc,
+                            Rvalue::Discriminant(scrut_local),
+                        ));
                         let expected = self.get_variant_discriminant(&ident.name);
                         let exp_local = self.new_temp(Ty::Int);
-                        self.emit(StatementKind::Assign(exp_local, Rvalue::Use(Operand::Constant(Constant::Int(expected)))));
+                        self.emit(StatementKind::Assign(
+                            exp_local,
+                            Rvalue::Use(Operand::Constant(Constant::Int(expected))),
+                        ));
                         let cond = self.new_temp(Ty::Bool);
-                        self.emit(StatementKind::Assign(cond, Rvalue::BinaryOp(BinOp::Eq, Operand::Copy(disc), Operand::Copy(exp_local))));
-                        self.terminate(Terminator::If { cond: Operand::Copy(cond), then_block: body_block, else_block: exit_block });
+                        self.emit(StatementKind::Assign(
+                            cond,
+                            Rvalue::BinaryOp(
+                                BinOp::Eq,
+                                Operand::Copy(disc),
+                                Operand::Copy(exp_local),
+                            ),
+                        ));
+                        self.terminate(Terminator::If {
+                            cond: Operand::Copy(cond),
+                            then_block: body_block,
+                            else_block: exit_block,
+                        });
                         self.current_block = Some(body_block);
                     }
                     _ => {
@@ -1448,8 +1620,14 @@ impl Lowerer {
                 }
 
                 self.lower_block(body);
-                if self.current_function().ok()
-                    .and_then(|f| self.current_block_id().ok().map(|b| f.block(b).terminator.is_none()))
+                if self
+                    .current_function()
+                    .ok()
+                    .and_then(|f| {
+                        self.current_block_id()
+                            .ok()
+                            .map(|b| f.block(b).terminator.is_none())
+                    })
                     .unwrap_or(false)
                 {
                     self.terminate(Terminator::Goto(cond_block));
@@ -1504,7 +1682,10 @@ impl Lowerer {
             ExprKind::MapOrSet(entries) => {
                 // Map or set literal { k: v, ... } or { a, b, ... }
                 // Build as a series of map_set calls
-                let result = self.new_temp(Ty::Map(Box::new(Ty::fresh_var()), Box::new(Ty::fresh_var())));
+                let result = self.new_temp(Ty::Map(
+                    Box::new(Ty::fresh_var()),
+                    Box::new(Ty::fresh_var()),
+                ));
 
                 // First create an empty map
                 let init_block = self.new_block();
@@ -1543,7 +1724,13 @@ impl Lowerer {
             ExprKind::FieldShorthand(field) => {
                 // .field shorthand closure - desugar to |x| x.field
                 // For now, error - this should be desugared earlier
-                self.error(format!("field shorthand '.{}' should be desugared before MIR lowering", field.name), expr.span);
+                self.error(
+                    format!(
+                        "field shorthand '.{}' should be desugared before MIR lowering",
+                        field.name
+                    ),
+                    expr.span,
+                );
                 None
             }
 
@@ -1551,7 +1738,10 @@ impl Lowerer {
                 // Operator shorthand like (+ 10) - desugar to |x| x + 10
                 // For now, error - this should be desugared earlier
                 let _ = (op, operand, left);
-                self.error("operator shorthand should be desugared before MIR lowering".to_string(), expr.span);
+                self.error(
+                    "operator shorthand should be desugared before MIR lowering".to_string(),
+                    expr.span,
+                );
                 None
             }
 
@@ -1596,7 +1786,13 @@ impl Lowerer {
         // This ensures the result variable is always defined on all paths
         let then_operand = then_val.unwrap_or(Operand::Constant(Constant::Unit));
         self.emit(StatementKind::Assign(result, Rvalue::Use(then_operand)));
-        if self.current_function().ok()?.block(self.current_block_id().ok()?).terminator.is_none() {
+        if self
+            .current_function()
+            .ok()?
+            .block(self.current_block_id().ok()?)
+            .terminator
+            .is_none()
+        {
             self.terminate(Terminator::Goto(merge_block));
         }
 
@@ -1614,7 +1810,13 @@ impl Lowerer {
         // Always assign to result, using Unit if the branch produces no value
         let else_operand = else_val.unwrap_or(Operand::Constant(Constant::Unit));
         self.emit(StatementKind::Assign(result, Rvalue::Use(else_operand)));
-        if self.current_function().ok()?.block(self.current_block_id().ok()?).terminator.is_none() {
+        if self
+            .current_function()
+            .ok()?
+            .block(self.current_block_id().ok()?)
+            .terminator
+            .is_none()
+        {
             self.terminate(Terminator::Goto(merge_block));
         }
 
@@ -1633,7 +1835,10 @@ impl Lowerer {
 
         // Store scrutinee in a local for repeated access
         let scrut_local = self.new_temp(Ty::Unit);
-        self.emit(StatementKind::Assign(scrut_local, Rvalue::Use(scrutinee_op)));
+        self.emit(StatementKind::Assign(
+            scrut_local,
+            Rvalue::Use(scrutinee_op),
+        ));
 
         let result = self.new_temp(Ty::Unit);
         let exit_block = self.new_block();
@@ -1680,9 +1885,12 @@ impl Lowerer {
 
                 PatternKind::Ident(ident, _, _) => {
                     // Check if this identifier is a known enum variant (or built-in like None)
-                    let is_enum_variant = self.enum_variants.get(&ident.name)
+                    let is_enum_variant = self
+                        .enum_variants
+                        .get(&ident.name)
                         .map(|(_, count)| *count == 0)
-                        .unwrap_or(false) || ident.name == "None";
+                        .unwrap_or(false)
+                        || ident.name == "None";
 
                     if is_enum_variant {
                         // Unit variant - compare discriminants
@@ -1725,7 +1933,10 @@ impl Lowerer {
                     }
                 }
 
-                PatternKind::Literal(Literal { kind: LiteralKind::Int(n), .. }) => {
+                PatternKind::Literal(Literal {
+                    kind: LiteralKind::Int(n),
+                    ..
+                }) => {
                     // Compare integer and branch
                     let lit_local = self.new_temp(Ty::Int);
                     self.emit(StatementKind::Assign(
@@ -1748,7 +1959,10 @@ impl Lowerer {
                     });
                 }
 
-                PatternKind::Literal(Literal { kind: LiteralKind::String(s), .. }) => {
+                PatternKind::Literal(Literal {
+                    kind: LiteralKind::String(s),
+                    ..
+                }) => {
                     // Compare string and branch
                     let lit_local = self.new_temp(Ty::Str);
                     self.emit(StatementKind::Assign(
@@ -1771,7 +1985,10 @@ impl Lowerer {
                     });
                 }
 
-                PatternKind::Literal(Literal { kind: LiteralKind::Bool(b), .. }) => {
+                PatternKind::Literal(Literal {
+                    kind: LiteralKind::Bool(b),
+                    ..
+                }) => {
                     // Compare bool and branch
                     let lit_local = self.new_temp(Ty::Bool);
                     self.emit(StatementKind::Assign(
@@ -1794,7 +2011,10 @@ impl Lowerer {
                     });
                 }
 
-                PatternKind::Literal(Literal { kind: LiteralKind::Char(c), .. }) => {
+                PatternKind::Literal(Literal {
+                    kind: LiteralKind::Char(c),
+                    ..
+                }) => {
                     // Compare char and branch
                     let lit_local = self.new_temp(Ty::Char);
                     self.emit(StatementKind::Assign(
@@ -1817,7 +2037,10 @@ impl Lowerer {
                     });
                 }
 
-                PatternKind::Literal(Literal { kind: LiteralKind::Float(f), .. }) => {
+                PatternKind::Literal(Literal {
+                    kind: LiteralKind::Float(f),
+                    ..
+                }) => {
                     // Compare float and branch
                     let lit_local = self.new_temp(Ty::Float);
                     self.emit(StatementKind::Assign(
@@ -1868,7 +2091,11 @@ impl Lowerer {
                     let cond = self.new_temp(Ty::Bool);
                     self.emit(StatementKind::Assign(
                         cond,
-                        Rvalue::BinaryOp(BinOp::Eq, Operand::Copy(disc_local), Operand::Copy(expected)),
+                        Rvalue::BinaryOp(
+                            BinOp::Eq,
+                            Operand::Copy(disc_local),
+                            Operand::Copy(expected),
+                        ),
                     ));
 
                     // Check if there are fields to extract
@@ -1902,7 +2129,8 @@ impl Lowerer {
                                         // Skip binding
                                     }
                                     PatternKind::Ident(inner_ident, _, _) => {
-                                        let field_local = self.new_local(Ty::Unit, Some(inner_ident.name.clone()));
+                                        let field_local = self
+                                            .new_local(Ty::Unit, Some(inner_ident.name.clone()));
                                         self.vars.insert(inner_ident.name.clone(), field_local);
                                         self.emit(StatementKind::Assign(
                                             field_local,
@@ -1913,7 +2141,8 @@ impl Lowerer {
                                 }
                             } else {
                                 // Bind directly with field name
-                                let field_local = self.new_local(Ty::Unit, Some(binding_name.clone()));
+                                let field_local =
+                                    self.new_local(Ty::Unit, Some(binding_name.clone()));
                                 self.vars.insert(binding_name.clone(), field_local);
                                 self.emit(StatementKind::Assign(
                                     field_local,
@@ -1946,7 +2175,10 @@ impl Lowerer {
 
                         // For simple patterns (literal, ident), inline the check
                         match &pat.kind {
-                            PatternKind::Literal(Literal { kind: LiteralKind::Int(n), .. }) => {
+                            PatternKind::Literal(Literal {
+                                kind: LiteralKind::Int(n),
+                                ..
+                            }) => {
                                 let lit_local = self.new_temp(Ty::Int);
                                 self.emit(StatementKind::Assign(
                                     lit_local,
@@ -1955,7 +2187,11 @@ impl Lowerer {
                                 let cond_local = self.new_temp(Ty::Bool);
                                 self.emit(StatementKind::Assign(
                                     cond_local,
-                                    Rvalue::BinaryOp(BinOp::Eq, Operand::Copy(scrut_local), Operand::Copy(lit_local)),
+                                    Rvalue::BinaryOp(
+                                        BinOp::Eq,
+                                        Operand::Copy(scrut_local),
+                                        Operand::Copy(lit_local),
+                                    ),
                                 ));
                                 self.terminate(Terminator::If {
                                     cond: Operand::Copy(cond_local),
@@ -1965,23 +2201,46 @@ impl Lowerer {
                             }
                             PatternKind::Ident(ident, _, _) => {
                                 // Check if enum variant
-                                let is_variant = self.enum_variants.get(&ident.name)
+                                let is_variant = self
+                                    .enum_variants
+                                    .get(&ident.name)
                                     .map(|(_, c)| *c == 0)
-                                    .unwrap_or(false) || ident.name == "None";
+                                    .unwrap_or(false)
+                                    || ident.name == "None";
                                 if is_variant {
                                     let disc = self.new_temp(Ty::Int);
-                                    self.emit(StatementKind::Assign(disc, Rvalue::Discriminant(scrut_local)));
+                                    self.emit(StatementKind::Assign(
+                                        disc,
+                                        Rvalue::Discriminant(scrut_local),
+                                    ));
                                     let exp_disc = self.get_variant_discriminant(&ident.name);
                                     let exp = self.new_temp(Ty::Int);
-                                    self.emit(StatementKind::Assign(exp, Rvalue::Use(Operand::Constant(Constant::Int(exp_disc)))));
+                                    self.emit(StatementKind::Assign(
+                                        exp,
+                                        Rvalue::Use(Operand::Constant(Constant::Int(exp_disc))),
+                                    ));
                                     let cond = self.new_temp(Ty::Bool);
-                                    self.emit(StatementKind::Assign(cond, Rvalue::BinaryOp(BinOp::Eq, Operand::Copy(disc), Operand::Copy(exp))));
-                                    self.terminate(Terminator::If { cond: Operand::Copy(cond), then_block: body_block, else_block: next_alt });
+                                    self.emit(StatementKind::Assign(
+                                        cond,
+                                        Rvalue::BinaryOp(
+                                            BinOp::Eq,
+                                            Operand::Copy(disc),
+                                            Operand::Copy(exp),
+                                        ),
+                                    ));
+                                    self.terminate(Terminator::If {
+                                        cond: Operand::Copy(cond),
+                                        then_block: body_block,
+                                        else_block: next_alt,
+                                    });
                                 } else {
                                     // Bind variable and match
                                     let local = self.new_local(Ty::Unit, Some(ident.name.clone()));
                                     self.vars.insert(ident.name.clone(), local);
-                                    self.emit(StatementKind::Assign(local, Rvalue::Use(Operand::Copy(scrut_local))));
+                                    self.emit(StatementKind::Assign(
+                                        local,
+                                        Rvalue::Use(Operand::Copy(scrut_local)),
+                                    ));
                                     self.terminate(Terminator::Goto(body_block));
                                 }
                             }
@@ -2003,34 +2262,72 @@ impl Lowerer {
                     let mut conditions = Vec::new();
 
                     if let Some(start_pat) = start
-                        && let PatternKind::Literal(Literal { kind: LiteralKind::Int(n), .. }) = &start_pat.kind {
-                            let start_val = self.new_temp(Ty::Int);
-                            self.emit(StatementKind::Assign(start_val, Rvalue::Use(Operand::Constant(Constant::Int(*n as i64)))));
-                            let ge_cond = self.new_temp(Ty::Bool);
-                            self.emit(StatementKind::Assign(ge_cond, Rvalue::BinaryOp(BinOp::Ge, Operand::Copy(scrut_local), Operand::Copy(start_val))));
-                            conditions.push(ge_cond);
-                        }
+                        && let PatternKind::Literal(Literal {
+                            kind: LiteralKind::Int(n),
+                            ..
+                        }) = &start_pat.kind
+                    {
+                        let start_val = self.new_temp(Ty::Int);
+                        self.emit(StatementKind::Assign(
+                            start_val,
+                            Rvalue::Use(Operand::Constant(Constant::Int(*n as i64))),
+                        ));
+                        let ge_cond = self.new_temp(Ty::Bool);
+                        self.emit(StatementKind::Assign(
+                            ge_cond,
+                            Rvalue::BinaryOp(
+                                BinOp::Ge,
+                                Operand::Copy(scrut_local),
+                                Operand::Copy(start_val),
+                            ),
+                        ));
+                        conditions.push(ge_cond);
+                    }
 
                     if let Some(end_pat) = end
-                        && let PatternKind::Literal(Literal { kind: LiteralKind::Int(n), .. }) = &end_pat.kind {
-                            let end_val = self.new_temp(Ty::Int);
-                            self.emit(StatementKind::Assign(end_val, Rvalue::Use(Operand::Constant(Constant::Int(*n as i64)))));
-                            let cmp_op = if *inclusive { BinOp::Le } else { BinOp::Lt };
-                            let le_cond = self.new_temp(Ty::Bool);
-                            self.emit(StatementKind::Assign(le_cond, Rvalue::BinaryOp(cmp_op, Operand::Copy(scrut_local), Operand::Copy(end_val))));
-                            conditions.push(le_cond);
-                        }
+                        && let PatternKind::Literal(Literal {
+                            kind: LiteralKind::Int(n),
+                            ..
+                        }) = &end_pat.kind
+                    {
+                        let end_val = self.new_temp(Ty::Int);
+                        self.emit(StatementKind::Assign(
+                            end_val,
+                            Rvalue::Use(Operand::Constant(Constant::Int(*n as i64))),
+                        ));
+                        let cmp_op = if *inclusive { BinOp::Le } else { BinOp::Lt };
+                        let le_cond = self.new_temp(Ty::Bool);
+                        self.emit(StatementKind::Assign(
+                            le_cond,
+                            Rvalue::BinaryOp(
+                                cmp_op,
+                                Operand::Copy(scrut_local),
+                                Operand::Copy(end_val),
+                            ),
+                        ));
+                        conditions.push(le_cond);
+                    }
 
                     // Combine conditions with AND
                     let final_cond = if conditions.is_empty() {
                         let t = self.new_temp(Ty::Bool);
-                        self.emit(StatementKind::Assign(t, Rvalue::Use(Operand::Constant(Constant::Bool(true)))));
+                        self.emit(StatementKind::Assign(
+                            t,
+                            Rvalue::Use(Operand::Constant(Constant::Bool(true))),
+                        ));
                         t
                     } else if conditions.len() == 1 {
                         conditions[0]
                     } else {
                         let combined = self.new_temp(Ty::Bool);
-                        self.emit(StatementKind::Assign(combined, Rvalue::BinaryOp(BinOp::And, Operand::Copy(conditions[0]), Operand::Copy(conditions[1]))));
+                        self.emit(StatementKind::Assign(
+                            combined,
+                            Rvalue::BinaryOp(
+                                BinOp::And,
+                                Operand::Copy(conditions[0]),
+                                Operand::Copy(conditions[1]),
+                            ),
+                        ));
                         combined
                     };
 
@@ -2047,7 +2344,10 @@ impl Lowerer {
                     if let PatternKind::Ident(ident, _, _) = &inner.kind {
                         let local = self.new_local(Ty::Unit, Some(ident.name.clone()));
                         self.vars.insert(ident.name.clone(), local);
-                        self.emit(StatementKind::Assign(local, Rvalue::Use(Operand::Copy(scrut_local))));
+                        self.emit(StatementKind::Assign(
+                            local,
+                            Rvalue::Use(Operand::Copy(scrut_local)),
+                        ));
                     }
                     self.terminate(Terminator::Goto(pattern_target));
                 }
@@ -2059,7 +2359,10 @@ impl Lowerer {
 
                 _ => {
                     // Remaining unsupported patterns - emit error and skip
-                    self.error(format!("unsupported pattern: {:?}", arm.pattern.kind), arm.pattern.span);
+                    self.error(
+                        format!("unsupported pattern: {:?}", arm.pattern.kind),
+                        arm.pattern.span,
+                    );
                     self.terminate(Terminator::Goto(next_test));
                     continue;
                 }
@@ -2089,7 +2392,13 @@ impl Lowerer {
             if let Some(val) = self.lower_expr(&arm.body) {
                 self.emit(StatementKind::Assign(result, Rvalue::Use(val)));
             }
-            if self.current_function().ok()?.block(self.current_block_id().ok()?).terminator.is_none() {
+            if self
+                .current_function()
+                .ok()?
+                .block(self.current_block_id().ok()?)
+                .terminator
+                .is_none()
+            {
                 self.terminate(Terminator::Goto(exit_block));
             }
         }
@@ -2131,27 +2440,27 @@ impl Lowerer {
     fn infer_receiver_type(&self, expr: &Expr) -> Option<String> {
         match &expr.kind {
             // Variable reference - look up in var_types map
-            ExprKind::Ident(ident) => {
-                self.var_types.get(&ident.name).cloned()
-            }
+            ExprKind::Ident(ident) => self.var_types.get(&ident.name).cloned(),
             // Struct construction clearly tells us the type
-            ExprKind::Struct(path, _, _) => {
-                path.segments.first().map(|seg| seg.name.name.clone())
-            }
+            ExprKind::Struct(path, _, _) => path.segments.first().map(|seg| seg.name.name.clone()),
             // Function call result - could be a constructor
             ExprKind::Call(callee, _) => {
                 if let ExprKind::Ident(ident) = &callee.kind {
                     // Check if this is a struct constructor (first char is uppercase)
-                    if ident.name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+                    if ident
+                        .name
+                        .chars()
+                        .next()
+                        .map(|c| c.is_uppercase())
+                        .unwrap_or(false)
+                    {
                         return Some(ident.name.clone());
                     }
                 }
                 None
             }
             // Field access - the base determines the type
-            ExprKind::Field(base, _) => {
-                self.infer_receiver_type(base)
-            }
+            ExprKind::Field(base, _) => self.infer_receiver_type(base),
             // Method call result - can't easily determine
             _ => None,
         }
@@ -2166,9 +2475,10 @@ impl Lowerer {
         if let Some(type_name) = receiver_type {
             let qualified = format!("{}::{}", type_name, method_name);
             if let Some(qualified_names) = self.impl_methods.get(method_name)
-                && qualified_names.contains(&qualified) {
-                    return qualified;
-                }
+                && qualified_names.contains(&qualified)
+            {
+                return qualified;
+            }
             // Also check if function exists directly
             if self.program.functions.contains_key(&qualified) {
                 return qualified;
@@ -2260,7 +2570,14 @@ impl Lowerer {
 
         // Check if this is a range iteration
         if let ExprKind::Range(start_opt, end_opt, inclusive) = &iter.kind {
-            return self.lower_for_range(label.clone(), pattern, start_opt, end_opt, *inclusive, body);
+            return self.lower_for_range(
+                label.clone(),
+                pattern,
+                start_opt,
+                end_opt,
+                *inclusive,
+                body,
+            );
         }
 
         // Check if this is an enumerate call: `arr.enumerate()`
@@ -2280,7 +2597,10 @@ impl Lowerer {
 
         // Create index counter starting at 0
         let idx_local = self.new_temp(Ty::Int);
-        self.emit(StatementKind::Assign(idx_local, Rvalue::Use(Operand::Constant(Constant::Int(0)))));
+        self.emit(StatementKind::Assign(
+            idx_local,
+            Rvalue::Use(Operand::Constant(Constant::Int(0))),
+        ));
 
         // Get array length
         let len_local = self.new_temp(Ty::Int);
@@ -2315,7 +2635,11 @@ impl Lowerer {
         let cond_val = self.new_temp(Ty::Bool);
         self.emit(StatementKind::Assign(
             cond_val,
-            Rvalue::BinaryOp(BinOp::Lt, Operand::Copy(idx_local), Operand::Copy(len_local)),
+            Rvalue::BinaryOp(
+                BinOp::Lt,
+                Operand::Copy(idx_local),
+                Operand::Copy(len_local),
+            ),
         ));
         self.terminate(Terminator::If {
             cond: Operand::Local(cond_val),
@@ -2338,7 +2662,10 @@ impl Lowerer {
             PatternKind::Ident(ident, _, _) => {
                 // Simple pattern: `for x in arr`
                 let var_local = self.new_local(Ty::Int, Some(ident.name.clone()));
-                self.emit(StatementKind::Assign(var_local, Rvalue::Use(Operand::Copy(elem_local))));
+                self.emit(StatementKind::Assign(
+                    var_local,
+                    Rvalue::Use(Operand::Copy(elem_local)),
+                ));
                 self.vars.insert(ident.name.clone(), var_local);
             }
             PatternKind::Tuple(patterns) if is_enumerate && patterns.len() == 2 => {
@@ -2346,12 +2673,18 @@ impl Lowerer {
                 // First element is index, second is value
                 if let PatternKind::Ident(idx_ident, _, _) = &patterns[0].kind {
                     let idx_var = self.new_local(Ty::Int, Some(idx_ident.name.clone()));
-                    self.emit(StatementKind::Assign(idx_var, Rvalue::Use(Operand::Copy(idx_local))));
+                    self.emit(StatementKind::Assign(
+                        idx_var,
+                        Rvalue::Use(Operand::Copy(idx_local)),
+                    ));
                     self.vars.insert(idx_ident.name.clone(), idx_var);
                 }
                 if let PatternKind::Ident(val_ident, _, _) = &patterns[1].kind {
                     let val_var = self.new_local(Ty::Int, Some(val_ident.name.clone()));
-                    self.emit(StatementKind::Assign(val_var, Rvalue::Use(Operand::Copy(elem_local))));
+                    self.emit(StatementKind::Assign(
+                        val_var,
+                        Rvalue::Use(Operand::Copy(elem_local)),
+                    ));
                     self.vars.insert(val_ident.name.clone(), val_var);
                 }
             }
@@ -2359,7 +2692,10 @@ impl Lowerer {
                 // Fallback: try to bind as simple identifier
                 if let PatternKind::Ident(ident, _, _) = &pattern.kind {
                     let var_local = self.new_local(Ty::Int, Some(ident.name.clone()));
-                    self.emit(StatementKind::Assign(var_local, Rvalue::Use(Operand::Copy(elem_local))));
+                    self.emit(StatementKind::Assign(
+                        var_local,
+                        Rvalue::Use(Operand::Copy(elem_local)),
+                    ));
                     self.vars.insert(ident.name.clone(), var_local);
                 }
             }
@@ -2369,7 +2705,13 @@ impl Lowerer {
         self.lower_block(body);
 
         // If body didn't terminate, go to increment
-        if self.current_function().ok()?.block(self.current_block_id().ok()?).terminator.is_none() {
+        if self
+            .current_function()
+            .ok()?
+            .block(self.current_block_id().ok()?)
+            .terminator
+            .is_none()
+        {
             self.terminate(Terminator::Goto(incr_block));
         }
 
@@ -2377,7 +2719,11 @@ impl Lowerer {
         self.current_block = Some(incr_block);
         self.emit(StatementKind::Assign(
             idx_local,
-            Rvalue::BinaryOp(BinOp::Add, Operand::Copy(idx_local), Operand::Constant(Constant::Int(1))),
+            Rvalue::BinaryOp(
+                BinOp::Add,
+                Operand::Copy(idx_local),
+                Operand::Constant(Constant::Int(1)),
+            ),
         ));
         self.terminate(Terminator::Goto(cond_block));
 
@@ -2456,7 +2802,10 @@ impl Lowerer {
         // Bind the loop variable based on pattern
         if let PatternKind::Ident(ident, _, _) = &pattern.kind {
             let var_local = self.new_local(Ty::Int, Some(ident.name.clone()));
-            self.emit(StatementKind::Assign(var_local, Rvalue::Use(Operand::Copy(idx_local))));
+            self.emit(StatementKind::Assign(
+                var_local,
+                Rvalue::Use(Operand::Copy(idx_local)),
+            ));
             self.vars.insert(ident.name.clone(), var_local);
         }
 
@@ -2464,7 +2813,13 @@ impl Lowerer {
         self.lower_block(body);
 
         // If body didn't terminate, go to increment
-        if self.current_function().ok()?.block(self.current_block_id().ok()?).terminator.is_none() {
+        if self
+            .current_function()
+            .ok()?
+            .block(self.current_block_id().ok()?)
+            .terminator
+            .is_none()
+        {
             self.terminate(Terminator::Goto(incr_block));
         }
 
@@ -2472,7 +2827,11 @@ impl Lowerer {
         self.current_block = Some(incr_block);
         self.emit(StatementKind::Assign(
             idx_local,
-            Rvalue::BinaryOp(BinOp::Add, Operand::Copy(idx_local), Operand::Constant(Constant::Int(1))),
+            Rvalue::BinaryOp(
+                BinOp::Add,
+                Operand::Copy(idx_local),
+                Operand::Constant(Constant::Int(1)),
+            ),
         ));
         self.terminate(Terminator::Goto(cond_block));
 
@@ -2519,7 +2878,13 @@ impl Lowerer {
         // Body block
         self.current_block = Some(body_block);
         self.lower_block(body);
-        if self.current_function().ok()?.block(self.current_block_id().ok()?).terminator.is_none() {
+        if self
+            .current_function()
+            .ok()?
+            .block(self.current_block_id().ok()?)
+            .terminator
+            .is_none()
+        {
             self.terminate(Terminator::Goto(cond_block));
         }
 
@@ -2528,7 +2893,12 @@ impl Lowerer {
         None
     }
 
-    fn lower_loop(&mut self, label: Option<String>, body: &AstBlock, _span: Span) -> Option<Operand> {
+    fn lower_loop(
+        &mut self,
+        label: Option<String>,
+        body: &AstBlock,
+        _span: Span,
+    ) -> Option<Operand> {
         let body_block = self.new_block();
         let exit_block = self.new_block();
         let result = self.new_temp(Ty::Int);
@@ -2547,7 +2917,13 @@ impl Lowerer {
         // Body block
         self.current_block = Some(body_block);
         self.lower_block(body);
-        if self.current_function().ok()?.block(self.current_block_id().ok()?).terminator.is_none() {
+        if self
+            .current_function()
+            .ok()?
+            .block(self.current_block_id().ok()?)
+            .terminator
+            .is_none()
+        {
             self.terminate(Terminator::Goto(body_block));
         }
 
@@ -2642,14 +3018,17 @@ impl Lowerer {
                 let name = &first_seg.name.name;
 
                 // Lower any generic arguments
-                let type_args: Vec<Ty> = first_seg.args.as_ref()
+                let type_args: Vec<Ty> = first_seg
+                    .args
+                    .as_ref()
                     .map(|args| {
-                        args.args.iter().filter_map(|arg| {
-                            match arg {
+                        args.args
+                            .iter()
+                            .filter_map(|arg| match arg {
                                 crate::parser::GenericArg::Type(t) => Some(self.lower_type(t)),
                                 _ => None,
-                            }
-                        }).collect()
+                            })
+                            .collect()
                     })
                     .unwrap_or_default();
 
@@ -2697,25 +3076,17 @@ impl Lowerer {
                 }
             }
 
-            AstTypeKind::List(inner) => {
-                Ty::List(Box::new(self.lower_type(inner)))
-            }
+            AstTypeKind::List(inner) => Ty::List(Box::new(self.lower_type(inner))),
 
-            AstTypeKind::Option(inner) => {
-                Ty::Option(Box::new(self.lower_type(inner)))
-            }
+            AstTypeKind::Option(inner) => Ty::Option(Box::new(self.lower_type(inner))),
 
             AstTypeKind::Result(ok, err) => {
                 let ok_ty = self.lower_type(ok);
-                let err_ty = err.as_ref()
-                    .map(|e| self.lower_type(e))
-                    .unwrap_or(Ty::Str);
+                let err_ty = err.as_ref().map(|e| self.lower_type(e)).unwrap_or(Ty::Str);
                 Ty::Result(Box::new(ok_ty), Box::new(err_ty))
             }
 
-            AstTypeKind::Tuple(tys) => {
-                Ty::Tuple(tys.iter().map(|t| self.lower_type(t)).collect())
-            }
+            AstTypeKind::Tuple(tys) => Ty::Tuple(tys.iter().map(|t| self.lower_type(t)).collect()),
 
             AstTypeKind::Ref(inner, is_mut) => {
                 let mutability = if *is_mut {
@@ -2746,13 +3117,12 @@ impl Lowerer {
                 Ty::Array(Box::new(self.lower_type(inner)), 0)
             }
 
-            AstTypeKind::Map(key, value) => {
-                Ty::Map(Box::new(self.lower_type(key)), Box::new(self.lower_type(value)))
-            }
+            AstTypeKind::Map(key, value) => Ty::Map(
+                Box::new(self.lower_type(key)),
+                Box::new(self.lower_type(value)),
+            ),
 
-            AstTypeKind::Set(inner) => {
-                Ty::Set(Box::new(self.lower_type(inner)))
-            }
+            AstTypeKind::Set(inner) => Ty::Set(Box::new(self.lower_type(inner))),
 
             AstTypeKind::Infer => Ty::Var(crate::types::TypeVar::fresh()),
 
@@ -2816,32 +3186,47 @@ impl Lowerer {
             ExprKind::Binary(_left, op, right) => {
                 match op {
                     // Comparison and logical operators return Bool
-                    AstBinOp::Eq | AstBinOp::Ne | AstBinOp::Lt | AstBinOp::Le |
-                    AstBinOp::Gt | AstBinOp::Ge | AstBinOp::And | AstBinOp::Or => Ty::Bool,
+                    AstBinOp::Eq
+                    | AstBinOp::Ne
+                    | AstBinOp::Lt
+                    | AstBinOp::Le
+                    | AstBinOp::Gt
+                    | AstBinOp::Ge
+                    | AstBinOp::And
+                    | AstBinOp::Or => Ty::Bool,
                     // Arithmetic operators return same type as operands
-                    AstBinOp::Add | AstBinOp::Sub | AstBinOp::Mul | AstBinOp::Div |
-                    AstBinOp::Mod | AstBinOp::BitAnd | AstBinOp::BitOr | AstBinOp::BitXor |
-                    AstBinOp::Shl | AstBinOp::Shr => {
+                    AstBinOp::Add
+                    | AstBinOp::Sub
+                    | AstBinOp::Mul
+                    | AstBinOp::Div
+                    | AstBinOp::Mod
+                    | AstBinOp::BitAnd
+                    | AstBinOp::BitOr
+                    | AstBinOp::BitXor
+                    | AstBinOp::Shl
+                    | AstBinOp::Shr => {
                         // Use right operand type (left and right should match)
                         self.infer_expr_type(right)
                     }
                 }
             }
 
-            ExprKind::Unary(op, operand) => {
-                match op {
-                    AstUnaryOp::Not => Ty::Bool,
-                    AstUnaryOp::Neg => self.infer_expr_type(operand),
-                    AstUnaryOp::Ref => Ty::Ref(Box::new(self.infer_expr_type(operand)), crate::types::Mutability::Immutable),
-                    AstUnaryOp::RefMut => Ty::Ref(Box::new(self.infer_expr_type(operand)), crate::types::Mutability::Mutable),
-                    AstUnaryOp::Deref => {
-                        match self.infer_expr_type(operand) {
-                            Ty::Ref(inner, _) => *inner,
-                            _ => Ty::Unit,
-                        }
-                    }
-                }
-            }
+            ExprKind::Unary(op, operand) => match op {
+                AstUnaryOp::Not => Ty::Bool,
+                AstUnaryOp::Neg => self.infer_expr_type(operand),
+                AstUnaryOp::Ref => Ty::Ref(
+                    Box::new(self.infer_expr_type(operand)),
+                    crate::types::Mutability::Immutable,
+                ),
+                AstUnaryOp::RefMut => Ty::Ref(
+                    Box::new(self.infer_expr_type(operand)),
+                    crate::types::Mutability::Mutable,
+                ),
+                AstUnaryOp::Deref => match self.infer_expr_type(operand) {
+                    Ty::Ref(inner, _) => *inner,
+                    _ => Ty::Unit,
+                },
+            },
 
             ExprKind::Call(callee, _args) => {
                 // Try to get function return type
@@ -2849,7 +3234,9 @@ impl Lowerer {
                     return self.get_function_return_type(&ident.name);
                 }
                 if let ExprKind::Path(path) = &callee.kind {
-                    let name = path.segments.iter()
+                    let name = path
+                        .segments
+                        .iter()
                         .map(|s| s.name.clone())
                         .collect::<Vec<_>>()
                         .join("::");
@@ -2867,19 +3254,18 @@ impl Lowerer {
             }
 
             ExprKind::Array(elements) => {
-                let elem_ty = elements.first()
+                let elem_ty = elements
+                    .first()
                     .map(|e| self.infer_expr_type(e))
                     .unwrap_or(Ty::Unit);
                 Ty::List(Box::new(elem_ty))
             }
 
-            ExprKind::Index(arr, _idx) => {
-                match self.infer_expr_type(arr) {
-                    Ty::List(elem) => *elem,
-                    Ty::Str => Ty::Char,
-                    _ => Ty::Unit,
-                }
-            }
+            ExprKind::Index(arr, _idx) => match self.infer_expr_type(arr) {
+                Ty::List(elem) => *elem,
+                Ty::Str => Ty::Char,
+                _ => Ty::Unit,
+            },
 
             ExprKind::Field(expr, _field) => {
                 // For field access, we'd need struct field type info
@@ -2889,7 +3275,9 @@ impl Lowerer {
             }
 
             ExprKind::Struct(path, _fields, _base) => {
-                let name = path.segments.last()
+                let name = path
+                    .segments
+                    .last()
                     .map(|s| s.name.name.clone())
                     .unwrap_or_default();
                 Ty::Named(crate::types::TypeId::new(&name), vec![])
@@ -2901,10 +3289,18 @@ impl Lowerer {
             }
 
             ExprKind::Closure(closure) => {
-                let param_types: Vec<Ty> = closure.params.iter()
-                    .map(|p| p.ty.as_ref().map(|t| self.lower_type(t)).unwrap_or(Ty::Unit))
+                let param_types: Vec<Ty> = closure
+                    .params
+                    .iter()
+                    .map(|p| {
+                        p.ty.as_ref()
+                            .map(|t| self.lower_type(t))
+                            .unwrap_or(Ty::Unit)
+                    })
                     .collect();
-                let return_ty = closure.return_type.as_ref()
+                let return_ty = closure
+                    .return_type
+                    .as_ref()
                     .map(|t| self.lower_type(t))
                     .unwrap_or(Ty::Unit);
                 Ty::Fn(param_types, Box::new(return_ty))
@@ -2912,7 +3308,8 @@ impl Lowerer {
 
             ExprKind::Range(start, end, _inclusive) => {
                 // Range produces an iterator/list of elements
-                let elem_ty = start.as_ref()
+                let elem_ty = start
+                    .as_ref()
                     .or(end.as_ref())
                     .map(|e| self.infer_expr_type(e))
                     .unwrap_or(Ty::Int);
@@ -2994,8 +3391,10 @@ impl Lowerer {
             "vec_first" | "vec_last" => Ty::Option(Box::new(Ty::Unit)),
 
             // String operations
-            "str_concat" | "str_trim" | "str_upper" | "str_lower" | "str_replace" |
-            "str_substring" | "str_repeat" | "str_reverse" | "str_pad_left" | "str_pad_right" => Ty::Str,
+            "str_concat" | "str_trim" | "str_upper" | "str_lower" | "str_replace"
+            | "str_substring" | "str_repeat" | "str_reverse" | "str_pad_left" | "str_pad_right" => {
+                Ty::Str
+            }
             "str_split" | "str_lines" | "str_chars" | "str_bytes" => Ty::List(Box::new(Ty::Str)),
             "str_find" | "str_rfind" => Ty::Option(Box::new(Ty::Int)),
             "str_parse_int" => Ty::Option(Box::new(Ty::Int)),
@@ -3009,7 +3408,9 @@ impl Lowerer {
 
             // Math operations
             "abs" | "min" | "max" => Ty::Int,
-            "sqrt" | "sin" | "cos" | "tan" | "log" | "exp" | "pow" | "floor" | "ceil" | "round" => Ty::Float,
+            "sqrt" | "sin" | "cos" | "tan" | "log" | "exp" | "pow" | "floor" | "ceil" | "round" => {
+                Ty::Float
+            }
 
             // I/O operations
             "print" | "println" | "eprint" | "eprintln" => Ty::Unit,
@@ -3068,10 +3469,16 @@ impl Lowerer {
             // Logical operators return Bool
             BinOp::And | BinOp::Or => Ty::Bool,
             // Arithmetic and bitwise operators return same type as operands
-            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem |
-            BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => {
-                self.operand_type(left)
-            }
+            BinOp::Add
+            | BinOp::Sub
+            | BinOp::Mul
+            | BinOp::Div
+            | BinOp::Rem
+            | BinOp::BitAnd
+            | BinOp::BitOr
+            | BinOp::BitXor
+            | BinOp::Shl
+            | BinOp::Shr => self.operand_type(left),
         }
     }
 
@@ -3176,7 +3583,11 @@ impl Lowerer {
 
         for i in 1..=m {
             for j in 1..=n {
-                let cost = if a_chars[i - 1] == b_chars[j - 1] { 0 } else { 1 };
+                let cost = if a_chars[i - 1] == b_chars[j - 1] {
+                    0
+                } else {
+                    1
+                };
                 dp[i][j] = (dp[i - 1][j] + 1)
                     .min(dp[i][j - 1] + 1)
                     .min(dp[i - 1][j - 1] + cost);
@@ -3188,7 +3599,11 @@ impl Lowerer {
 
     /// Find free variables in an expression that aren't in the given bound set.
     /// Used for closure capture analysis.
-    fn find_free_vars(&self, expr: &Expr, bound: &std::collections::HashSet<String>) -> Vec<String> {
+    fn find_free_vars(
+        &self,
+        expr: &Expr,
+        bound: &std::collections::HashSet<String>,
+    ) -> Vec<String> {
         let mut free = Vec::new();
         self.collect_free_vars(expr, bound, &mut free);
         // Remove duplicates while preserving order
@@ -3197,7 +3612,12 @@ impl Lowerer {
         free
     }
 
-    fn collect_free_vars(&self, expr: &Expr, bound: &std::collections::HashSet<String>, free: &mut Vec<String>) {
+    fn collect_free_vars(
+        &self,
+        expr: &Expr,
+        bound: &std::collections::HashSet<String>,
+        free: &mut Vec<String>,
+    ) {
         match &expr.kind {
             ExprKind::Ident(ident) => {
                 let name = &ident.name;
@@ -3256,8 +3676,11 @@ impl Lowerer {
                         }
                         ElseBranch::ElseIf(nested_if) => {
                             // Recurse as an if expression
-                            self.collect_free_vars(&Expr::new(ExprKind::If(nested_if.clone()), expr.span,
-                            ), bound, free);
+                            self.collect_free_vars(
+                                &Expr::new(ExprKind::If(nested_if.clone()), expr.span),
+                                bound,
+                                free,
+                            );
                         }
                     }
                 }
@@ -3300,14 +3723,42 @@ impl Lowerer {
     }
 
     fn is_builtin(&self, name: &str) -> bool {
-        matches!(name,
-            "print" | "vec_new" | "vec_push" | "vec_pop" | "vec_len" | "vec_get" |
-            "vec_first" | "vec_last" | "vec_concat" | "vec_reverse" | "vec_slice" |
-            "str_len" | "str_char_at" | "str_slice" | "str_contains" | "str_starts_with" |
-            "str_ends_with" | "str_split" | "str_trim" | "str_to_int" | "int_to_str" |
-            "str_concat" | "map_new" | "map_insert" | "map_get" | "map_contains" |
-            "map_remove" | "map_len" | "map_keys" | "char_is_digit" | "char_is_alpha" |
-            "char_is_alphanumeric" | "char_is_whitespace" | "char_to_int"
+        matches!(
+            name,
+            "print"
+                | "vec_new"
+                | "vec_push"
+                | "vec_pop"
+                | "vec_len"
+                | "vec_get"
+                | "vec_first"
+                | "vec_last"
+                | "vec_concat"
+                | "vec_reverse"
+                | "vec_slice"
+                | "str_len"
+                | "str_char_at"
+                | "str_slice"
+                | "str_contains"
+                | "str_starts_with"
+                | "str_ends_with"
+                | "str_split"
+                | "str_trim"
+                | "str_to_int"
+                | "int_to_str"
+                | "str_concat"
+                | "map_new"
+                | "map_insert"
+                | "map_get"
+                | "map_contains"
+                | "map_remove"
+                | "map_len"
+                | "map_keys"
+                | "char_is_digit"
+                | "char_is_alpha"
+                | "char_is_alphanumeric"
+                | "char_is_whitespace"
+                | "char_to_int"
         )
     }
 
@@ -3348,7 +3799,8 @@ mod tests {
 
     #[test]
     fn test_if_expression() {
-        let program = lower_source("f max(a: Int, b: Int) -> Int = if a > b then a else b").unwrap();
+        let program =
+            lower_source("f max(a: Int, b: Int) -> Int = if a > b then a else b").unwrap();
         assert!(program.functions.contains_key("max"));
         // Should have multiple blocks for if/then/else
         assert!(program.functions["max"].blocks.len() >= 3);
@@ -3362,7 +3814,8 @@ mod tests {
     wh x > 0
         x = x - 1
     x"#,
-        ).unwrap();
+        )
+        .unwrap();
         assert!(program.functions.contains_key("countdown"));
     }
 
@@ -3373,7 +3826,8 @@ mod tests {
     x = 42
     y = x + 1
     y"#,
-        ).unwrap();
+        )
+        .unwrap();
         assert!(program.functions.contains_key("example"));
     }
 }

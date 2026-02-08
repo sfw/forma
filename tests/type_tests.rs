@@ -1,7 +1,7 @@
 //! Integration tests for the FORMA type system.
 
-use forma::{Parser, Scanner, TypeChecker};
 use forma::types::{Ty, TypeId};
+use forma::{Parser, Scanner, TypeChecker};
 
 fn check_source(source: &str) -> Result<forma::types::TypedAst, Vec<forma::types::TypeError>> {
     let scanner = Scanner::new(source);
@@ -201,15 +201,13 @@ f lookup(m: {Str: Int}) -> Int
     assert!(ty.is_some());
     let ty = ty.unwrap();
     match ty {
-        Ty::Fn(params, _) => {
-            match &params[0] {
-                Ty::Map(k, v) => {
-                    assert_eq!(**k, Ty::Str);
-                    assert_eq!(**v, Ty::Int);
-                }
-                _ => panic!("expected map type"),
+        Ty::Fn(params, _) => match &params[0] {
+            Ty::Map(k, v) => {
+                assert_eq!(**k, Ty::Str);
+                assert_eq!(**v, Ty::Int);
             }
-        }
+            _ => panic!("expected map type"),
+        },
         _ => panic!("expected function type"),
     }
 }
@@ -227,16 +225,14 @@ f pair(p: (Int, Str)) -> Int
     assert!(ty.is_some());
     let ty = ty.unwrap();
     match ty {
-        Ty::Fn(params, _) => {
-            match &params[0] {
-                Ty::Tuple(elems) => {
-                    assert_eq!(elems.len(), 2);
-                    assert_eq!(elems[0], Ty::Int);
-                    assert_eq!(elems[1], Ty::Str);
-                }
-                _ => panic!("expected tuple type"),
+        Ty::Fn(params, _) => match &params[0] {
+            Ty::Tuple(elems) => {
+                assert_eq!(elems.len(), 2);
+                assert_eq!(elems[0], Ty::Int);
+                assert_eq!(elems[1], Ty::Str);
             }
-        }
+            _ => panic!("expected tuple type"),
+        },
         _ => panic!("expected function type"),
     }
 }
@@ -246,20 +242,18 @@ fn test_function_type_param() {
     // Test function type representation directly
     let fn_type = Ty::Fn(
         vec![Ty::Fn(vec![Ty::Int], Box::new(Ty::Int)), Ty::Int],
-        Box::new(Ty::Int)
+        Box::new(Ty::Int),
     );
 
     match fn_type {
-        Ty::Fn(params, _) => {
-            match &params[0] {
-                Ty::Fn(inner_params, inner_ret) => {
-                    assert_eq!(inner_params.len(), 1);
-                    assert_eq!(inner_params[0], Ty::Int);
-                    assert_eq!(**inner_ret, Ty::Int);
-                }
-                _ => panic!("expected function type parameter"),
+        Ty::Fn(params, _) => match &params[0] {
+            Ty::Fn(inner_params, inner_ret) => {
+                assert_eq!(inner_params.len(), 1);
+                assert_eq!(inner_params[0], Ty::Int);
+                assert_eq!(**inner_ret, Ty::Int);
             }
-        }
+            _ => panic!("expected function type parameter"),
+        },
         _ => panic!("expected function type"),
     }
 }
@@ -398,8 +392,8 @@ fn test_type_relations_size_of() {
 
 #[test]
 fn test_unification_basic() {
-    use forma::types::{Unifier, reset_type_var_counter};
     use forma::lexer::Span;
+    use forma::types::{Unifier, reset_type_var_counter};
 
     reset_type_var_counter();
     let mut unifier = Unifier::new();
@@ -415,8 +409,8 @@ fn test_unification_basic() {
 
 #[test]
 fn test_unification_type_var() {
-    use forma::types::{Unifier, reset_type_var_counter, TypeVar};
     use forma::lexer::Span;
+    use forma::types::{TypeVar, Unifier, reset_type_var_counter};
 
     reset_type_var_counter();
     let mut unifier = Unifier::new();
@@ -434,8 +428,8 @@ fn test_unification_type_var() {
 
 #[test]
 fn test_unification_compound() {
-    use forma::types::{Unifier, reset_type_var_counter, TypeVar};
     use forma::lexer::Span;
+    use forma::types::{TypeVar, Unifier, reset_type_var_counter};
 
     reset_type_var_counter();
     let mut unifier = Unifier::new();
@@ -455,8 +449,8 @@ fn test_unification_compound() {
 
 #[test]
 fn test_occurs_check() {
-    use forma::types::{Unifier, reset_type_var_counter, TypeVar};
     use forma::lexer::Span;
+    use forma::types::{TypeVar, Unifier, reset_type_var_counter};
 
     reset_type_var_counter();
     let mut unifier = Unifier::new();
@@ -471,7 +465,7 @@ fn test_occurs_check() {
 
 #[test]
 fn test_type_scheme_instantiation() {
-    use forma::types::{TypeScheme, reset_type_var_counter, TypeVar};
+    use forma::types::{TypeScheme, TypeVar, reset_type_var_counter};
 
     reset_type_var_counter();
     let var = TypeVar::fresh();
@@ -505,7 +499,10 @@ fn test_type_display() {
         format!("{}", Ty::Fn(vec![Ty::Int, Ty::Int], Box::new(Ty::Int))),
         "(Int, Int) -> Int"
     );
-    assert_eq!(format!("{}", Ty::Tuple(vec![Ty::Int, Ty::Str])), "(Int, Str)");
+    assert_eq!(
+        format!("{}", Ty::Tuple(vec![Ty::Int, Ty::Str])),
+        "(Int, Str)"
+    );
     assert_eq!(
         format!("{}", Ty::Map(Box::new(Ty::Str), Box::new(Ty::Int))),
         "{Str:Int}"
@@ -580,42 +577,52 @@ fn test_is_float() {
 
 #[test]
 fn test_cast_int_to_i32() {
-    let result = check_source(r#"
+    let result = check_source(
+        r#"
 f cast_test() -> i32 = i32(255)
-"#);
+"#,
+    );
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_cast_int_to_float() {
-    let result = check_source(r#"
+    let result = check_source(
+        r#"
 f cast_test() -> f64 = f64(42)
-"#);
+"#,
+    );
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_cast_float_to_int() {
-    let result = check_source(r#"
+    let result = check_source(
+        r#"
 f cast_test() -> i32 = i32(3.14)
-"#);
+"#,
+    );
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_integer_type_i8() {
     // Test that i8 type annotation is accepted in return type
-    let result = check_source(r#"
+    let result = check_source(
+        r#"
 f test() -> i8 = i8(127)
-"#);
+"#,
+    );
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_integer_type_u8() {
     // Test that u8 type annotation is accepted in return type
-    let result = check_source(r#"
+    let result = check_source(
+        r#"
 f test() -> u8 = u8(255)
-"#);
+"#,
+    );
     assert!(result.is_ok());
 }

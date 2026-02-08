@@ -1,7 +1,7 @@
 //! Integration tests for the FORMA borrow checker.
 
-use forma::{Parser, Scanner};
 use forma::borrow::{BorrowChecker, BorrowError, BorrowErrorKind};
+use forma::{Parser, Scanner};
 
 fn check_source(source: &str) -> Result<(), Vec<BorrowError>> {
     let scanner = Scanner::new(source);
@@ -29,17 +29,13 @@ fn expect_error(source: &str, expected: fn(&BorrowErrorKind) -> bool) {
 
 #[test]
 fn test_simple_function_no_refs() {
-    let result = check_source(
-        r#"f add(a: Int, b: Int) -> Int = a + b"#,
-    );
+    let result = check_source(r#"f add(a: Int, b: Int) -> Int = a + b"#);
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_function_with_ref_param() {
-    let result = check_source(
-        r#"f deref(x: &Int) -> Int = *x"#,
-    );
+    let result = check_source(r#"f deref(x: &Int) -> Int = *x"#);
     assert!(result.is_ok());
 }
 
@@ -54,17 +50,13 @@ fn test_function_with_mut_ref_param() {
 
 #[test]
 fn test_multiple_immut_borrows() {
-    let result = check_source(
-        r#"f use_both(a: &Int, b: &Int) -> Int = *a + *b"#,
-    );
+    let result = check_source(r#"f use_both(a: &Int, b: &Int) -> Int = *a + *b"#);
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_return_derived_ref() {
-    let result = check_source(
-        r#"f first(data: &[Int]) -> &Int = &data[0]"#,
-    );
+    let result = check_source(r#"f first(data: &[Int]) -> &Int = &data[0]"#);
     assert!(result.is_ok());
 }
 
@@ -131,9 +123,7 @@ fn test_mutable_let_binding() {
 
 #[test]
 fn test_if_expression() {
-    let result = check_source(
-        r#"f max(a: Int, b: Int) -> Int = if a > b then a else b"#,
-    );
+    let result = check_source(r#"f max(a: Int, b: Int) -> Int = if a > b then a else b"#);
     assert!(result.is_ok());
 }
 
@@ -238,10 +228,9 @@ s Bad
 
 #[test]
 fn test_reference_in_tuple_struct() {
-    expect_error(
-        r#"s Wrapper(&Int)"#,
-        |kind| matches!(kind, BorrowErrorKind::ReferenceInStruct { .. }),
-    );
+    expect_error(r#"s Wrapper(&Int)"#, |kind| {
+        matches!(kind, BorrowErrorKind::ReferenceInStruct { .. })
+    });
 }
 
 #[test]
@@ -360,9 +349,8 @@ fn test_return_local_ref_in_block() {
 
 #[test]
 fn test_valid_borrow_in_if() {
-    let result = check_source(
-        r#"f choose(cond: Bool, a: &Int, b: &Int) -> &Int = if cond then a else b"#,
-    );
+    let result =
+        check_source(r#"f choose(cond: Bool, a: &Int, b: &Int) -> &Int = if cond then a else b"#);
     assert!(result.is_ok());
 }
 
@@ -452,9 +440,7 @@ f use_fallible(x: Int) -> Int!
 
 #[test]
 fn test_option_coalesce() {
-    let result = check_source(
-        r#"f with_default(x: Int?, default: Int) -> Int = x ?? default"#,
-    );
+    let result = check_source(r#"f with_default(x: Int?, default: Int) -> Int = x ?? default"#);
     assert!(result.is_ok());
 }
 
@@ -487,7 +473,10 @@ fn test_error_display_implementations() {
 
     // Test UseAfterMove
     let err = BorrowError::new(
-        BorrowErrorKind::UseAfterMove { name: "x".into(), moved_at: span },
+        BorrowErrorKind::UseAfterMove {
+            name: "x".into(),
+            moved_at: span,
+        },
         span,
     );
     assert!(format!("{}", err).contains("moved value"));
@@ -500,10 +489,7 @@ fn test_error_display_implementations() {
     assert!(format!("{}", err).contains("mutable more than once"));
 
     // Test MixedBorrow
-    let err = BorrowError::new(
-        BorrowErrorKind::MixedBorrow { name: "z".into() },
-        span,
-    );
+    let err = BorrowError::new(BorrowErrorKind::MixedBorrow { name: "z".into() }, span);
     assert!(format!("{}", err).contains("mutable while immutable"));
 
     // Test ReferenceInStruct
@@ -519,7 +505,9 @@ fn test_error_display_implementations() {
 
     // Test ReturnLocalReference
     let err = BorrowError::new(
-        BorrowErrorKind::ReturnLocalReference { name: "local".into() },
+        BorrowErrorKind::ReturnLocalReference {
+            name: "local".into(),
+        },
         span,
     );
     assert!(format!("{}", err).contains("local variable"));
@@ -531,17 +519,13 @@ fn test_error_display_implementations() {
 
 #[test]
 fn test_empty_function() {
-    let result = check_source(
-        r#"f empty() = ()"#,
-    );
+    let result = check_source(r#"f empty() = ()"#);
     assert!(result.is_ok());
 }
 
 #[test]
 fn test_unit_struct() {
-    let result = check_source(
-        r#"s Unit"#,
-    );
+    let result = check_source(r#"s Unit"#);
     assert!(result.is_ok());
 }
 
@@ -615,9 +599,7 @@ f make_person(name: Str) -> Person
 
 #[test]
 fn test_inline_enum() {
-    let result = check_source(
-        r#"e Bool = True | False"#,
-    );
+    let result = check_source(r#"e Bool = True | False"#);
     assert!(result.is_ok());
 }
 

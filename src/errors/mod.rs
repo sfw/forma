@@ -10,4 +10,4 @@ pub use diagnostic::{
     CompileError, Diagnostic, Label, LabelStyle, LexError, MultiResult, ParseError, Result,
     Severity, TypeError,
 };
-pub use report::{report_error, report_errors, report_warning, ErrorContext};
+pub use report::{ErrorContext, report_error, report_errors, report_warning};

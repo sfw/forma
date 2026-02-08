@@ -7,4 +7,4 @@
 
 pub mod safe_ptr;
 
-pub use safe_ptr::{MemoryArena, SafePtr, PtrError};
+pub use safe_ptr::{MemoryArena, PtrError, SafePtr};

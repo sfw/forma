@@ -84,9 +84,10 @@ impl<'a> Scanner<'a> {
 
         // Handle indentation at line start
         if self.at_line_start
-            && let Some(token) = self.handle_indentation() {
-                return token;
-            }
+            && let Some(token) = self.handle_indentation()
+        {
+            return token;
+        }
 
         self.skip_whitespace_and_comments();
 
@@ -131,17 +132,19 @@ impl<'a> Scanner<'a> {
             }
             '{' => {
                 if self.interpolation_depth > 0
-                    && let Some(depth) = self.brace_depth_stack.last_mut() {
-                        *depth += 1;
-                    }
+                    && let Some(depth) = self.brace_depth_stack.last_mut()
+                {
+                    *depth += 1;
+                }
                 self.make_token(TokenKind::LBrace)
             }
             '}' => {
                 if self.interpolation_depth > 0
                     && let Some(depth) = self.brace_depth_stack.last_mut()
-                        && *depth > 0 {
-                            *depth -= 1;
-                        }
+                    && *depth > 0
+                {
+                    *depth -= 1;
+                }
                 self.make_token(TokenKind::RBrace)
             }
             ',' => self.make_token(TokenKind::Comma),
@@ -266,9 +269,8 @@ impl<'a> Scanner<'a> {
                     } else {
                         None
                     };
-                    let is_field_access = prev_char.is_some_and(|c| {
-                        is_ident_continue(c) || c == ')' || c == ']' || c == '}'
-                    });
+                    let is_field_access = prev_char
+                        .is_some_and(|c| is_ident_continue(c) || c == ')' || c == ']' || c == '}');
                     if is_field_access {
                         self.make_token(TokenKind::Dot)
                     } else {
@@ -755,7 +757,10 @@ impl<'a> Scanner<'a> {
     }
 
     fn scan_hex_number(&mut self) -> Token {
-        while self.peek().is_some_and(|c| c.is_ascii_hexdigit() || c == '_') {
+        while self
+            .peek()
+            .is_some_and(|c| c.is_ascii_hexdigit() || c == '_')
+        {
             self.advance();
         }
 
@@ -780,7 +785,10 @@ impl<'a> Scanner<'a> {
     }
 
     fn scan_binary_number(&mut self) -> Token {
-        while self.peek().is_some_and(|c| c == '0' || c == '1' || c == '_') {
+        while self
+            .peek()
+            .is_some_and(|c| c == '0' || c == '1' || c == '_')
+        {
             self.advance();
         }
 
@@ -803,7 +811,10 @@ impl<'a> Scanner<'a> {
     }
 
     fn scan_octal_number(&mut self) -> Token {
-        while self.peek().is_some_and(|c| ('0'..='7').contains(&c) || c == '_') {
+        while self
+            .peek()
+            .is_some_and(|c| ('0'..='7').contains(&c) || c == '_')
+        {
             self.advance();
         }
 
@@ -909,7 +920,8 @@ impl<'a> Scanner<'a> {
                         }
                         Some('u') => {
                             if !self.match_char('{') {
-                                return self.error_token("expected '{' in unicode escape in f-string");
+                                return self
+                                    .error_token("expected '{' in unicode escape in f-string");
                             }
                             if let Some(ch) = self.scan_unicode_escape() {
                                 current_text.push(ch);
@@ -918,7 +930,8 @@ impl<'a> Scanner<'a> {
                             }
                         }
                         Some(c) => {
-                            return self.error_token(format!("invalid escape in f-string: \\{}", c));
+                            return self
+                                .error_token(format!("invalid escape in f-string: \\{}", c));
                         }
                         None => {
                             return self.error_token("unterminated f-string");
@@ -974,15 +987,23 @@ impl<'a> Scanner<'a> {
                                     match self.peek() {
                                         None | Some('\n') => break,
                                         Some('\\') => {
-                                            if let Some(c) = self.advance() { expr.push(c); }
-                                            if let Some(c) = self.advance() { expr.push(c); }
+                                            if let Some(c) = self.advance() {
+                                                expr.push(c);
+                                            }
+                                            if let Some(c) = self.advance() {
+                                                expr.push(c);
+                                            }
                                         }
                                         Some('"') => {
-                                            if let Some(c) = self.advance() { expr.push(c); }
+                                            if let Some(c) = self.advance() {
+                                                expr.push(c);
+                                            }
                                             break;
                                         }
                                         Some(_) => {
-                                            if let Some(c) = self.advance() { expr.push(c); }
+                                            if let Some(c) = self.advance() {
+                                                expr.push(c);
+                                            }
                                         }
                                     }
                                 }
@@ -996,15 +1017,23 @@ impl<'a> Scanner<'a> {
                                     match self.peek() {
                                         None | Some('\n') => break,
                                         Some('\\') => {
-                                            if let Some(c) = self.advance() { expr.push(c); }
-                                            if let Some(c) = self.advance() { expr.push(c); }
+                                            if let Some(c) = self.advance() {
+                                                expr.push(c);
+                                            }
+                                            if let Some(c) = self.advance() {
+                                                expr.push(c);
+                                            }
                                         }
                                         Some('\'') => {
-                                            if let Some(c) = self.advance() { expr.push(c); }
+                                            if let Some(c) = self.advance() {
+                                                expr.push(c);
+                                            }
                                             break;
                                         }
                                         Some(_) => {
-                                            if let Some(c) = self.advance() { expr.push(c); }
+                                            if let Some(c) = self.advance() {
+                                                expr.push(c);
+                                            }
                                         }
                                     }
                                 }
@@ -1018,11 +1047,15 @@ impl<'a> Scanner<'a> {
                                     match self.peek() {
                                         None => break,
                                         Some('`') => {
-                                            if let Some(c) = self.advance() { expr.push(c); }
+                                            if let Some(c) = self.advance() {
+                                                expr.push(c);
+                                            }
                                             break;
                                         }
                                         Some(_) => {
-                                            if let Some(c) = self.advance() { expr.push(c); }
+                                            if let Some(c) = self.advance() {
+                                                expr.push(c);
+                                            }
                                         }
                                     }
                                 }
@@ -1149,12 +1182,30 @@ mod tests {
     #[test]
     fn test_keywords() {
         // Single-letter keywords are now contextual - emitted as Ident
-        assert_eq!(scan("f"), vec![TokenKind::Ident("f".to_string()), TokenKind::Eof]);
-        assert_eq!(scan("s"), vec![TokenKind::Ident("s".to_string()), TokenKind::Eof]);
-        assert_eq!(scan("m"), vec![TokenKind::Ident("m".to_string()), TokenKind::Eof]);
-        assert_eq!(scan("e"), vec![TokenKind::Ident("e".to_string()), TokenKind::Eof]);
-        assert_eq!(scan("t"), vec![TokenKind::Ident("t".to_string()), TokenKind::Eof]);
-        assert_eq!(scan("i"), vec![TokenKind::Ident("i".to_string()), TokenKind::Eof]);
+        assert_eq!(
+            scan("f"),
+            vec![TokenKind::Ident("f".to_string()), TokenKind::Eof]
+        );
+        assert_eq!(
+            scan("s"),
+            vec![TokenKind::Ident("s".to_string()), TokenKind::Eof]
+        );
+        assert_eq!(
+            scan("m"),
+            vec![TokenKind::Ident("m".to_string()), TokenKind::Eof]
+        );
+        assert_eq!(
+            scan("e"),
+            vec![TokenKind::Ident("e".to_string()), TokenKind::Eof]
+        );
+        assert_eq!(
+            scan("t"),
+            vec![TokenKind::Ident("t".to_string()), TokenKind::Eof]
+        );
+        assert_eq!(
+            scan("i"),
+            vec![TokenKind::Ident("i".to_string()), TokenKind::Eof]
+        );
         // Multi-character keywords are still keywords
         assert_eq!(scan("if"), vec![TokenKind::If, TokenKind::Eof]);
         assert_eq!(scan("then"), vec![TokenKind::Then, TokenKind::Eof]);
@@ -1184,8 +1235,14 @@ mod tests {
     fn test_floats() {
         #[allow(clippy::approx_constant)]
         let expected = 3.14;
-        assert_eq!(scan("3.14"), vec![TokenKind::Float(expected), TokenKind::Eof]);
-        assert_eq!(scan("2.5e10"), vec![TokenKind::Float(2.5e10), TokenKind::Eof]);
+        assert_eq!(
+            scan("3.14"),
+            vec![TokenKind::Float(expected), TokenKind::Eof]
+        );
+        assert_eq!(
+            scan("2.5e10"),
+            vec![TokenKind::Float(2.5e10), TokenKind::Eof]
+        );
     }
 
     #[test]

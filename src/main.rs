@@ -2,12 +2,12 @@
 //!
 //! Command-line interface for the FORMA compiler.
 
+use clap::{Parser, Subcommand, ValueEnum};
 use forma::errors::ErrorContext;
 use forma::lexer::Span;
 use forma::mir::{Interpreter, Lowerer, Value};
 use forma::module::ModuleLoader;
 use forma::{BorrowChecker, Parser as FormaParser, Scanner, TypeChecker};
-use clap::{Parser, Subcommand, ValueEnum};
 use serde::Serialize;
 use std::fs;
 use std::path::PathBuf;
@@ -221,9 +221,29 @@ fn main() {
     let error_format = cli.error_format;
 
     let result = match cli.command {
-        Commands::Compile { file, output, opt_level } => build(&file, output.as_ref(), opt_level, error_format),
-        Commands::Run { file, args, dump_mir, check_contracts, allow_read, allow_write, allow_network, allow_exec, allow_all } => {
-            let caps = CapabilityConfig { allow_read, allow_write, allow_network, allow_exec, allow_all };
+        Commands::Compile {
+            file,
+            output,
+            opt_level,
+        } => build(&file, output.as_ref(), opt_level, error_format),
+        Commands::Run {
+            file,
+            args,
+            dump_mir,
+            check_contracts,
+            allow_read,
+            allow_write,
+            allow_network,
+            allow_exec,
+            allow_all,
+        } => {
+            let caps = CapabilityConfig {
+                allow_read,
+                allow_write,
+                allow_network,
+                allow_exec,
+                allow_all,
+            };
             run(&file, &args, dump_mir, check_contracts, &caps, error_format)
         }
         Commands::Lex { file } => lex(&file, error_format),
@@ -231,7 +251,11 @@ fn main() {
         Commands::Check { file, partial } => check(&file, partial, error_format),
         Commands::Complete { file, position } => complete(&file, &position, error_format),
         Commands::Typeof { file, position } => typeof_at(&file, &position, error_format),
-        Commands::Build { file, output, opt_level } => build(&file, output.as_ref(), opt_level, error_format),
+        Commands::Build {
+            file,
+            output,
+            opt_level,
+        } => build(&file, output.as_ref(), opt_level, error_format),
         Commands::Grammar { format } => grammar(format),
         Commands::New { name } => new_project(&name),
         Commands::Init => init_project(),
@@ -321,7 +345,14 @@ fn output_json_errors(errors: Vec<JsonError>, items_count: Option<usize>) {
     print_json(&output);
 }
 
-fn run(file: &PathBuf, program_args: &[String], dump_mir: bool, _check_contracts: bool, caps: &CapabilityConfig, error_format: ErrorFormat) -> Result<(), String> {
+fn run(
+    file: &PathBuf,
+    program_args: &[String],
+    dump_mir: bool,
+    _check_contracts: bool,
+    caps: &CapabilityConfig,
+    error_format: ErrorFormat,
+) -> Result<(), String> {
     let source = read_file(file)?;
     let filename = file.to_string_lossy().to_string();
     let ctx = ErrorContext::new(&filename, &source);
@@ -395,7 +426,15 @@ fn run(file: &PathBuf, program_args: &[String], dump_mir: bool, _check_contracts
         Err(e) => {
             match error_format {
                 ErrorFormat::Human => {
-                    ctx.error(forma::lexer::Span { start: 0, end: 0, line: 1, column: 1 }, &format!("module error: {}", e));
+                    ctx.error(
+                        forma::lexer::Span {
+                            start: 0,
+                            end: 0,
+                            line: 1,
+                            column: 1,
+                        },
+                        &format!("module error: {}", e),
+                    );
                 }
                 ErrorFormat::Json => {
                     json_errors.push(JsonError {
@@ -466,11 +505,7 @@ fn run(file: &PathBuf, program_args: &[String], dump_mir: bool, _check_contracts
                 match error_format {
                     ErrorFormat::Human => ctx.error(e.span, &e.message),
                     ErrorFormat::Json => json_errors.push(span_to_json_error(
-                        &filename,
-                        e.span,
-                        "LOWER",
-                        &e.message,
-                        None,
+                        &filename, e.span, "LOWER", &e.message, None,
                     )),
                 }
             }
@@ -511,8 +546,8 @@ fn run(file: &PathBuf, program_args: &[String], dump_mir: bool, _check_contracts
     }
 
     // Run the interpreter
-    let mut interp = Interpreter::new(program)
-        .map_err(|e| format!("Failed to create interpreter: {}", e))?;
+    let mut interp =
+        Interpreter::new(program).map_err(|e| format!("Failed to create interpreter: {}", e))?;
 
     // Apply capability grants
     caps.apply(&mut interp);
@@ -680,7 +715,13 @@ fn print_item(item: &forma::parser::Item, indent: usize) {
     match &item.kind {
         forma::parser::ItemKind::Function(f) => {
             let async_str = if f.is_async { "async " } else { "" };
-            println!("{}{}fn {} ({} params)", prefix, async_str, f.name.name, f.params.len());
+            println!(
+                "{}{}fn {} ({} params)",
+                prefix,
+                async_str,
+                f.name.name,
+                f.params.len()
+            );
         }
         forma::parser::ItemKind::Struct(s) => {
             let fields = match &s.kind {
@@ -691,7 +732,12 @@ fn print_item(item: &forma::parser::Item, indent: usize) {
             println!("{}struct {} ({} fields)", prefix, s.name.name, fields);
         }
         forma::parser::ItemKind::Enum(e) => {
-            println!("{}enum {} ({} variants)", prefix, e.name.name, e.variants.len());
+            println!(
+                "{}enum {} ({} variants)",
+                prefix,
+                e.name.name,
+                e.variants.len()
+            );
         }
         forma::parser::ItemKind::Trait(t) => {
             println!("{}trait {} ({} items)", prefix, t.name.name, t.items.len());
@@ -856,8 +902,12 @@ fn parse_position(pos: &str) -> Result<(usize, usize), String> {
     if parts.len() != 2 {
         return Err("Position must be in format 'line:column'".to_string());
     }
-    let line = parts[0].parse::<usize>().map_err(|_| "Invalid line number")?;
-    let col = parts[1].parse::<usize>().map_err(|_| "Invalid column number")?;
+    let line = parts[0]
+        .parse::<usize>()
+        .map_err(|_| "Invalid line number")?;
+    let col = parts[1]
+        .parse::<usize>()
+        .map_err(|_| "Invalid column number")?;
     Ok((line, col))
 }
 
@@ -916,14 +966,23 @@ fn complete(file: &PathBuf, position: &str, error_format: ErrorFormat) -> Result
 }
 
 /// Get valid completion tokens for a context
-fn get_completions_for_context(prev_tokens: &[String], _ast: &Option<forma::parser::SourceFile>) -> Vec<String> {
+fn get_completions_for_context(
+    prev_tokens: &[String],
+    _ast: &Option<forma::parser::SourceFile>,
+) -> Vec<String> {
     // Basic context-aware completions
     let last = prev_tokens.last().map(|s| s.as_str()).unwrap_or("");
 
     match last {
         // After keywords that expect expressions
         s if s.contains("Assign") || s.contains("Eq") => {
-            vec!["identifier".into(), "literal".into(), "if".into(), "m".into(), "(expr)".into()]
+            vec![
+                "identifier".into(),
+                "literal".into(),
+                "if".into(),
+                "m".into(),
+                "(expr)".into(),
+            ]
         }
         // After 'f' (function definition)
         s if s.contains("Fn") => {
@@ -935,8 +994,16 @@ fn get_completions_for_context(prev_tokens: &[String], _ast: &Option<forma::pars
         }
         // After '->' (return type)
         s if s.contains("Arrow") => {
-            vec!["Int".into(), "Str".into(), "Bool".into(), "Float".into(), "Char".into(),
-                 "[T]".into(), "T?".into(), "identifier".into()]
+            vec![
+                "Int".into(),
+                "Str".into(),
+                "Bool".into(),
+                "Float".into(),
+                "Char".into(),
+                "[T]".into(),
+                "T?".into(),
+                "identifier".into(),
+            ]
         }
         // After '(' (function params or tuple)
         s if s.contains("LParen") => {
@@ -944,19 +1011,39 @@ fn get_completions_for_context(prev_tokens: &[String], _ast: &Option<forma::pars
         }
         // After identifier (could be many things)
         s if s.contains("Ident") => {
-            vec![":=".into(), "(".into(), ".".into(), "[".into(), "->".into(), ":".into()]
+            vec![
+                ":=".into(),
+                "(".into(),
+                ".".into(),
+                "[".into(),
+                "->".into(),
+                ":".into(),
+            ]
         }
         // Default - statement start
         _ => {
-            vec!["f".into(), "s".into(), "e".into(), "t".into(), "i".into(),
-                 "if".into(), "m".into(), "wh".into(), "for".into(), "return".into(),
-                 "identifier".into()]
+            vec![
+                "f".into(),
+                "s".into(),
+                "e".into(),
+                "t".into(),
+                "i".into(),
+                "if".into(),
+                "m".into(),
+                "wh".into(),
+                "for".into(),
+                "return".into(),
+                "identifier".into(),
+            ]
         }
     }
 }
 
 /// Infer the expected type at position
-fn infer_expected_type(prev_tokens: &[String], _ast: &Option<forma::parser::SourceFile>) -> Option<String> {
+fn infer_expected_type(
+    prev_tokens: &[String],
+    _ast: &Option<forma::parser::SourceFile>,
+) -> Option<String> {
     let last = prev_tokens.last().map(|s| s.as_str()).unwrap_or("");
 
     // Simple heuristics - in a real implementation this would use the type checker
@@ -1006,9 +1093,10 @@ fn typeof_at(file: &PathBuf, position: &str, error_format: ErrorFormat) -> Resul
 
     // Search through tokens to find the one at position
     for token in &tokens {
-        if token.span.line == line &&
-           token.span.column <= col &&
-           col < token.span.column + token.span.end.saturating_sub(token.span.start) {
+        if token.span.line == line
+            && token.span.column <= col
+            && col < token.span.column + token.span.end.saturating_sub(token.span.start)
+        {
             // Found token at position - infer its type from context
             match &token.kind {
                 forma::lexer::TokenKind::Ident(_) => {
@@ -1116,7 +1204,12 @@ fn find_runtime_lib() -> Option<PathBuf> {
 /// Build native executable using LLVM
 #[allow(unused_variables)] // output_path and program are used only when LLVM feature is enabled
 #[allow(unreachable_code)] // Ok(()) is reachable only when LLVM feature is enabled
-fn build(file: &PathBuf, output: Option<&PathBuf>, opt_level: u8, error_format: ErrorFormat) -> Result<(), String> {
+fn build(
+    file: &PathBuf,
+    output: Option<&PathBuf>,
+    opt_level: u8,
+    error_format: ErrorFormat,
+) -> Result<(), String> {
     let source = read_file(file)?;
     let filename = file.to_string_lossy().to_string();
     let ctx = ErrorContext::new(&filename, &source);
@@ -1199,9 +1292,7 @@ fn build(file: &PathBuf, output: Option<&PathBuf>, opt_level: u8, error_format: 
     }
 
     // Determine output path
-    let output_path = output.cloned().unwrap_or_else(|| {
-        file.with_extension("")
-    });
+    let output_path = output.cloned().unwrap_or_else(|| file.with_extension(""));
 
     // Lower to MIR
     let program = match Lowerer::new().lower(&ast) {
@@ -1211,11 +1302,7 @@ fn build(file: &PathBuf, output: Option<&PathBuf>, opt_level: u8, error_format: 
                 match error_format {
                     ErrorFormat::Human => ctx.error(e.span, &e.message),
                     ErrorFormat::Json => json_errors.push(span_to_json_error(
-                        &filename,
-                        e.span,
-                        "LOWER",
-                        &e.message,
-                        None,
+                        &filename, e.span, "LOWER", &e.message, None,
                     )),
                 }
             }
@@ -1291,7 +1378,8 @@ fn build(file: &PathBuf, output: Option<&PathBuf>, opt_level: u8, error_format: 
         // Link to executable with the FORMA runtime
         let status = std::process::Command::new("cc")
             .arg(&obj_path)
-            .arg("-L").arg(&runtime_lib_path)
+            .arg("-L")
+            .arg(&runtime_lib_path)
             .arg("-lforma_runtime")
             .arg("-o")
             .arg(&output_path)
@@ -1349,8 +1437,13 @@ fn new_project(name: &str) -> Result<(), String> {
     if name.is_empty() {
         return Err("Project name cannot be empty".into());
     }
-    if !name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
-        return Err("Project name can only contain letters, numbers, underscores, and hyphens".into());
+    if !name
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+    {
+        return Err(
+            "Project name can only contain letters, numbers, underscores, and hyphens".into(),
+        );
     }
 
     let project_path = PathBuf::from(name);
@@ -1359,11 +1452,11 @@ fn new_project(name: &str) -> Result<(), String> {
     }
 
     // Create project directory
-    fs::create_dir(&project_path)
-        .map_err(|e| format!("Failed to create directory: {}", e))?;
+    fs::create_dir(&project_path).map_err(|e| format!("Failed to create directory: {}", e))?;
 
     // Create forma.toml
-    let toml_content = format!(r#"[package]
+    let toml_content = format!(
+        r#"[package]
 name = "{}"
 version = "0.1.0"
 authors = []
@@ -1371,7 +1464,9 @@ authors = []
 [deps]
 # Add dependencies here
 # example = {{ path = "../example" }}
-"#, name);
+"#,
+        name
+    );
 
     fs::write(project_path.join("forma.toml"), toml_content)
         .map_err(|e| format!("Failed to create forma.toml: {}", e))?;
@@ -1408,15 +1503,16 @@ fn init_project() -> Result<(), String> {
     }
 
     // Get current directory name for project name
-    let current_dir = std::env::current_dir()
-        .map_err(|e| format!("Failed to get current directory: {}", e))?;
+    let current_dir =
+        std::env::current_dir().map_err(|e| format!("Failed to get current directory: {}", e))?;
     let name = current_dir
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("project");
 
     // Create forma.toml
-    let toml_content = format!(r#"[package]
+    let toml_content = format!(
+        r#"[package]
 name = "{}"
 version = "0.1.0"
 authors = []
@@ -1424,7 +1520,9 @@ authors = []
 [deps]
 # Add dependencies here
 # example = {{ path = "../example" }}
-"#, name);
+"#,
+        name
+    );
 
     fs::write(&toml_path, toml_content)
         .map_err(|e| format!("Failed to create forma.toml: {}", e))?;
@@ -1432,8 +1530,7 @@ authors = []
     // Create src directory if it doesn't exist
     let src_path = PathBuf::from("src");
     if !src_path.exists() {
-        fs::create_dir(&src_path)
-            .map_err(|e| format!("Failed to create src directory: {}", e))?;
+        fs::create_dir(&src_path).map_err(|e| format!("Failed to create src directory: {}", e))?;
 
         // Create main.forma if src didn't exist
         let main_content = r#"# Welcome to your FORMA project!
@@ -2070,14 +2167,15 @@ fn is_definition(line: &str) -> bool {
 
 /// Start an interactive REPL
 fn repl() -> Result<(), String> {
-    use rustyline::error::ReadlineError;
     use rustyline::DefaultEditor;
+    use rustyline::error::ReadlineError;
 
     println!("FORMA REPL v0.1.0");
     println!("Type :help for commands, :quit to exit");
     println!();
 
-    let mut rl = DefaultEditor::new().map_err(|e| format!("Failed to initialize readline: {}", e))?;
+    let mut rl =
+        DefaultEditor::new().map_err(|e| format!("Failed to initialize readline: {}", e))?;
 
     // Keep track of defined functions for the session
     let mut session_code = String::new();
@@ -2248,7 +2346,8 @@ fn repl() -> Result<(), String> {
                         // Count lines we just added
                         let added_lines = input.lines().count();
                         let all_lines: Vec<&str> = session_code.lines().collect();
-                        session_code = all_lines[..all_lines.len().saturating_sub(added_lines)].join("\n");
+                        session_code =
+                            all_lines[..all_lines.len().saturating_sub(added_lines)].join("\n");
                         if !session_code.is_empty() {
                             session_code.push('\n');
                         }
@@ -2290,7 +2389,11 @@ fn repl_validate_code(code: &str) -> Result<(), String> {
 
     let parser = FormaParser::new(&tokens);
     parser.parse().map_err(|errors| {
-        errors.iter().map(|e| format!("{}", e)).collect::<Vec<_>>().join("; ")
+        errors
+            .iter()
+            .map(|e| format!("{}", e))
+            .collect::<Vec<_>>()
+            .join("; ")
     })?;
     Ok(())
 }
@@ -2301,8 +2404,7 @@ fn repl_eval_expr(expr: &str, session_code: &str) {
     // Use print() to output the value since FORMA requires explicit return types
     let code = format!(
         "{}\nf __repl_main__() -> Int\n    __result__ := {}\n    print(__result__)\n    0\n",
-        session_code,
-        expr
+        session_code, expr
     );
 
     // Lex
@@ -2379,8 +2481,7 @@ fn repl_type_of(expr: &str, session_code: &str) {
     // Wrap the expression as a variable assignment to get its type
     let code = format!(
         "{}\nf __repl_main__() -> Int\n    __result__ := {}\n    0\n",
-        session_code,
-        expr
+        session_code, expr
     );
 
     // Lex
@@ -2434,7 +2535,10 @@ fn fmt(file: &PathBuf, write: bool, check: bool) -> Result<(), String> {
 
     if !lex_errors.is_empty() {
         for error in &lex_errors {
-            eprintln!("error[LEX]: {}:{}: {}", error.span.line, error.span.column, error.message);
+            eprintln!(
+                "error[LEX]: {}:{}: {}",
+                error.span.line, error.span.column, error.message
+            );
         }
         return Err(format!("{} lexer error(s)", lex_errors.len()));
     }
@@ -2480,8 +2584,8 @@ fn fmt(file: &PathBuf, write: bool, check: bool) -> Result<(), String> {
 /// Start the LSP server
 fn lsp() -> Result<(), String> {
     // Create a tokio runtime for the async LSP server
-    let rt = tokio::runtime::Runtime::new()
-        .map_err(|e| format!("Failed to create runtime: {}", e))?;
+    let rt =
+        tokio::runtime::Runtime::new().map_err(|e| format!("Failed to create runtime: {}", e))?;
 
     rt.block_on(async {
         forma::lsp::run_server().await;

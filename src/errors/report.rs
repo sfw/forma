@@ -23,9 +23,7 @@ pub fn report_error(filename: &str, source: &str, span: Span, message: &str, hel
         report = report.with_help(h);
     }
 
-    let _ = report
-        .finish()
-        .print((filename, Source::from(source)));
+    let _ = report.finish().print((filename, Source::from(source)));
 }
 
 /// Report a warning with source context.
