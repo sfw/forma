@@ -4,6 +4,7 @@
 //! All functions use the C ABI for compatibility with the generated LLVM IR.
 
 #![allow(clippy::missing_safety_doc)]
+#![allow(clippy::not_unsafe_ptr_arg_deref)] // FFI exports intentionally take raw pointers
 
 pub mod env;
 pub mod io;

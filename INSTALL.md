@@ -19,17 +19,39 @@ The binary will be at `./target/release/forma`.
 
 ### With LLVM Backend (Optional)
 
-To enable native compilation via `forma build`:
+To enable native compilation via `forma build`, you need LLVM 18 and its link-time dependencies.
+
+**macOS (Homebrew):**
 
 ```bash
-# macOS (Homebrew)
-brew install llvm@18
-
-# Ubuntu/Debian
-sudo apt install llvm-18-dev
-
-# Build with LLVM support
+brew install llvm@18 zstd
+export LLVM_SYS_180_PREFIX="$(brew --prefix llvm@18)"
+export LIBRARY_PATH="/opt/homebrew/lib:$LIBRARY_PATH"
 cargo build --release --features llvm
+```
+
+**Ubuntu/Debian:**
+
+```bash
+# LLVM toolchain + link dependencies
+sudo apt install llvm-18-dev libzstd-dev libpolly-18-dev
+
+cargo build --release --features llvm
+```
+
+**Fedora/RHEL:**
+
+```bash
+sudo dnf install llvm18-devel libzstd-devel
+
+cargo build --release --features llvm
+```
+
+**Verify the LLVM build:**
+
+```bash
+# Should complete with zero warnings
+cargo check --features llvm
 ```
 
 ## Verify Installation

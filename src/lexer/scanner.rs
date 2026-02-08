@@ -1182,7 +1182,9 @@ mod tests {
 
     #[test]
     fn test_floats() {
-        assert_eq!(scan("3.14"), vec![TokenKind::Float(3.14), TokenKind::Eof]);
+        #[allow(clippy::approx_constant)]
+        let expected = 3.14;
+        assert_eq!(scan("3.14"), vec![TokenKind::Float(expected), TokenKind::Eof]);
         assert_eq!(scan("2.5e10"), vec![TokenKind::Float(2.5e10), TokenKind::Eof]);
     }
 

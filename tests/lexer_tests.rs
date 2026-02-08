@@ -195,7 +195,9 @@ fn test_integer_literals() {
 
 #[test]
 fn test_float_literals() {
-    assert_eq!(tokens("3.14")[0], TokenKind::Float(3.14));
+    #[allow(clippy::approx_constant)]
+    let pi_approx = 3.14;
+    assert_eq!(tokens("3.14")[0], TokenKind::Float(pi_approx));
     assert_eq!(tokens("2.5e10")[0], TokenKind::Float(2.5e10));
     assert_eq!(tokens("1.0e-5")[0], TokenKind::Float(1.0e-5));
     assert_eq!(tokens("1E10")[0], TokenKind::Float(1E10));

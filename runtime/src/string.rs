@@ -258,7 +258,18 @@ pub extern "C" fn forma_str_substr(s: *const c_char, start: i64, len: i64) -> *m
                 }
 
                 let end = std::cmp::min(start + len, rust_str.len());
-                let substr = &rust_str[start..end];
+                // Use get() to avoid panic on non-UTF-8-char-boundary indices
+                let substr = match rust_str.get(start..end) {
+                    Some(s) => s,
+                    None => {
+                        // Invalid byte boundary — return empty string (no crash)
+                        let ptr = libc::malloc(1) as *mut c_char;
+                        if !ptr.is_null() {
+                            *ptr = 0;
+                        }
+                        return ptr;
+                    }
+                };
                 let substr_len = substr.len();
 
                 let ptr = libc::malloc(substr_len + 1) as *mut c_char;
@@ -336,5 +347,68 @@ pub extern "C" fn forma_str_dup(s: *const c_char) -> *mut c_char {
         }
         std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr as *mut u8, len);
         ptr
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::CString;
+
+    /// Helper: create a C string from a Rust &str
+    fn c(s: &str) -> CString {
+        CString::new(s).unwrap()
+    }
+
+    /// Helper: read a *mut c_char back to a Rust String, then free it
+    unsafe fn read_and_free(ptr: *mut c_char) -> Option<String> {
+        if ptr.is_null() {
+            return None;
+        }
+        let s = CStr::from_ptr(ptr).to_str().unwrap().to_string();
+        forma_str_free(ptr);
+        Some(s)
+    }
+
+    #[test]
+    fn test_substr_ascii() {
+        let input = c("hello world");
+        unsafe {
+            let result = forma_str_substr(input.as_ptr(), 0, 5);
+            assert_eq!(read_and_free(result), Some("hello".to_string()));
+        }
+    }
+
+    #[test]
+    fn test_substr_utf8_boundary_returns_empty() {
+        // "é" is 2 bytes in UTF-8 (0xC3 0xA9). Slicing at byte 1 is mid-character.
+        let input = c("é");
+        unsafe {
+            let result = forma_str_substr(input.as_ptr(), 0, 1);
+            // Should return empty string, not panic
+            assert_eq!(read_and_free(result), Some("".to_string()));
+        }
+    }
+
+    #[test]
+    fn test_substr_null_input() {
+        let result = forma_str_substr(std::ptr::null(), 0, 5);
+        assert!(result.is_null());
+    }
+
+    #[test]
+    fn test_substr_start_past_end() {
+        let input = c("hi");
+        unsafe {
+            let result = forma_str_substr(input.as_ptr(), 100, 5);
+            assert_eq!(read_and_free(result), Some("".to_string()));
+        }
+    }
+
+    #[test]
+    fn test_substr_negative_start() {
+        let input = c("hello");
+        let result = forma_str_substr(input.as_ptr(), -1, 3);
+        assert!(result.is_null());
     }
 }

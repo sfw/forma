@@ -68,8 +68,6 @@ pub struct LLVMCodegen<'ctx> {
     current_function: Option<FunctionValue<'ctx>>,
     /// Optimization level
     opt_level: OptimizationLevel,
-    /// Closure environment types for each closure local
-    closure_env_types: HashMap<usize, inkwell::types::StructType<'ctx>>,
 }
 
 impl<'ctx> LLVMCodegen<'ctx> {
@@ -87,7 +85,6 @@ impl<'ctx> LLVMCodegen<'ctx> {
             local_types: HashMap::new(),
             current_function: None,
             opt_level: OptimizationLevel::Default,
-            closure_env_types: HashMap::new(),
         }
     }
 
@@ -285,6 +282,11 @@ impl<'ctx> LLVMCodegen<'ctx> {
                             .map_err(|e| CodegenError { message: format!("store failed: {:?}", e) })?;
                     }
                 }
+            }
+            StatementKind::IndexAssign(_local, _index, _value) => {
+                return Err(CodegenError {
+                    message: "IndexAssign is not yet supported in LLVM codegen".to_string(),
+                });
             }
             StatementKind::Nop => {}
         }
@@ -549,10 +551,6 @@ impl<'ctx> LLVMCodegen<'ctx> {
                     })
                 }
             }
-            // Note: function calls are handled in Terminator::Call, not in Rvalue
-            _ => Err(CodegenError {
-                message: format!("Unsupported rvalue: {:?}", rvalue),
-            }),
         }
     }
 
@@ -688,11 +686,6 @@ impl<'ctx> LLVMCodegen<'ctx> {
                 .map_err(|e| CodegenError { message: format!("shl failed: {:?}", e) })?,
             BinOp::Shr => self.builder.build_right_shift(lhs_int, rhs_int, false, "shr")
                 .map_err(|e| CodegenError { message: format!("shr failed: {:?}", e) })?,
-            _ => {
-                return Err(CodegenError {
-                    message: format!("Unsupported binary operator: {:?}", op),
-                })
-            }
         };
 
         Ok(result.into())
@@ -741,11 +734,11 @@ impl<'ctx> LLVMCodegen<'ctx> {
 
         // 3. Allocate environment on heap (call malloc)
         let i64_type = self.context.i64_type();
-        let i8_ptr_type = self.context.i8_type().ptr_type(inkwell::AddressSpace::default());
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
 
         // Get or declare malloc
         let malloc_fn = self.module.get_function("malloc").unwrap_or_else(|| {
-            let malloc_type = i8_ptr_type.fn_type(&[i64_type.into()], false);
+            let malloc_type = ptr_type.fn_type(&[i64_type.into()], false);
             self.module.add_function("malloc", malloc_type, None)
         });
 
@@ -758,11 +751,11 @@ impl<'ctx> LLVMCodegen<'ctx> {
             .try_as_basic_value()
             .left()
             .ok_or_else(|| CodegenError { message: "malloc returned void".into() })?;
-        let env_ptr_i8 = self.as_pointer_value(malloc_result)?;
+        let env_ptr_raw = self.as_pointer_value(malloc_result)?;
 
         // Check if malloc returned null
         let is_null = self.builder
-            .build_is_null(env_ptr_i8, "is_null")
+            .build_is_null(env_ptr_raw, "is_null")
             .map_err(|e| CodegenError { message: format!("is_null check failed: {:?}", e) })?;
 
         // Get or declare abort for allocation failure
@@ -791,11 +784,11 @@ impl<'ctx> LLVMCodegen<'ctx> {
         // Continue in alloc_ok
         self.builder.position_at_end(alloc_ok);
 
-        // 4. Cast to environment struct pointer
+        // 4. Cast to environment struct pointer (no-op with opaque pointers)
         let env_struct_ptr = self.builder
             .build_pointer_cast(
-                env_ptr_i8,
-                env_struct_type.ptr_type(inkwell::AddressSpace::default()),
+                env_ptr_raw,
+                ptr_type,
                 "env_struct_ptr"
             )
             .map_err(|e| CodegenError { message: format!("pointer cast failed: {:?}", e) })?;
@@ -817,33 +810,33 @@ impl<'ctx> LLVMCodegen<'ctx> {
                 message: format!("Lifted closure function not found: {}", func_name),
             })?;
 
-        // 7. Cast function pointer to i8*
-        let fn_ptr_i8 = self.builder
+        // 7. Cast function pointer to opaque ptr
+        let fn_ptr_cast = self.builder
             .build_pointer_cast(
                 lifted_fn.as_global_value().as_pointer_value(),
-                i8_ptr_type,
-                "fn_ptr_i8"
+                ptr_type,
+                "fn_ptr_cast"
             )
             .map_err(|e| CodegenError { message: format!("fn pointer cast failed: {:?}", e) })?;
 
-        // 8. Cast env pointer back to i8*
-        let env_ptr_i8_final = self.builder
-            .build_pointer_cast(env_struct_ptr, i8_ptr_type, "env_ptr_i8")
+        // 8. Cast env pointer to opaque ptr
+        let env_ptr_cast = self.builder
+            .build_pointer_cast(env_struct_ptr, ptr_type, "env_ptr_cast")
             .map_err(|e| CodegenError { message: format!("env pointer cast failed: {:?}", e) })?;
 
-        // 9. Create closure fat pointer struct: { i8*, i8* }
+        // 9. Create closure fat pointer struct: { ptr, ptr }
         let closure_struct_type = self.context.struct_type(
-            &[i8_ptr_type.into(), i8_ptr_type.into()],
+            &[ptr_type.into(), ptr_type.into()],
             false
         );
 
         // Build the struct value
         let closure_undef = closure_struct_type.get_undef();
         let closure_with_fn = self.builder
-            .build_insert_value(closure_undef, fn_ptr_i8, 0, "closure_fn")
+            .build_insert_value(closure_undef, fn_ptr_cast, 0, "closure_fn")
             .map_err(|e| CodegenError { message: format!("insert fn failed: {:?}", e) })?;
         let closure_complete = self.builder
-            .build_insert_value(closure_with_fn, env_ptr_i8_final, 1, "closure_env")
+            .build_insert_value(closure_with_fn, env_ptr_cast, 1, "closure_env")
             .map_err(|e| CodegenError { message: format!("insert env failed: {:?}", e) })?;
 
         // closure_complete is an AggregateValueEnum, convert safely
@@ -1529,7 +1522,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
                 }
             }
             Terminator::CallIndirect { callee, args, arg_pass_modes: _, dest, next } => {
-                let i8_ptr_type = self.context.i8_type().ptr_type(inkwell::AddressSpace::default());
+                let ptr_type = self.context.ptr_type(AddressSpace::default());
                 let i64_type = self.context.i64_type();
 
                 // 1. Compile the closure operand (should be a fat pointer struct)
@@ -1555,7 +1548,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
 
                 // 4. Build function type: (i8*, args...) -> i64
                 // Environment pointer is always first parameter
-                let mut param_types: Vec<BasicMetadataTypeEnum> = vec![i8_ptr_type.into()];
+                let mut param_types: Vec<BasicMetadataTypeEnum> = vec![ptr_type.into()];
                 for _ in args {
                     param_types.push(i64_type.into());
                 }
@@ -1565,7 +1558,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
                 let fn_ptr_typed = self.builder
                     .build_pointer_cast(
                         fn_ptr_i8,
-                        fn_type.ptr_type(inkwell::AddressSpace::default()),
+                        ptr_type,
                         "fn_ptr_typed"
                     )
                     .map_err(|e| CodegenError { message: format!("fn type cast failed: {:?}", e) })?;

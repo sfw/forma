@@ -257,6 +257,8 @@ forma typeof myfile.forma --position "5:10"
 
 ## Documentation
 
+- [Language Reference](docs/reference.md) — Learn FORMA
+- [AI Reference](docs/ai-reference.md) — For LLM system prompts
 - [Why FORMA?](docs/WHY_FORMA.md) — Design rationale and AI failure analysis
 
 ## License

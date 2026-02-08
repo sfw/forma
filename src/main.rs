@@ -114,6 +114,10 @@ enum Commands {
         #[arg(long)]
         allow_network: bool,
 
+        /// Allow process execution
+        #[arg(long)]
+        allow_exec: bool,
+
         /// Allow all capabilities
         #[arg(long)]
         allow_all: bool,
@@ -218,8 +222,8 @@ fn main() {
 
     let result = match cli.command {
         Commands::Compile { file, output, opt_level } => build(&file, output.as_ref(), opt_level, error_format),
-        Commands::Run { file, args, dump_mir, check_contracts, allow_read, allow_write, allow_network, allow_all } => {
-            let caps = CapabilityConfig { allow_read, allow_write, allow_network, allow_all };
+        Commands::Run { file, args, dump_mir, check_contracts, allow_read, allow_write, allow_network, allow_exec, allow_all } => {
+            let caps = CapabilityConfig { allow_read, allow_write, allow_network, allow_exec, allow_all };
             run(&file, &args, dump_mir, check_contracts, &caps, error_format)
         }
         Commands::Lex { file } => lex(&file, error_format),
@@ -260,6 +264,7 @@ struct CapabilityConfig {
     allow_read: bool,
     allow_write: bool,
     allow_network: bool,
+    allow_exec: bool,
     allow_all: bool,
 }
 
@@ -277,6 +282,9 @@ impl CapabilityConfig {
             }
             if self.allow_network {
                 interp.grant_capability("network");
+            }
+            if self.allow_exec {
+                interp.grant_capability("exec");
             }
         }
     }

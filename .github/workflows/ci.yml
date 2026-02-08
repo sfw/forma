@@ -43,6 +43,24 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+  llvm-check:
+    name: LLVM Feature Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install LLVM 18 and link dependencies
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+          echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-18 main" | sudo tee /etc/apt/sources.list.d/llvm-18.list
+          sudo apt-get update
+          sudo apt-get install -y llvm-18-dev libzstd-dev libpolly-18-dev
+      - name: Check LLVM feature compiles (zero warnings)
+        run: cargo check --features llvm 2>&1 | tee /dev/stderr | (! grep -q '^warning')
+      - name: Verify LLVM test targets compile
+        run: cargo test --features llvm --no-run
+
   showcase:
     name: Showcase Examples
     runs-on: ubuntu-latest

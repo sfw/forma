@@ -475,6 +475,15 @@ impl Interpreter {
     }
 
     /// Check if a capability is granted, returning an error if not.
+    ///
+    /// Capability mapping (keep in sync when adding builtins):
+    ///   "read"    — file_read, file_exists, dir_list
+    ///   "write"   — file_write, file_append, file_remove, file_move, file_copy,
+    ///               dir_create, dir_create_all, dir_remove, dir_remove_all,
+    ///               chdir, db_open
+    ///   "network" — http_get, http_post, http_post_json, http_put, http_delete,
+    ///               http_serve, tcp_connect, tcp_listen, udp_bind, tls_connect
+    ///   "exec"    — exec
     pub fn require_capability(&self, capability: &str, operation: &str) -> Result<(), InterpError> {
         if self.capabilities.contains(capability) || self.capabilities.contains("all") {
             Ok(())
@@ -2522,6 +2531,7 @@ impl Interpreter {
             }
             "file_exists" => {
                 validate_args!(args, 1, "file_exists");
+                self.require_capability("read", "file_exists")?;
                 // file_exists(path: Str) -> Bool
                 let path = match &args[0] {
                     Value::Str(s) => s.clone(),
@@ -2531,6 +2541,7 @@ impl Interpreter {
             }
             "file_append" => {
                 validate_args!(args, 2, "file_append");
+                self.require_capability("write", "file_append")?;
                 // file_append(path: Str, content: Str) -> Result[(), Str]
                 use std::io::Write;
                 let path = match &args[0] {
@@ -3730,6 +3741,7 @@ impl Interpreter {
             // ===== Process operations =====
             "exec" => {
                 validate_args!(args, 1, "exec");
+                self.require_capability("exec", "exec")?;
                 // exec(cmd: Str) -> Result[(Str, Str, Int), Str]
                 let cmd = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "exec: cmd must be Str".to_string() }) };
                 match std::process::Command::new("sh").arg("-c").arg(&cmd).output() {
@@ -3792,6 +3804,7 @@ impl Interpreter {
             }
             "chdir" => {
                 validate_args!(args, 1, "chdir");
+                self.require_capability("write", "chdir")?;
                 // chdir(path: Str) -> Result[(), Str]
                 let path = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "chdir: path must be Str".to_string() }) };
                 match std::env::set_current_dir(&path) {
@@ -3973,6 +3986,7 @@ impl Interpreter {
             }
             "dir_create" => {
                 validate_args!(args, 1, "dir_create");
+                self.require_capability("write", "dir_create")?;
                 // dir_create(path: Str) -> Result[(), Str]
                 let path = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "dir_create: path must be Str".to_string() }) };
                 match std::fs::create_dir(&path) {
@@ -3990,6 +4004,7 @@ impl Interpreter {
             }
             "dir_create_all" => {
                 validate_args!(args, 1, "dir_create_all");
+                self.require_capability("write", "dir_create_all")?;
                 // dir_create_all(path: Str) -> Result[(), Str]
                 let path = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "dir_create_all: path must be Str".to_string() }) };
                 match std::fs::create_dir_all(&path) {
@@ -4007,6 +4022,7 @@ impl Interpreter {
             }
             "dir_remove" => {
                 validate_args!(args, 1, "dir_remove");
+                self.require_capability("write", "dir_remove")?;
                 // dir_remove(path: Str) -> Result[(), Str]
                 let path = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "dir_remove: path must be Str".to_string() }) };
                 match std::fs::remove_dir(&path) {
@@ -4024,6 +4040,7 @@ impl Interpreter {
             }
             "dir_remove_all" => {
                 validate_args!(args, 1, "dir_remove_all");
+                self.require_capability("write", "dir_remove_all")?;
                 // dir_remove_all(path: Str) -> Result[(), Str]
                 let path = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "dir_remove_all: path must be Str".to_string() }) };
                 match std::fs::remove_dir_all(&path) {
@@ -4041,6 +4058,7 @@ impl Interpreter {
             }
             "dir_list" => {
                 validate_args!(args, 1, "dir_list");
+                self.require_capability("read", "dir_list")?;
                 // dir_list(path: Str) -> Result[[Str], Str]
                 let path = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "dir_list: path must be Str".to_string() }) };
                 match std::fs::read_dir(&path) {
@@ -4064,6 +4082,7 @@ impl Interpreter {
             }
             "file_copy" => {
                 validate_args!(args, 2, "file_copy");
+                self.require_capability("write", "file_copy")?;
                 // file_copy(from: Str, to: Str) -> Result[(), Str]
                 let from = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "file_copy: from must be Str".to_string() }) };
                 let to = match &args[1] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "file_copy: to must be Str".to_string() }) };
@@ -4082,6 +4101,7 @@ impl Interpreter {
             }
             "file_move" => {
                 validate_args!(args, 2, "file_move");
+                self.require_capability("write", "file_move")?;
                 // file_move(from: Str, to: Str) -> Result[(), Str]
                 let from = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "file_move: from must be Str".to_string() }) };
                 let to = match &args[1] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "file_move: to must be Str".to_string() }) };
@@ -4100,6 +4120,7 @@ impl Interpreter {
             }
             "file_remove" => {
                 validate_args!(args, 1, "file_remove");
+                self.require_capability("write", "file_remove")?;
                 // file_remove(path: Str) -> Result[(), Str]
                 let path = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "file_remove: path must be Str".to_string() }) };
                 match std::fs::remove_file(&path) {
@@ -4122,7 +4143,8 @@ impl Interpreter {
                 self.require_capability("network", "http_get")?;
                 // http_get(url: Str) -> Result[(Int, Str, {Str: Str}), Str]
                 let url = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "http_get: url must be Str".to_string() }) };
-                match reqwest::blocking::get(&url) {
+                let client = reqwest::blocking::Client::builder().build().map_err(|e| InterpError { message: format!("http_get: failed to create HTTP client: {}", e) })?;
+                match client.get(&url).send() {
                     Ok(resp) => {
                         let status = resp.status().as_u16() as i64;
                         let headers: HashMap<String, Value> = resp.headers()
@@ -4145,10 +4167,11 @@ impl Interpreter {
             }
             "http_post" => {
                 validate_args!(args, 2, "http_post");
+                self.require_capability("network", "http_post")?;
                 // http_post(url: Str, body: Str) -> Result[(Int, Str, {Str: Str}), Str]
                 let url = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "http_post: url must be Str".to_string() }) };
                 let body = match &args[1] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "http_post: body must be Str".to_string() }) };
-                let client = reqwest::blocking::Client::new();
+                let client = reqwest::blocking::Client::builder().build().map_err(|e| InterpError { message: format!("http_post: failed to create HTTP client: {}", e) })?;
                 match client.post(&url).body(body).send() {
                     Ok(resp) => {
                         let status = resp.status().as_u16() as i64;
@@ -4172,10 +4195,11 @@ impl Interpreter {
             }
             "http_post_json" => {
                 validate_args!(args, 2, "http_post_json");
+                self.require_capability("network", "http_post_json")?;
                 // http_post_json(url: Str, json: Json) -> Result[(Int, Str, {Str: Str}), Str]
                 let url = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "http_post_json: url must be Str".to_string() }) };
                 let json = match &args[1] { Value::Json(j) => j.clone(), _ => return Err(InterpError { message: "http_post_json: body must be Json".to_string() }) };
-                let client = reqwest::blocking::Client::new();
+                let client = reqwest::blocking::Client::builder().build().map_err(|e| InterpError { message: format!("http_post_json: failed to create HTTP client: {}", e) })?;
                 match client.post(&url).json(&json).send() {
                     Ok(resp) => {
                         let status = resp.status().as_u16() as i64;
@@ -4199,10 +4223,11 @@ impl Interpreter {
             }
             "http_put" => {
                 validate_args!(args, 2, "http_put");
+                self.require_capability("network", "http_put")?;
                 // http_put(url: Str, body: Str) -> Result[(Int, Str, {Str: Str}), Str]
                 let url = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "http_put: url must be Str".to_string() }) };
                 let body = match &args[1] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "http_put: body must be Str".to_string() }) };
-                let client = reqwest::blocking::Client::new();
+                let client = reqwest::blocking::Client::builder().build().map_err(|e| InterpError { message: format!("http_put: failed to create HTTP client: {}", e) })?;
                 match client.put(&url).body(body).send() {
                     Ok(resp) => {
                         let status = resp.status().as_u16() as i64;
@@ -4226,9 +4251,10 @@ impl Interpreter {
             }
             "http_delete" => {
                 validate_args!(args, 1, "http_delete");
+                self.require_capability("network", "http_delete")?;
                 // http_delete(url: Str) -> Result[(Int, Str, {Str: Str}), Str]
                 let url = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "http_delete: url must be Str".to_string() }) };
-                let client = reqwest::blocking::Client::new();
+                let client = reqwest::blocking::Client::builder().build().map_err(|e| InterpError { message: format!("http_delete: failed to create HTTP client: {}", e) })?;
                 match client.delete(&url).send() {
                     Ok(resp) => {
                         let status = resp.status().as_u16() as i64;
@@ -4449,6 +4475,7 @@ impl Interpreter {
             }
             "http_serve" => {
                 validate_args!(args, 2, "http_serve");
+                self.require_capability("network", "http_serve")?;
                 // http_serve(port: Int, handler: Fn) -> Result[(), Str]
                 // Blocking HTTP server implementation
                 use std::io::{Read, Write, BufRead, BufReader};
@@ -4987,6 +5014,7 @@ impl Interpreter {
             // UDP builtins
             "udp_bind" => {
                 validate_args!(args, 2, "udp_bind");
+                self.require_capability("network", "udp_bind")?;
                 // udp_bind(host: Str, port: Int) -> Result[UdpSocket, Str]
                 let host = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "udp_bind: host must be Str".to_string() }) };
                 let port = match &args[1] { Value::Int(n) => *n as u16, _ => return Err(InterpError { message: "udp_bind: port must be Int".to_string() }) };
@@ -6136,6 +6164,7 @@ impl Interpreter {
             // ===== TLS operations =====
             "tls_connect" => {
                 validate_args!(args, 2, "tls_connect");
+                self.require_capability("network", "tls_connect")?;
                 // tls_connect(host: Str, port: Int) -> Result[TlsStream, Str]
                 let host = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "tls_connect: host must be Str".to_string() }) };
                 let port = match &args[1] { Value::Int(n) => *n as u16, _ => return Err(InterpError { message: "tls_connect: port must be Int".to_string() }) };
@@ -6328,6 +6357,7 @@ impl Interpreter {
             // ===== SQLite database operations =====
             "db_open" => {
                 validate_args!(args, 1, "db_open");
+                self.require_capability("write", "db_open")?;
                 // db_open(path: Str) -> Result[Database, Str]
                 let path = match &args[0] { Value::Str(s) => s.clone(), _ => return Err(InterpError { message: "db_open: expected Str path".to_string() }) };
 
@@ -7673,5 +7703,82 @@ f main() -> Int = unwrap(safe_add_one(Some(41)))
         let result = interp.call_builtin("vec_len", &[Value::Array(vec![Value::Int(1), Value::Int(2)])]);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), Some(Value::Int(2)));
+    }
+
+    #[test]
+    fn test_capability_denial_file_ops() {
+        let program = Program::new();
+        let mut interp = Interpreter::new(program).unwrap();
+        // No capabilities granted — all file ops should be denied
+        let path = Value::Str("/tmp/test".to_string());
+        let content = Value::Str("data".to_string());
+
+        for (name, args) in [
+            ("file_read", vec![path.clone()]),
+            ("file_write", vec![path.clone(), content.clone()]),
+            ("file_append", vec![path.clone(), content.clone()]),
+            ("file_exists", vec![path.clone()]),
+            ("file_remove", vec![path.clone()]),
+            ("file_copy", vec![path.clone(), path.clone()]),
+            ("file_move", vec![path.clone(), path.clone()]),
+            ("dir_list", vec![path.clone()]),
+            ("dir_create", vec![path.clone()]),
+            ("dir_create_all", vec![path.clone()]),
+            ("dir_remove", vec![path.clone()]),
+            ("dir_remove_all", vec![path.clone()]),
+            ("chdir", vec![path.clone()]),
+        ] {
+            let result = interp.call_builtin(name, &args);
+            assert!(result.is_err(), "{} should be denied without capability", name);
+            assert!(result.unwrap_err().message.contains("capability"), "{} error should mention capability", name);
+        }
+    }
+
+    #[test]
+    fn test_capability_denial_network_ops() {
+        let program = Program::new();
+        let mut interp = Interpreter::new(program).unwrap();
+        let url = Value::Str("http://example.com".to_string());
+        let body = Value::Str("{}".to_string());
+
+        for (name, args) in [
+            ("http_get", vec![url.clone()]),
+            ("http_post", vec![url.clone(), body.clone()]),
+            ("http_put", vec![url.clone(), body.clone()]),
+            ("http_delete", vec![url.clone()]),
+        ] {
+            let result = interp.call_builtin(name, &args);
+            assert!(result.is_err(), "{} should be denied without capability", name);
+            assert!(result.unwrap_err().message.contains("capability"), "{} error should mention capability", name);
+        }
+    }
+
+    #[test]
+    fn test_capability_denial_exec() {
+        let program = Program::new();
+        let mut interp = Interpreter::new(program).unwrap();
+        let result = interp.call_builtin("exec", &[Value::Str("echo hi".to_string())]);
+        assert!(result.is_err(), "exec should be denied without capability");
+        assert!(result.unwrap_err().message.contains("capability"));
+    }
+
+    #[test]
+    fn test_capability_grant_allows_ops() {
+        let program = Program::new();
+        let mut interp = Interpreter::new(program).unwrap();
+        interp.grant_capability("exec");
+        // exec with capability granted should attempt to run (not denied)
+        let result = interp.call_builtin("exec", &[Value::Str("echo hello".to_string())]);
+        assert!(result.is_ok(), "exec should succeed with capability");
+    }
+
+    #[test]
+    fn test_capability_all_grants_everything() {
+        let program = Program::new();
+        let mut interp = Interpreter::new(program).unwrap();
+        interp.grant_capability("all");
+        // With "all", exec should not be denied
+        let result = interp.call_builtin("exec", &[Value::Str("echo hello".to_string())]);
+        assert!(result.is_ok(), "exec should succeed with 'all' capability");
     }
 }

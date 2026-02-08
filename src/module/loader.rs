@@ -134,6 +134,14 @@ impl ModuleLoader {
         // Mark as loading
         self.loading.insert(path.to_path_buf());
 
+        // Do the actual load work; always clean up loading set afterwards
+        let result = self.load_module_file_inner(path);
+        self.loading.remove(path);
+        result
+    }
+
+    /// Inner helper for load_module_file — separated so loading set cleanup is guaranteed.
+    fn load_module_file_inner(&mut self, path: &Path) -> Result<LoadedModule, ModuleError> {
         // Read the file
         let source = std::fs::read_to_string(path).map_err(|e| ModuleError {
             message: format!("failed to read file: {}", e),
@@ -160,9 +168,6 @@ impl ModuleLoader {
             path: Some(path.to_path_buf()),
         })?;
 
-        // Done loading this module
-        self.loading.remove(path);
-
         let module = LoadedModule {
             path: path.to_path_buf(),
             items: ast.items.clone(),
@@ -177,8 +182,46 @@ impl ModuleLoader {
         Ok(module)
     }
 
+    /// Resolve a module path to a file, trying base_dir, cwd, and std/ directory.
+    fn find_module_file(&self, module_path: &[String]) -> Result<PathBuf, ModuleError> {
+        // Try resolved path from base_dir first
+        let file_path = self.resolve_module_path(module_path);
+        if file_path.exists() {
+            return Ok(file_path);
+        }
+
+        // Try relative to working directory
+        let cwd_path = PathBuf::from(".").join(module_path.join("/")).with_extension("forma");
+        if cwd_path.exists() {
+            return Ok(cwd_path);
+        }
+
+        // Try std/ directory for stdlib modules (std.core -> std/core.forma)
+        if module_path.first().map(|s| s.as_str()) == Some("std") {
+            let mut std_path = PathBuf::from("std");
+            for segment in module_path.iter().skip(1) {
+                std_path.push(segment);
+            }
+            std_path.set_extension("forma");
+            if std_path.exists() {
+                return Ok(std_path);
+            }
+        }
+
+        // Module not found
+        let tried = format!("'{}'", file_path.display());
+        Err(ModuleError {
+            message: format!(
+                "module not found: '{}' (tried {})",
+                module_path.join("."),
+                tried
+            ),
+            path: None,
+        })
+    }
+
     /// Load all modules referenced by use statements in the given AST.
-    /// Returns the combined items from all loaded modules.
+    /// Returns the combined items from all loaded modules, including transitive imports.
     pub fn load_imports(&mut self, ast: &SourceFile) -> Result<Vec<Item>, ModuleError> {
         let mut all_imported_items = Vec::new();
 
@@ -188,75 +231,83 @@ impl ModuleLoader {
                 Self::extract_use_paths(&use_item.tree, &[], &mut paths);
 
                 for module_path in paths {
-                    // Try different path resolutions
-                    let file_path = self.resolve_module_path(&module_path);
-
-                    // Try the resolved path first
-                    if file_path.exists() {
-                        let module = self.load_module_file(&file_path)?;
-                        // Add all items from the module
-                        for item in module.items {
-                            // Skip use statements from imported modules to avoid re-importing
-                            if !matches!(item.kind, ItemKind::Use(_)) {
-                                all_imported_items.push(item);
-                            }
-                        }
-                    } else {
-                        // Try relative to working directory
-                        let cwd_path = PathBuf::from(".").join(
-                            module_path.join("/")
-                        ).with_extension("forma");
-
-                        if cwd_path.exists() {
-                            let module = self.load_module_file(&cwd_path)?;
-                            for item in module.items {
-                                if !matches!(item.kind, ItemKind::Use(_)) {
-                                    all_imported_items.push(item);
-                                }
-                            }
-                        } else {
-                            // Try std/ directory for stdlib modules (std.core -> std/core.forma)
-                            let std_path = if module_path.first().map(|s| s.as_str()) == Some("std") {
-                                let mut p = PathBuf::from("std");
-                                for segment in module_path.iter().skip(1) {
-                                    p.push(segment);
-                                }
-                                p.set_extension("forma");
-                                p
-                            } else {
-                                PathBuf::new()
-                            };
-
-                            if !std_path.as_os_str().is_empty() && std_path.exists() {
-                                let module = self.load_module_file(&std_path)?;
-                                for item in module.items {
-                                    if !matches!(item.kind, ItemKind::Use(_)) {
-                                        all_imported_items.push(item);
-                                    }
-                                }
-                            } else {
-                                // Module not found - return error with helpful message
-                                let tried_paths = if std_path.as_os_str().is_empty() {
-                                    format!("'{}' and '{}'", file_path.display(), cwd_path.display())
-                                } else {
-                                    format!("'{}', '{}', and '{}'", file_path.display(), cwd_path.display(), std_path.display())
-                                };
-                                return Err(ModuleError {
-                                    message: format!(
-                                        "module not found: '{}' (tried {})",
-                                        module_path.join("."),
-                                        tried_paths
-                                    ),
-                                    path: None,
-                                });
-                            }
-                        }
-                    }
+                    let file_path = self.find_module_file(&module_path)?;
+                    self.load_module_recursive(&file_path, &mut all_imported_items)?;
                 }
             }
         }
 
         Ok(all_imported_items)
+    }
+
+    /// Recursively load a module and its transitive imports.
+    /// Uses the `loading` set for cycle detection during transitive resolution.
+    fn load_module_recursive(&mut self, path: &Path, items: &mut Vec<Item>) -> Result<(), ModuleError> {
+        let path_buf = path.to_path_buf();
+
+        // Cycle detection FIRST: if this path is currently being resolved, it's circular
+        if self.loading.contains(&path_buf) {
+            return Err(ModuleError {
+                message: "circular module dependency detected".to_string(),
+                path: Some(path_buf),
+            });
+        }
+
+        // If already fully loaded and not in a loading cycle, skip
+        if self.loaded.contains_key(&path_buf) {
+            return Ok(());
+        }
+
+        // Mark as loading for cycle detection during transitive resolution
+        self.loading.insert(path_buf.clone());
+
+        // Load and parse the file (load_module_file will also mark/unmark loading,
+        // but we re-insert above so it stays marked during transitive resolution)
+        let module = match self.load_module_file_inner(path) {
+            Ok(m) => m,
+            Err(e) => {
+                self.loading.remove(&path_buf);
+                return Err(e);
+            }
+        };
+
+        // First, recursively resolve any Use items from this module (transitive imports)
+        let use_items: Vec<Item> = module.items.iter()
+            .filter(|i| matches!(i.kind, ItemKind::Use(_)))
+            .cloned()
+            .collect();
+
+        for use_item in &use_items {
+            if let ItemKind::Use(use_decl) = &use_item.kind {
+                let mut paths = Vec::new();
+                Self::extract_use_paths(&use_decl.tree, &[], &mut paths);
+                for module_path in paths {
+                    let dep_path = match self.find_module_file(&module_path) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            self.loading.remove(&path_buf);
+                            return Err(e);
+                        }
+                    };
+                    if let Err(e) = self.load_module_recursive(&dep_path, items) {
+                        self.loading.remove(&path_buf);
+                        return Err(e);
+                    }
+                }
+            }
+        }
+
+        // Done resolving — remove from loading
+        self.loading.remove(&path_buf);
+
+        // Then add this module's non-Use items
+        for item in module.items {
+            if !matches!(item.kind, ItemKind::Use(_)) {
+                items.push(item);
+            }
+        }
+
+        Ok(())
     }
 
     /// Load a file and all its dependencies, returning a combined AST.
@@ -279,5 +330,95 @@ impl ModuleLoader {
             items: combined_items,
             span: main_ast.span,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    /// Create a temp directory with forma files for testing
+    fn write_temp_file(dir: &Path, name: &str, content: &str) {
+        let path = dir.join(name);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(content.as_bytes()).unwrap();
+    }
+
+    #[test]
+    fn test_transitive_import() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+
+        // b.forma defines a function
+        write_temp_file(base, "b.forma", "f helper() -> Int = 99\n");
+
+        // a.forma imports b
+        write_temp_file(base, "a.forma", "us b\nf wrapper() -> Int = helper()\n");
+
+        // main.forma imports a (should transitively get b's items)
+        write_temp_file(base, "main.forma", "us a\nf main() -> Int = wrapper()\n");
+
+        let main_path = base.join("main.forma");
+        let mut loader = ModuleLoader::from_source_file(&main_path);
+        let result = loader.load_with_dependencies(&main_path);
+        assert!(result.is_ok(), "transitive import should succeed: {:?}", result.err());
+
+        let ast = result.unwrap();
+        let names: Vec<String> = ast.items.iter().filter_map(|item| {
+            if let ItemKind::Function(f) = &item.kind {
+                Some(f.name.name.clone())
+            } else {
+                None
+            }
+        }).collect();
+
+        // Should contain items from both a and b
+        assert!(names.contains(&"helper".to_string()), "should contain 'helper' from b.forma");
+        assert!(names.contains(&"wrapper".to_string()), "should contain 'wrapper' from a.forma");
+        assert!(names.contains(&"main".to_string()), "should contain 'main' from main.forma");
+    }
+
+    #[test]
+    fn test_circular_import_detected() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+
+        write_temp_file(base, "x.forma", "us y\nf fx() -> Int = 1\n");
+        write_temp_file(base, "y.forma", "us x\nf fy() -> Int = 2\n");
+        write_temp_file(base, "main.forma", "us x\nf main() -> Int = fx()\n");
+
+        let main_path = base.join("main.forma");
+        let mut loader = ModuleLoader::from_source_file(&main_path);
+        let result = loader.load_with_dependencies(&main_path);
+        assert!(result.is_err(), "circular import should be detected");
+        let err = result.unwrap_err();
+        assert!(err.message.contains("circular"), "error should mention circular: {}", err.message);
+    }
+
+    #[test]
+    fn test_lex_error_does_not_poison_loading_set() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+
+        // Create a file with a lex error (invalid character)
+        write_temp_file(base, "bad.forma", "f foo() -> Int = \x01\n");
+
+        let mut loader = ModuleLoader::new(base);
+        let bad_path = base.join("bad.forma");
+
+        // First load attempt should fail
+        let result = loader.load_module_file(&bad_path);
+        assert!(result.is_err());
+
+        // Second attempt should also fail (not get stuck as "loading")
+        let result2 = loader.load_module_file(&bad_path);
+        assert!(result2.is_err());
+        // Should NOT be a "circular dependency" error
+        assert!(!result2.unwrap_err().message.contains("circular"),
+            "lex error should not poison cycle detection");
     }
 }
