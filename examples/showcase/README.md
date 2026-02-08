@@ -40,6 +40,11 @@ A collection of canonical programming examples demonstrating FORMA's features an
 | 15 | Matrix Multiplication | Computational benchmark | Nested loops, O(n³) algorithm |
 | 16 | Game of Life | Cellular automaton | 2D simulation, neighbor counting |
 
+### Error Handling (Tier 6)
+| # | Example | Description | Key Concepts |
+|---|---------|-------------|--------------|
+| 17 | Error Handling | Option, Result, safe patterns | Option/Result, `?`, `??`, match guards, builtins |
+
 ## Running Examples
 
 ```bash
@@ -87,11 +92,12 @@ echo "Results: $PASS passed, $FAIL failed"
 
 These examples collectively demonstrate:
 
-- **Control Flow**: if/else, while loops, match expressions, early return
+- **Control Flow**: if/else, while loops, match expressions, match guards, early return
 - **Functions**: Recursion, tail recursion, multiple return values (tuples)
-- **Data Types**: Int, String, Bool, arrays, tuples
+- **Data Types**: Int, String, Bool, arrays, tuples, Option, Result
+- **Error Handling**: Option/Result types, `?` propagation, `??` coalescing, `is_some`/`is_ok`/`unwrap`/`unwrap_or`/`expect`
 - **String Handling**: f-strings, concatenation, interpolation
-- **Array Operations**: Indexing, mutation, parallel arrays
+- **Array Operations**: Indexing, mutation, parallel arrays, safe access (`vec_get`)
 - **Algorithms**: Sorting, searching, backtracking, constraint satisfaction
 - **Mathematical**: GCD, LCM, primes, factorials, Fibonacci
 

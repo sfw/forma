@@ -52,8 +52,123 @@ f test_option_map_like() -> Bool
         Some(v) -> v == 20
         None -> false
 
+# --- Option builtins ---
+
+f test_is_some_true() -> Bool
+    is_some(Some(1))
+
+f test_is_some_false() -> Bool
+    is_some(None) == false
+
+f test_is_none_true() -> Bool
+    is_none(None)
+
+f test_is_none_false() -> Bool
+    is_none(Some(1)) == false
+
+f test_unwrap_some() -> Bool
+    unwrap(Some(42)) == 42
+
+f test_unwrap_or_some() -> Bool
+    unwrap_or(Some(42), 0) == 42
+
+f test_unwrap_or_none() -> Bool
+    unwrap_or(None, 99) == 99
+
+f test_expect_some() -> Bool
+    expect(Some(42), "should not fail") == 42
+
+# --- Result builtins ---
+
+f test_is_ok_true() -> Bool
+    is_ok(Ok(1))
+
+f test_is_ok_false() -> Bool
+    is_ok(Err("bad")) == false
+
+f test_is_err_true() -> Bool
+    is_err(Err("bad"))
+
+f test_is_err_false() -> Bool
+    is_err(Ok(1)) == false
+
+# --- Coalesce ?? ---
+
+f test_coalesce_some() -> Bool
+    (Some(42) ?? 0) == 42
+
+f test_coalesce_none() -> Bool
+    (None ?? 99) == 99
+
+# --- Try ? on Result ---
+
+f helper_ok() -> Int!Str = Ok(10)
+
+f helper_err() -> Int!Str = Err("fail")
+
+f try_propagate_ok() -> Int!Str
+    v := helper_ok()?
+    Ok(v + 1)
+
+f try_propagate_err() -> Int!Str
+    v := helper_err()?
+    Ok(v + 1)
+
+f test_try_propagate_ok() -> Bool
+    m try_propagate_ok()
+        Ok(v) -> v == 11
+        Err(_) -> false
+
+f test_try_propagate_err() -> Bool
+    m try_propagate_err()
+        Ok(_) -> false
+        Err(e) -> e == "fail"
+
+# --- Practical: str_to_int ---
+
+f test_str_to_int_some() -> Bool
+    m str_to_int("42")
+        Some(n) -> n == 42
+        None -> false
+
+f test_str_to_int_none() -> Bool
+    m str_to_int("abc")
+        Some(_) -> false
+        None -> true
+
+# --- Practical: vec_get ---
+
+f test_vec_get_valid() -> Bool
+    arr := [10, 20, 30]
+    m vec_get(arr, 1)
+        Some(v) -> v == 20
+        None -> false
+
+f test_vec_get_out_of_bounds() -> Bool
+    arr := [10, 20, 30]
+    m vec_get(arr, 5)
+        Some(_) -> false
+        None -> true
+
+# --- Match guards ---
+
+f test_match_guard_pass() -> Bool
+    m Some(10)
+        Some(n) if n > 5 -> true
+        Some(_) -> false
+        None -> false
+
+f test_match_guard_fail() -> Bool
+    m Some(3)
+        Some(n) if n > 5 -> false
+        Some(_) -> true
+        None -> false
+
 f run_all_tests() -> Int
     passed := 0
+    total := 29
+
+    # Original 7 tests
     if test_option_some() then passed = passed + 1 else print("FAIL: test_option_some")
     if test_option_none() then passed = passed + 1 else print("FAIL: test_option_none")
     if test_result_ok() then passed = passed + 1 else print("FAIL: test_result_ok")
@@ -62,10 +177,44 @@ f run_all_tests() -> Int
     if test_get_or_default_none() then passed = passed + 1 else print("FAIL: test_get_or_default_none")
     if test_option_map_like() then passed = passed + 1 else print("FAIL: test_option_map_like")
 
+    # Option builtins
+    if test_is_some_true() then passed = passed + 1 else print("FAIL: test_is_some_true")
+    if test_is_some_false() then passed = passed + 1 else print("FAIL: test_is_some_false")
+    if test_is_none_true() then passed = passed + 1 else print("FAIL: test_is_none_true")
+    if test_is_none_false() then passed = passed + 1 else print("FAIL: test_is_none_false")
+    if test_unwrap_some() then passed = passed + 1 else print("FAIL: test_unwrap_some")
+    if test_unwrap_or_some() then passed = passed + 1 else print("FAIL: test_unwrap_or_some")
+    if test_unwrap_or_none() then passed = passed + 1 else print("FAIL: test_unwrap_or_none")
+    if test_expect_some() then passed = passed + 1 else print("FAIL: test_expect_some")
+
+    # Result builtins
+    if test_is_ok_true() then passed = passed + 1 else print("FAIL: test_is_ok_true")
+    if test_is_ok_false() then passed = passed + 1 else print("FAIL: test_is_ok_false")
+    if test_is_err_true() then passed = passed + 1 else print("FAIL: test_is_err_true")
+    if test_is_err_false() then passed = passed + 1 else print("FAIL: test_is_err_false")
+
+    # Coalesce
+    if test_coalesce_some() then passed = passed + 1 else print("FAIL: test_coalesce_some")
+    if test_coalesce_none() then passed = passed + 1 else print("FAIL: test_coalesce_none")
+
+    # Try operator
+    if test_try_propagate_ok() then passed = passed + 1 else print("FAIL: test_try_propagate_ok")
+    if test_try_propagate_err() then passed = passed + 1 else print("FAIL: test_try_propagate_err")
+
+    # Practical
+    if test_str_to_int_some() then passed = passed + 1 else print("FAIL: test_str_to_int_some")
+    if test_str_to_int_none() then passed = passed + 1 else print("FAIL: test_str_to_int_none")
+    if test_vec_get_valid() then passed = passed + 1 else print("FAIL: test_vec_get_valid")
+    if test_vec_get_out_of_bounds() then passed = passed + 1 else print("FAIL: test_vec_get_out_of_bounds")
+
+    # Match guards
+    if test_match_guard_pass() then passed = passed + 1 else print("FAIL: test_match_guard_pass")
+    if test_match_guard_fail() then passed = passed + 1 else print("FAIL: test_match_guard_fail")
+
     print("Error handling tests passed:")
     print(passed)
-    print("of 7")
+    print(f"of {total}")
 
-    if passed == 7 then 1 else 0
+    if passed == total then 1 else 0
 
 f main() -> Int = run_all_tests()

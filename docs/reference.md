@@ -590,17 +590,111 @@ f main()
 
 ### Option/Result Utilities
 
+#### Builtin Reference
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `is_some` | `Option[T] -> Bool` | `true` if `Some` |
+| `is_none` | `Option[T] -> Bool` | `true` if `None` |
+| `is_ok` | `Result[T, E] -> Bool` | `true` if `Ok` |
+| `is_err` | `Result[T, E] -> Bool` | `true` if `Err` |
+| `unwrap` | `Option[T] -> T` | Extract value, panic on `None` |
+| `unwrap_or` | `(Option[T], T) -> T` | Extract value, or return default on `None` |
+| `expect` | `(Option[T], Str) -> T` | Extract value, panic with message on `None` |
+
 ```forma
 # Check status
-is_some(value)    # true if Some
-is_none(value)    # true if None
-is_ok(result)     # true if Ok
-is_err(result)    # true if Err
+is_some(Some(42))       # true
+is_none(None)           # true
+is_ok(Ok(42))           # true
+is_err(Err("bad"))      # true
 
-# Unwrapping
-unwrap(value)           # Panics on None/Err
-unwrap_or(value, 0)     # Default value on None/Err
-expect(value, "msg")    # Panics with message on None/Err
+# Unwrapping (Option only)
+unwrap(Some(42))             # 42
+unwrap_or(Some(42), 0)      # 42
+unwrap_or(None, 0)          # 0
+expect(Some(42), "missing")  # 42
+```
+
+### Pattern Matching on Option/Result
+
+Use `m` (match) to handle both variants with value binding:
+
+```forma
+f describe(opt: Int?) -> Str
+    m opt
+        Some(v) -> f"got {v}"
+        None -> "nothing"
+
+f handle(res: Int!Str) -> Str
+    m res
+        Ok(v) -> f"success: {v}"
+        Err(e) -> f"error: {e}"
+```
+
+Match guards add conditions after the pattern:
+
+```forma
+f classify(opt: Int?) -> Str
+    m opt
+        Some(n) if n > 0 -> "positive"
+        Some(n) if n < 0 -> "negative"
+        Some(_) -> "zero"
+        None -> "absent"
+```
+
+### Practical Patterns
+
+**Safe division:**
+
+```forma
+f safe_div(a: Int, b: Int) -> Int?
+    if b == 0 then None
+    else Some(a / b)
+
+f main()
+    result := safe_div(10, 0) ?? 0    # 0
+```
+
+**Chaining `?` for error propagation:**
+
+```forma
+f parse_positive(s: Str) -> Int!Str
+    m str_to_int(s)
+        Some(n) if n > 0 -> Ok(n)
+        Some(_) -> Err("not positive")
+        None -> Err("not a number")
+
+f add_parsed(a: Str, b: Str) -> Int!Str
+    x := parse_positive(a)?    # Returns Err early if parsing fails
+    y := parse_positive(b)?
+    Ok(x + y)
+```
+
+**`unwrap_or` vs `??`:**
+
+Both provide a default value for `None`. Use `??` for concise inline expressions:
+
+```forma
+f main()
+    # These are equivalent for Option values:
+    a := unwrap_or(str_to_int("abc"), 0)
+    b := str_to_int("abc") ?? 0
+```
+
+**Functions that return Option:**
+
+```forma
+# str_to_int: Str -> Int?
+m str_to_int("42")
+    Some(n) -> print(n)    # 42
+    None -> print("failed")
+
+# vec_get: ([T], Int) -> T?
+arr := [10, 20, 30]
+m vec_get(arr, 1)
+    Some(v) -> print(v)    # 20
+    None -> print("out of bounds")
 ```
 
 ---

@@ -224,7 +224,7 @@ value := aw task                                 # await
 ## Error Handling Patterns
 
 ```forma
-# Propagate with ?
+# Propagate with ? (Result only)
 f load(path: Str) -> Str!Str
     content := file_read(path)?
     Ok(content)
@@ -232,8 +232,9 @@ f load(path: Str) -> Str!Str
 # Unwrap with !
 db := db_open("app.db")!
 
-# Default with ??
+# Default with ?? (Option only)
 name := env_get("USER") ?? "unknown"
+val := str_to_int("abc") ?? 0
 
 # Match on Result
 m result
@@ -244,6 +245,36 @@ m result
 m option
     Some(v) -> v
     None -> default
+
+# Match with guard
+m str_to_int(s)
+    Some(n) if n > 0 -> Ok(n)
+    Some(_) -> Err("not positive")
+    None -> Err("not a number")
+```
+
+### Option/Result Utility Functions
+
+```forma
+# Option checks
+is_some(Some(42))             # true
+is_none(None)                 # true
+
+# Option unwrapping
+unwrap(Some(42))              # 42 (panics on None)
+unwrap_or(Some(42), 0)       # 42
+unwrap_or(None, 0)           # 0
+expect(Some(42), "missing")   # 42 (panics with msg on None)
+
+# Result checks
+is_ok(Ok(42))                 # true
+is_err(Err("bad"))            # true
+
+# Functions returning Option
+str_to_int("42")              # Some(42)
+str_to_int("abc")             # None
+vec_get([10, 20], 0)          # Some(10)
+vec_get([10, 20], 5)          # None
 ```
 
 ## Reference Parameters

@@ -1639,12 +1639,17 @@ impl Lowerer {
         let exit_block = self.new_block();
 
         // Collect arm info for processing
-        let mut arm_blocks: Vec<(BlockId, BlockId)> = Vec::new(); // (test_block, body_block)
+        let mut arm_blocks: Vec<(BlockId, BlockId, Option<BlockId>)> = Vec::new(); // (test_block, body_block, guard_block)
 
-        for _ in arms {
+        for arm in arms {
             let test_block = self.new_block();
             let body_block = self.new_block();
-            arm_blocks.push((test_block, body_block));
+            let guard_block = if arm.guard.is_some() {
+                Some(self.new_block())
+            } else {
+                None
+            };
+            arm_blocks.push((test_block, body_block, guard_block));
         }
 
         // Start by jumping to first test
@@ -1656,7 +1661,9 @@ impl Lowerer {
 
         // Process each arm
         for (i, arm) in arms.iter().enumerate() {
-            let (test_block, body_block) = arm_blocks[i];
+            let (test_block, body_block, guard_block) = arm_blocks[i];
+            // The target after a successful pattern match: guard block if guard exists, else body
+            let pattern_target = guard_block.unwrap_or(body_block);
             let next_test = if i + 1 < arm_blocks.len() {
                 arm_blocks[i + 1].0
             } else {
@@ -1667,8 +1674,8 @@ impl Lowerer {
 
             match &arm.pattern.kind {
                 PatternKind::Wildcard => {
-                    // Always matches, go directly to body
-                    self.terminate(Terminator::Goto(body_block));
+                    // Always matches, go directly to body (or guard)
+                    self.terminate(Terminator::Goto(pattern_target));
                 }
 
                 PatternKind::Ident(ident, _, _) => {
@@ -1703,18 +1710,18 @@ impl Lowerer {
                         ));
                         self.terminate(Terminator::If {
                             cond: Operand::Copy(cond_local),
-                            then_block: body_block,
+                            then_block: pattern_target,
                             else_block: next_test,
                         });
                     } else {
-                        // Not an enum variant - bind the variable and go to body
+                        // Not an enum variant - bind the variable and go to body (or guard)
                         let local = self.new_local(Ty::Unit, Some(ident.name.clone()));
                         self.vars.insert(ident.name.clone(), local);
                         self.emit(StatementKind::Assign(
                             local,
                             Rvalue::Use(Operand::Copy(scrut_local)),
                         ));
-                        self.terminate(Terminator::Goto(body_block));
+                        self.terminate(Terminator::Goto(pattern_target));
                     }
                 }
 
@@ -1736,7 +1743,7 @@ impl Lowerer {
                     ));
                     self.terminate(Terminator::If {
                         cond: Operand::Copy(cond_local),
-                        then_block: body_block,
+                        then_block: pattern_target,
                         else_block: next_test,
                     });
                 }
@@ -1759,7 +1766,7 @@ impl Lowerer {
                     ));
                     self.terminate(Terminator::If {
                         cond: Operand::Copy(cond_local),
-                        then_block: body_block,
+                        then_block: pattern_target,
                         else_block: next_test,
                     });
                 }
@@ -1782,7 +1789,7 @@ impl Lowerer {
                     ));
                     self.terminate(Terminator::If {
                         cond: Operand::Copy(cond_local),
-                        then_block: body_block,
+                        then_block: pattern_target,
                         else_block: next_test,
                     });
                 }
@@ -1805,7 +1812,7 @@ impl Lowerer {
                     ));
                     self.terminate(Terminator::If {
                         cond: Operand::Copy(cond_local),
-                        then_block: body_block,
+                        then_block: pattern_target,
                         else_block: next_test,
                     });
                 }
@@ -1828,7 +1835,7 @@ impl Lowerer {
                     ));
                     self.terminate(Terminator::If {
                         cond: Operand::Copy(cond_local),
-                        then_block: body_block,
+                        then_block: pattern_target,
                         else_block: next_test,
                     });
                 }
@@ -1866,10 +1873,10 @@ impl Lowerer {
 
                     // Check if there are fields to extract
                     if fields.is_empty() {
-                        // Unit variant, go directly to body
+                        // Unit variant, go directly to body (or guard)
                         self.terminate(Terminator::If {
                             cond: Operand::Copy(cond),
-                            then_block: body_block,
+                            then_block: pattern_target,
                             else_block: next_test,
                         });
                     } else {
@@ -1881,7 +1888,7 @@ impl Lowerer {
                             else_block: next_test,
                         });
 
-                        // In extract block: bind fields and goto body
+                        // In extract block: bind fields, then goto guard or body
                         self.current_block = Some(extract_block);
                         for (idx, field) in fields.iter().enumerate() {
                             // PatternField has name and optional pattern
@@ -1914,7 +1921,7 @@ impl Lowerer {
                                 ));
                             }
                         }
-                        self.terminate(Terminator::Goto(body_block));
+                        self.terminate(Terminator::Goto(pattern_target));
                     }
                 }
 
@@ -2029,7 +2036,7 @@ impl Lowerer {
 
                     self.terminate(Terminator::If {
                         cond: Operand::Copy(final_cond),
-                        then_block: body_block,
+                        then_block: pattern_target,
                         else_block: next_test,
                     });
                 }
@@ -2042,12 +2049,12 @@ impl Lowerer {
                         self.vars.insert(ident.name.clone(), local);
                         self.emit(StatementKind::Assign(local, Rvalue::Use(Operand::Copy(scrut_local))));
                     }
-                    self.terminate(Terminator::Goto(body_block));
+                    self.terminate(Terminator::Goto(pattern_target));
                 }
 
                 PatternKind::Rest => {
                     // Rest pattern (used in list/tuple patterns) - matches anything
-                    self.terminate(Terminator::Goto(body_block));
+                    self.terminate(Terminator::Goto(pattern_target));
                 }
 
                 _ => {
@@ -2055,6 +2062,25 @@ impl Lowerer {
                     self.error(format!("unsupported pattern: {:?}", arm.pattern.kind), arm.pattern.span);
                     self.terminate(Terminator::Goto(next_test));
                     continue;
+                }
+            }
+
+            // Lower guard (if present)
+            if let Some(guard_blk) = guard_block {
+                self.current_block = Some(guard_blk);
+                if let Some(ref guard_expr) = arm.guard {
+                    if let Some(guard_val) = self.lower_expr(guard_expr) {
+                        let guard_cond = self.new_temp(Ty::Bool);
+                        self.emit(StatementKind::Assign(guard_cond, Rvalue::Use(guard_val)));
+                        self.terminate(Terminator::If {
+                            cond: Operand::Copy(guard_cond),
+                            then_block: body_block,
+                            else_block: next_test,
+                        });
+                    } else {
+                        // Guard expression failed to lower, skip to next arm
+                        self.terminate(Terminator::Goto(next_test));
+                    }
                 }
             }
 
