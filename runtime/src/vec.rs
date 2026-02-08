@@ -123,3 +123,57 @@ pub extern "C" fn forma_vec_free(v: *mut FormaVec) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new_and_len() {
+        let v = forma_vec_new(std::mem::size_of::<i64>());
+        assert_eq!(forma_vec_len(v), 0);
+        forma_vec_free(v);
+    }
+
+    #[test]
+    fn test_push_and_get() {
+        let v = forma_vec_new(std::mem::size_of::<i64>());
+        let val: i64 = 42;
+        forma_vec_push(v, &val as *const i64 as *const u8);
+        assert_eq!(forma_vec_len(v), 1);
+        let ptr = forma_vec_get(v, 0);
+        assert!(!ptr.is_null());
+        let got = unsafe { *(ptr as *const i64) };
+        assert_eq!(got, 42);
+        forma_vec_free(v);
+    }
+
+    #[test]
+    fn test_set() {
+        let v = forma_vec_new(std::mem::size_of::<i64>());
+        let val: i64 = 10;
+        forma_vec_push(v, &val as *const i64 as *const u8);
+        let new_val: i64 = 99;
+        forma_vec_set(v, 0, &new_val as *const i64 as *const u8);
+        let ptr = forma_vec_get(v, 0);
+        let got = unsafe { *(ptr as *const i64) };
+        assert_eq!(got, 99);
+        forma_vec_free(v);
+    }
+
+    #[test]
+    fn test_out_of_bounds() {
+        let v = forma_vec_new(std::mem::size_of::<i64>());
+        assert!(forma_vec_get(v, 0).is_null());
+        assert!(forma_vec_get(v, -1).is_null());
+        forma_vec_free(v);
+    }
+
+    #[test]
+    fn test_null_safety() {
+        assert_eq!(forma_vec_len(ptr::null()), 0);
+        forma_vec_push(ptr::null_mut(), ptr::null());
+        assert!(forma_vec_get(ptr::null(), 0).is_null());
+        forma_vec_free(ptr::null_mut()); // should not crash
+    }
+}

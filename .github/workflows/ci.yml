@@ -63,6 +63,51 @@ jobs:
       - name: Verify LLVM test targets compile
         run: cargo test --features llvm --no-run
 
+  runtime-test:
+    name: Runtime Crate Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run runtime tests
+        run: cd runtime && cargo test
+
+  forma-tests:
+    name: FORMA Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release
+      - name: Run .forma test files
+        run: |
+          PASS=0
+          FAIL=0
+          SKIP=0
+          for f in tests/forma/*.forma; do
+            name=$(basename "$f")
+            case "$name" in
+              test_tcp*|test_http_server*|test_database*|test_db_advanced*|test_prepared_statements*|test_process*|test_file_io*)
+                echo "SKIP: $name (external deps)"
+                SKIP=$((SKIP + 1))
+                continue
+                ;;
+            esac
+            if ./target/release/forma run "$f" > /dev/null 2>&1; then
+              echo "PASS: $name"
+              PASS=$((PASS + 1))
+            else
+              echo "FAIL: $name"
+              FAIL=$((FAIL + 1))
+            fi
+          done
+          echo ""
+          echo "Results: $PASS passed, $FAIL failed, $SKIP skipped"
+          if [ "$FAIL" -gt 0 ]; then exit 1; fi
+
   showcase:
     name: Showcase Examples
     runs-on: ubuntu-latest

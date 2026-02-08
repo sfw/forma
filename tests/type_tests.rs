@@ -572,6 +572,85 @@ fn test_is_float() {
 }
 
 // ============================================================================
+// Negative Type Checking Tests
+// ============================================================================
+
+fn check_should_fail(source: &str) {
+    let result = check_source(source);
+    assert!(
+        result.is_err(),
+        "Expected type error for: {}",
+        source.chars().take(80).collect::<String>()
+    );
+}
+
+#[test]
+fn test_return_type_mismatch() {
+    check_should_fail(
+        r#"
+f test() -> Int = "hello"
+"#,
+    );
+}
+
+#[test]
+fn test_binary_op_type_mismatch() {
+    check_should_fail(
+        r#"
+f test() -> Int = 1 + "hello"
+"#,
+    );
+}
+
+#[test]
+fn test_if_branch_type_mismatch() {
+    check_should_fail(
+        r#"
+f test(b: Bool) -> Int
+    if b then 1 else "no"
+"#,
+    );
+}
+
+#[test]
+fn test_wrong_arg_type() {
+    check_should_fail(
+        r#"
+f add(a: Int, b: Int) -> Int = a + b
+f test() -> Int = add(1, "two")
+"#,
+    );
+}
+
+#[test]
+fn test_wrong_arg_count() {
+    check_should_fail(
+        r#"
+f add(a: Int, b: Int) -> Int = a + b
+f test() -> Int = add(1)
+"#,
+    );
+}
+
+#[test]
+fn test_bool_arithmetic() {
+    check_should_fail(
+        r#"
+f test() -> Int = true + 1
+"#,
+    );
+}
+
+#[test]
+fn test_assign_bool_to_int() {
+    check_should_fail(
+        r#"
+f test() -> Int = false
+"#,
+    );
+}
+
+// ============================================================================
 // Cast Expression Type Checking
 // ============================================================================
 

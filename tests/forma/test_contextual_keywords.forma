@@ -252,4 +252,4 @@ f main() -> Int
     print("of")
     print(total)
 
-    if passed == total then 1 else 0
+    if passed == total then 0 else 1

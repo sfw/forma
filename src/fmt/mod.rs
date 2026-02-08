@@ -59,13 +59,36 @@ impl Formatter {
                 self.write_indent();
                 self.write("t ");
                 self.write(&t.name.name);
+                if !t.supertraits.is_empty() {
+                    self.write(": ");
+                    for (i, st) in t.supertraits.iter().enumerate() {
+                        if i > 0 {
+                            self.write(" + ");
+                        }
+                        self.format_type_path(&st.path);
+                    }
+                }
                 self.newline();
+                self.indent += 1;
+                for item in &t.items {
+                    self.format_trait_item(item);
+                }
+                self.indent -= 1;
             }
-            ItemKind::Impl(i) => {
+            ItemKind::Impl(imp) => {
                 self.write_indent();
-                self.write("impl ");
-                self.format_type(&i.self_type);
+                self.write("i ");
+                if let Some(ref trait_ty) = imp.trait_ {
+                    self.format_type(trait_ty);
+                    self.write(" for ");
+                }
+                self.format_type(&imp.self_type);
                 self.newline();
+                self.indent += 1;
+                for item in &imp.items {
+                    self.format_impl_item(item);
+                }
+                self.indent -= 1;
             }
             ItemKind::TypeAlias(t) => {
                 self.write_indent();
@@ -113,6 +136,23 @@ impl Formatter {
         for (i, param) in f.params.iter().enumerate() {
             if i > 0 {
                 self.write(", ");
+            }
+            // Handle &self and &mut self shorthand
+            if param.name.name == "self" {
+                match &param.ty.kind {
+                    TypeKind::Ref(_, true) => {
+                        self.write("&mut self");
+                        continue;
+                    }
+                    TypeKind::Ref(_, false) => {
+                        self.write("&self");
+                        continue;
+                    }
+                    _ => {
+                        self.write("self");
+                        continue;
+                    }
+                }
             }
             match param.pass_mode {
                 PassMode::Ref => self.write("ref "),
@@ -794,6 +834,39 @@ impl Formatter {
                 self.format_pattern(pat);
             }
             PatternKind::Rest => self.write(".."),
+        }
+    }
+
+    fn format_trait_item(&mut self, item: &TraitItem) {
+        match item {
+            TraitItem::Function(f) => self.format_function(f),
+            TraitItem::TypeAlias(t) => {
+                self.write_indent();
+                self.write("type ");
+                self.write(&t.name.name);
+                self.newline();
+            }
+        }
+    }
+
+    fn format_impl_item(&mut self, item: &ImplItem) {
+        match item {
+            ImplItem::Function(f) => self.format_function(f),
+            ImplItem::TypeAlias(t) => {
+                self.write_indent();
+                self.write("type ");
+                self.write(&t.name.name);
+                self.newline();
+            }
+        }
+    }
+
+    fn format_type_path(&mut self, path: &TypePath) {
+        for (i, seg) in path.segments.iter().enumerate() {
+            if i > 0 {
+                self.write("::");
+            }
+            self.write(&seg.name.name);
         }
     }
 

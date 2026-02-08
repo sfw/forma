@@ -91,3 +91,56 @@ pub extern "C" fn forma_map_free(m: *mut FormaMap) {
         drop(Box::from_raw(m));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::CString;
+
+    #[test]
+    fn test_new_and_len() {
+        let m = forma_map_new();
+        assert_eq!(forma_map_len(m), 0);
+        forma_map_free(m);
+    }
+
+    #[test]
+    fn test_set_and_get() {
+        let m = forma_map_new();
+        let key = CString::new("name").unwrap();
+        let val = CString::new("forma").unwrap();
+        forma_map_set(m, key.as_ptr(), val.as_ptr());
+        assert_eq!(forma_map_len(m), 1);
+
+        let got = forma_map_get(m, key.as_ptr());
+        assert!(!got.is_null());
+        let got_str = unsafe { CStr::from_ptr(got).to_string_lossy().into_owned() };
+        assert_eq!(got_str, "forma");
+        // Free the returned string
+        unsafe { drop(CString::from_raw(got)); }
+        forma_map_free(m);
+    }
+
+    #[test]
+    fn test_contains_and_remove() {
+        let m = forma_map_new();
+        let key = CString::new("x").unwrap();
+        let val = CString::new("1").unwrap();
+        assert!(!forma_map_contains(m, key.as_ptr()));
+        forma_map_set(m, key.as_ptr(), val.as_ptr());
+        assert!(forma_map_contains(m, key.as_ptr()));
+        assert!(forma_map_remove(m, key.as_ptr()));
+        assert!(!forma_map_contains(m, key.as_ptr()));
+        assert_eq!(forma_map_len(m), 0);
+        forma_map_free(m);
+    }
+
+    #[test]
+    fn test_null_safety() {
+        assert_eq!(forma_map_len(ptr::null()), 0);
+        assert!(forma_map_get(ptr::null(), ptr::null()).is_null());
+        assert!(!forma_map_contains(ptr::null(), ptr::null()));
+        assert!(!forma_map_remove(ptr::null_mut(), ptr::null()));
+        forma_map_free(ptr::null_mut()); // should not crash
+    }
+}

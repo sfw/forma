@@ -215,6 +215,6 @@ f run_all_tests() -> Int
     print(passed)
     print(f"of {total}")
 
-    if passed == total then 1 else 0
+    if passed == total then 0 else 1
 
 f main() -> Int = run_all_tests()

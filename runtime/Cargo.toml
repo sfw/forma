@@ -6,7 +6,7 @@ description = "Runtime library for FORMA compiled binaries"
 
 [lib]
 name = "forma_runtime"
-crate-type = ["staticlib"]
+crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 libc = "0.2"

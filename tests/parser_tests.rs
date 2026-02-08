@@ -576,3 +576,61 @@ fn test_missing_function_body() {
 fn test_unexpected_token() {
     assert!(parse_err("f test -> Int\n    @@@"));
 }
+
+// ============================================================================
+// Negative Parser Tests
+// ============================================================================
+
+fn parse_should_fail(source: &str) {
+    let result = parse(source);
+    assert!(
+        result.is_err(),
+        "Expected parse error for: {}",
+        source.chars().take(60).collect::<String>()
+    );
+}
+
+#[test]
+fn test_unterminated_string() {
+    parse_should_fail("f test -> Str\n    \"hello");
+}
+
+#[test]
+fn test_missing_closing_paren() {
+    parse_should_fail("f test(a: Int -> Int\n    a");
+}
+
+#[test]
+fn test_missing_closing_bracket() {
+    parse_should_fail("f test -> [Int\n    []");
+}
+
+#[test]
+fn test_double_arrow() {
+    parse_should_fail("f test -> -> Int\n    42");
+}
+
+#[test]
+fn test_invalid_operator_sequence() {
+    parse_should_fail("f test -> Int\n    1 + + 2");
+}
+
+#[test]
+fn test_missing_param_type() {
+    parse_should_fail("f test(a) -> Int\n    a");
+}
+
+#[test]
+fn test_missing_function_name() {
+    parse_should_fail("f (a: Int) -> Int\n    a");
+}
+
+#[test]
+fn test_struct_missing_field_type() {
+    parse_should_fail("s Point\n    x\n    y");
+}
+
+#[test]
+fn test_duplicate_arrow_in_fn_type() {
+    parse_should_fail("f test -> (Int) -> -> Int\n    42");
+}

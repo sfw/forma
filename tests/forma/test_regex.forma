@@ -104,6 +104,6 @@ f run_all_tests() -> Int
     print(passed)
     print("of 15")
 
-    if passed == 15 then 1 else 0
+    if passed == 15 then 0 else 1
 
 f main() -> Int = run_all_tests()

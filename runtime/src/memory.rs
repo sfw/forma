@@ -129,3 +129,66 @@ pub extern "C" fn forma_alloc_size(_ptr: *const u8) -> size_t {
     // Return 0 to indicate unknown
     0
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_alloc_dealloc() {
+        let ptr = forma_alloc(64);
+        assert!(!ptr.is_null());
+        forma_dealloc(ptr);
+    }
+
+    #[test]
+    fn test_zero_alloc() {
+        let ptr = forma_alloc(0);
+        assert!(ptr.is_null());
+    }
+
+    #[test]
+    fn test_zeroed_alloc() {
+        let ptr = forma_alloc_zeroed(32);
+        assert!(!ptr.is_null());
+        unsafe {
+            for i in 0..32 {
+                assert_eq!(*ptr.add(i), 0);
+            }
+        }
+        forma_dealloc(ptr);
+    }
+
+    #[test]
+    fn test_memcpy() {
+        let src: [u8; 4] = [1, 2, 3, 4];
+        let mut dst: [u8; 4] = [0; 4];
+        forma_memcpy(dst.as_mut_ptr(), src.as_ptr(), 4);
+        assert_eq!(dst, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn test_memcmp() {
+        let a: [u8; 3] = [1, 2, 3];
+        let b: [u8; 3] = [1, 2, 3];
+        let c: [u8; 3] = [1, 2, 4];
+        assert_eq!(forma_memcmp(a.as_ptr(), b.as_ptr(), 3), 0);
+        assert!(forma_memcmp(a.as_ptr(), c.as_ptr(), 3) < 0);
+        assert!(forma_memcmp(c.as_ptr(), a.as_ptr(), 3) > 0);
+    }
+
+    #[test]
+    fn test_memset() {
+        let mut buf: [u8; 4] = [0; 4];
+        forma_memset(buf.as_mut_ptr(), 0xFF, 4);
+        assert_eq!(buf, [0xFF; 4]);
+    }
+
+    #[test]
+    fn test_null_safety() {
+        forma_dealloc(std::ptr::null_mut()); // should not crash
+        forma_memcpy(std::ptr::null_mut(), std::ptr::null(), 10); // no-op
+        forma_memset(std::ptr::null_mut(), 0, 10); // no-op
+        assert_eq!(forma_memcmp(std::ptr::null(), std::ptr::null(), 0), 0);
+    }
+}

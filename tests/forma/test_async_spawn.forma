@@ -81,4 +81,4 @@ f main() -> Int
     print(passed)
     print("of 4")
 
-    if passed == 4 then 1 else 0
+    if passed == 4 then 0 else 1

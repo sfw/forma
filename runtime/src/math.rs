@@ -234,3 +234,87 @@ pub extern "C" fn forma_clamp_int(n: i64, min: i64, max: i64) -> i64 {
 pub extern "C" fn forma_clamp_float(n: f64, min: f64, max: f64) -> f64 {
     n.clamp(min, max)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_abs() {
+        assert_eq!(forma_abs_int(-5), 5);
+        assert_eq!(forma_abs_int(5), 5);
+        assert_eq!(forma_abs_int(0), 0);
+        assert!((forma_abs_float(-3.14) - 3.14).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_min_max() {
+        assert_eq!(forma_min_int(3, 7), 3);
+        assert_eq!(forma_max_int(3, 7), 7);
+        assert!((forma_min_float(1.5, 2.5) - 1.5).abs() < 1e-10);
+        assert!((forma_max_float(1.5, 2.5) - 2.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_pow() {
+        assert_eq!(forma_pow_int(2, 10), 1024);
+        assert_eq!(forma_pow_int(3, 0), 1);
+        assert_eq!(forma_pow_int(5, -1), 0); // negative exp returns 0
+        assert!((forma_pow_float(2.0, 0.5) - std::f64::consts::SQRT_2).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_sqrt() {
+        assert!((forma_sqrt(4.0) - 2.0).abs() < 1e-10);
+        assert!((forma_sqrt(0.0)).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_trig() {
+        assert!((forma_sin(0.0)).abs() < 1e-10);
+        assert!((forma_cos(0.0) - 1.0).abs() < 1e-10);
+        assert!((forma_tan(0.0)).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_sign() {
+        assert_eq!(forma_sign_int(-42), -1);
+        assert_eq!(forma_sign_int(0), 0);
+        assert_eq!(forma_sign_int(42), 1);
+        assert!((forma_sign_float(-1.5) - (-1.0)).abs() < 1e-10);
+        assert!((forma_sign_float(0.0)).abs() < 1e-10);
+        assert!((forma_sign_float(1.5) - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_clamp() {
+        assert_eq!(forma_clamp_int(5, 0, 10), 5);
+        assert_eq!(forma_clamp_int(-5, 0, 10), 0);
+        assert_eq!(forma_clamp_int(15, 0, 10), 10);
+        assert!((forma_clamp_float(1.5, 0.0, 1.0) - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_is_nan_and_infinite() {
+        assert!(forma_is_nan(f64::NAN));
+        assert!(!forma_is_nan(1.0));
+        assert!(forma_is_infinite(f64::INFINITY));
+        assert!(!forma_is_infinite(1.0));
+        assert!(forma_is_finite(1.0));
+        assert!(!forma_is_finite(f64::NAN));
+    }
+
+    #[test]
+    fn test_constants() {
+        assert!((forma_pi() - std::f64::consts::PI).abs() < 1e-15);
+        assert!((forma_e() - std::f64::consts::E).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_rounding() {
+        assert!((forma_floor(2.7) - 2.0).abs() < 1e-10);
+        assert!((forma_ceil(2.3) - 3.0).abs() < 1e-10);
+        assert!((forma_round(2.5) - 3.0).abs() < 1e-10);
+        assert!((forma_trunc(2.9) - 2.0).abs() < 1e-10);
+    }
+}

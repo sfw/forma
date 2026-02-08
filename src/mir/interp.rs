@@ -10427,11 +10427,21 @@ f main() -> Int = unwrap(safe_add_one(Some(41)))
         let url = Value::Str("http://example.com".to_string());
         let body = Value::Str("{}".to_string());
 
+        let port = Value::Int(8080);
+        let json = Value::Str(r#"{"key":"val"}"#.to_string());
+        let host = Value::Str("127.0.0.1".to_string());
+
         for (name, args) in [
             ("http_get", vec![url.clone()]),
             ("http_post", vec![url.clone(), body.clone()]),
             ("http_put", vec![url.clone(), body.clone()]),
             ("http_delete", vec![url.clone()]),
+            ("http_post_json", vec![url.clone(), json.clone()]),
+            ("http_serve", vec![port.clone(), Value::Unit]),
+            ("tcp_connect", vec![host.clone(), port.clone()]),
+            ("tcp_listen", vec![host.clone(), port.clone()]),
+            ("tls_connect", vec![host.clone(), port.clone()]),
+            ("udp_bind", vec![host.clone(), port.clone()]),
         ] {
             let result = interp.call_builtin(name, &args);
             assert!(
@@ -10445,6 +10455,18 @@ f main() -> Int = unwrap(safe_add_one(Some(41)))
                 name
             );
         }
+    }
+
+    #[test]
+    fn test_capability_denial_db_ops() {
+        let program = Program::new();
+        let mut interp = Interpreter::new(program).unwrap();
+        let result = interp.call_builtin("db_open", &[Value::Str("/tmp/test.db".to_string())]);
+        assert!(
+            result.is_err(),
+            "db_open should be denied without capability"
+        );
+        assert!(result.unwrap_err().message.contains("capability"));
     }
 
     #[test]
@@ -10474,5 +10496,82 @@ f main() -> Int = unwrap(safe_add_one(Some(41)))
         // With "all", exec should not be denied
         let result = interp.call_builtin("exec", &[Value::Str("echo hello".to_string())]);
         assert!(result.is_ok(), "exec should succeed with 'all' capability");
+    }
+
+    // =========================================================================
+    // Option/Result negative-path tests
+    // =========================================================================
+
+    #[test]
+    fn test_option_match_none_path() {
+        let result = run_source(
+            r#"
+f get_or_default(opt: Int?) -> Int
+    m opt
+        Some(x) -> x
+        None -> -1
+
+f main() -> Int = get_or_default(None)
+"#,
+        )
+        .unwrap();
+        assert_eq!(result, Value::Int(-1));
+    }
+
+    #[test]
+    fn test_result_err_propagation() {
+        let result = run_source(
+            r#"
+f failing() -> Int!Str = Err("boom")
+
+f caller() -> Int!Str
+    v := failing()?
+    Ok(v + 1)
+
+f main() -> Int
+    m caller()
+        Ok(_) -> 0
+        Err(e) -> if e == "boom" then 1 else 0
+"#,
+        )
+        .unwrap();
+        assert_eq!(result, Value::Int(1));
+    }
+
+    #[test]
+    fn test_coalesce_none_default() {
+        let result = run_source(
+            r#"
+f main() -> Int = None ?? 42
+"#,
+        )
+        .unwrap();
+        assert_eq!(result, Value::Int(42));
+    }
+
+    #[test]
+    fn test_coalesce_some_value() {
+        let result = run_source(
+            r#"
+f main() -> Int = Some(7) ?? 42
+"#,
+        )
+        .unwrap();
+        assert_eq!(result, Value::Int(7));
+    }
+
+    #[test]
+    fn test_result_match_err_path() {
+        let result = run_source(
+            r#"
+f main() -> Str
+    res := Err("not found")
+    m res
+        Ok(_) -> "ok"
+        Err(msg) -> msg
+"#,
+        )
+        .unwrap();
+        assert_eq!(result, Value::Str("not found".to_string()));
     }
 }
