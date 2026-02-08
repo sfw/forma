@@ -10,8 +10,9 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 use crate::borrow::BorrowChecker;
+use crate::fmt::Formatter;
 use crate::lexer::{Scanner, Span};
-use crate::parser::Parser;
+use crate::parser::{ItemKind, Parser};
 use crate::types::TypeChecker;
 
 /// Document state for tracking open files
@@ -68,7 +69,12 @@ impl FormaLanguageServer {
             if token.span.line == line && token.span.column <= col && col <= token_end {
                 let info = match &token.kind {
                     crate::lexer::TokenKind::Ident(name) => {
-                        get_builtin_info(name).unwrap_or_else(|| format!("identifier: {}", name))
+                        if let Some(info) = get_builtin_info(name) {
+                            info
+                        } else {
+                            get_symbol_type_info(content, name)
+                                .unwrap_or_else(|| format!("identifier: {}", name))
+                        }
                     }
                     crate::lexer::TokenKind::Int(n) => format!("Int literal: {}", n),
                     crate::lexer::TokenKind::Float(n) => format!("Float literal: {}", n),
@@ -120,6 +126,14 @@ impl LanguageServer for FormaLanguageServer {
                 }),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
+                document_formatting_provider: Some(OneOf::Left(true)),
+                document_symbol_provider: Some(OneOf::Left(true)),
+                references_provider: Some(OneOf::Left(true)),
+                signature_help_provider: Some(SignatureHelpOptions {
+                    trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
+                    retrigger_characters: None,
+                    work_done_progress_options: Default::default(),
+                }),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -290,6 +304,148 @@ impl LanguageServer for FormaLanguageServer {
 
         Ok(None)
     }
+
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        let uri = params.text_document.uri;
+
+        let content = {
+            let docs = self.documents.read().await;
+            docs.get(&uri).map(|d| d.content.clone())
+        };
+
+        if let Some(content) = content {
+            let scanner = Scanner::new(&content);
+            let (tokens, lex_errors) = scanner.scan_all();
+
+            if !lex_errors.is_empty() {
+                return Ok(None);
+            }
+
+            let parser = Parser::new(&tokens);
+            match parser.parse() {
+                Ok(ast) => {
+                    let mut formatter = Formatter::new();
+                    let formatted = formatter.format(&ast);
+
+                    let line_count = content.lines().count() as u32;
+                    let last_line_len = content.lines().last().map_or(0, |l| l.len()) as u32;
+
+                    Ok(Some(vec![TextEdit {
+                        range: Range {
+                            start: Position {
+                                line: 0,
+                                character: 0,
+                            },
+                            end: Position {
+                                line: line_count,
+                                character: last_line_len,
+                            },
+                        },
+                        new_text: formatted,
+                    }]))
+                }
+                Err(_) => Ok(None),
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn document_symbol(
+        &self,
+        params: DocumentSymbolParams,
+    ) -> Result<Option<DocumentSymbolResponse>> {
+        let uri = params.text_document.uri;
+
+        let content = {
+            let docs = self.documents.read().await;
+            docs.get(&uri).map(|d| d.content.clone())
+        };
+
+        if let Some(content) = content {
+            let symbols = analyze_document_symbols(&content, &uri);
+            Ok(Some(DocumentSymbolResponse::Flat(symbols)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        let content = {
+            let docs = self.documents.read().await;
+            docs.get(&uri).map(|d| d.content.clone())
+        };
+
+        if let Some(content) = content {
+            Ok(get_signature_help(&content, position))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+
+        let content = {
+            let docs = self.documents.read().await;
+            docs.get(&uri).map(|d| d.content.clone())
+        };
+
+        if let Some(content) = content {
+            let scanner = Scanner::new(&content);
+            let (tokens, _) = scanner.scan_all();
+
+            let line = position.line as usize + 1;
+            let col = position.character as usize + 1;
+
+            let target_name = tokens.iter().find_map(|token| {
+                let token_end = token.span.column + (token.span.end - token.span.start);
+                if token.span.line == line && token.span.column <= col && col <= token_end {
+                    if let crate::lexer::TokenKind::Ident(name) = &token.kind {
+                        Some(name.clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            });
+
+            if let Some(name) = target_name {
+                let locations: Vec<Location> = tokens
+                    .iter()
+                    .filter_map(|token| {
+                        if let crate::lexer::TokenKind::Ident(n) = &token.kind {
+                            if n == &name {
+                                Some(Location {
+                                    uri: uri.clone(),
+                                    range: span_to_range(token.span),
+                                })
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                if locations.is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(locations))
+                }
+            } else {
+                Ok(None)
+            }
+        } else {
+            Ok(None)
+        }
+    }
 }
 
 /// Convert a FORMA span to an LSP range
@@ -430,7 +586,15 @@ pub fn analyze_completions(content: &str, position: Position) -> Vec<CompletionI
     let mut prev_token_kind = None;
     for token in &tokens {
         if token.span.line == line && token.span.column <= col {
-            prev_token_kind = Some(format!("{:?}", token.kind));
+            // Skip Eof/Newline/Dedent so they don't overwrite the meaningful previous token
+            if !matches!(
+                token.kind,
+                crate::lexer::TokenKind::Eof
+                    | crate::lexer::TokenKind::Newline
+                    | crate::lexer::TokenKind::Dedent
+            ) {
+                prev_token_kind = Some(format!("{:?}", token.kind));
+            }
         }
     }
 
@@ -501,6 +665,145 @@ pub fn analyze_completions(content: &str, position: Position) -> Vec<CompletionI
     completions
 }
 
+/// Extract document symbols from source content (extracted for testability).
+#[allow(deprecated)] // SymbolInformation is deprecated in favor of DocumentSymbol but widely supported
+pub fn analyze_document_symbols(content: &str, uri: &Url) -> Vec<SymbolInformation> {
+    let scanner = Scanner::new(content);
+    let (tokens, lex_errors) = scanner.scan_all();
+
+    if !lex_errors.is_empty() {
+        return vec![];
+    }
+
+    let parser = Parser::new(&tokens);
+    let ast = match parser.parse() {
+        Ok(ast) => ast,
+        Err(_) => return vec![],
+    };
+
+    let mut symbols = Vec::new();
+
+    for item in &ast.items {
+        let (name, kind) = match &item.kind {
+            ItemKind::Function(f) => (f.name.name.clone(), SymbolKind::FUNCTION),
+            ItemKind::Struct(s) => (s.name.name.clone(), SymbolKind::STRUCT),
+            ItemKind::Enum(e) => (e.name.name.clone(), SymbolKind::ENUM),
+            ItemKind::Trait(t) => (t.name.name.clone(), SymbolKind::INTERFACE),
+            ItemKind::Const(c) => (c.name.name.clone(), SymbolKind::CONSTANT),
+            ItemKind::TypeAlias(t) => (t.name.name.clone(), SymbolKind::TYPE_PARAMETER),
+            _ => continue,
+        };
+
+        symbols.push(SymbolInformation {
+            name,
+            kind,
+            location: Location {
+                uri: uri.clone(),
+                range: span_to_range(item.span),
+            },
+            tags: None,
+            deprecated: None,
+            container_name: None,
+        });
+    }
+
+    symbols
+}
+
+/// Get signature help for a function call at the given position.
+fn get_signature_help(content: &str, position: Position) -> Option<SignatureHelp> {
+    let scanner = Scanner::new(content);
+    let (tokens, _) = scanner.scan_all();
+
+    let line = position.line as usize + 1;
+    let col = position.character as usize + 1;
+
+    // Walk tokens to find the function name before the nearest `(` at/before cursor,
+    // and count commas to determine the active parameter.
+    let mut fn_name = None;
+    let mut active_param: u32 = 0;
+    let mut paren_depth: i32 = 0;
+
+    for (i, token) in tokens.iter().enumerate() {
+        if token.span.line > line || (token.span.line == line && token.span.column > col) {
+            break;
+        }
+        match &token.kind {
+            crate::lexer::TokenKind::LParen => {
+                paren_depth += 1;
+                if i > 0
+                    && let crate::lexer::TokenKind::Ident(name) = &tokens[i - 1].kind
+                {
+                    fn_name = Some(name.clone());
+                    active_param = 0;
+                }
+            }
+            crate::lexer::TokenKind::RParen => {
+                paren_depth -= 1;
+                if paren_depth <= 0 {
+                    fn_name = None;
+                }
+            }
+            crate::lexer::TokenKind::Comma => {
+                if fn_name.is_some() && paren_depth > 0 {
+                    active_param += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let name = fn_name?;
+    let info = get_builtin_info(&name)?;
+    let sig_line = info.lines().next().unwrap_or(&info);
+
+    Some(SignatureHelp {
+        signatures: vec![SignatureInformation {
+            label: sig_line.to_string(),
+            documentation: Some(Documentation::String(info)),
+            parameters: None,
+            active_parameter: Some(active_param),
+        }],
+        active_signature: Some(0),
+        active_parameter: Some(active_param),
+    })
+}
+
+/// Try to get type information for a user-defined symbol from the type checker.
+fn get_symbol_type_info(content: &str, name: &str) -> Option<String> {
+    let scanner = Scanner::new(content);
+    let (tokens, lex_errors) = scanner.scan_all();
+    if !lex_errors.is_empty() {
+        return None;
+    }
+
+    let parser = Parser::new(&tokens);
+    let ast = match parser.parse() {
+        Ok(ast) => ast,
+        Err(_) => return None,
+    };
+
+    let mut type_checker = TypeChecker::new();
+    let _ = type_checker.check(&ast);
+
+    let scheme = type_checker.env().get(name)?;
+    let kind_label = if let Some((_span, def_kind)) = type_checker.get_definition_location(name) {
+        match def_kind {
+            crate::types::checker::DefinitionKind::Function => "function",
+            crate::types::checker::DefinitionKind::Struct => "struct",
+            crate::types::checker::DefinitionKind::Enum => "enum",
+            crate::types::checker::DefinitionKind::Trait => "trait",
+            crate::types::checker::DefinitionKind::TypeAlias => "type alias",
+            crate::types::checker::DefinitionKind::Variable => "variable",
+            crate::types::checker::DefinitionKind::Parameter => "parameter",
+            crate::types::checker::DefinitionKind::EnumVariant => "variant",
+        }
+    } else {
+        "symbol"
+    };
+    Some(format!("{} {}: {}", kind_label, name, scheme))
+}
+
 /// Run the LSP server
 pub async fn run_server() {
     let stdin = tokio::io::stdin();
@@ -549,5 +852,76 @@ mod tests {
             labels.contains(&"vec_new"),
             "should contain 'vec_new' builtin"
         );
+    }
+
+    #[test]
+    fn test_document_symbols_function_and_struct() {
+        let source = "f greet(name: Str) -> Str = name\n\ns Point\n    x: Int\n    y: Int\n";
+        let uri = Url::parse("file:///test.forma").unwrap();
+        let symbols = analyze_document_symbols(source, &uri);
+        let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"greet"), "should contain function 'greet'");
+        assert!(names.contains(&"Point"), "should contain struct 'Point'");
+        assert_eq!(symbols.len(), 2);
+        assert_eq!(symbols[0].kind, SymbolKind::FUNCTION);
+        assert_eq!(symbols[1].kind, SymbolKind::STRUCT);
+    }
+
+    #[test]
+    fn test_document_symbols_empty() {
+        let uri = Url::parse("file:///test.forma").unwrap();
+        let symbols = analyze_document_symbols("", &uri);
+        assert!(symbols.is_empty(), "empty source should produce no symbols");
+
+        let symbols = analyze_document_symbols("f main( -> Int\n", &uri);
+        assert!(
+            symbols.is_empty(),
+            "invalid source should produce no symbols"
+        );
+    }
+
+    #[test]
+    fn test_completions_after_arrow() {
+        // Simulate content where previous token is Arrow (->)
+        let source = "f main() -> ";
+        let completions = analyze_completions(
+            source,
+            Position {
+                line: 0,
+                character: 12,
+            },
+        );
+        let labels: Vec<&str> = completions.iter().map(|c| c.label.as_str()).collect();
+        assert!(labels.contains(&"Int"), "should contain Int type after ->");
+        assert!(labels.contains(&"Str"), "should contain Str type after ->");
+    }
+
+    #[test]
+    fn test_completions_after_dot() {
+        let source = "x.";
+        let completions = analyze_completions(
+            source,
+            Position {
+                line: 0,
+                character: 2,
+            },
+        );
+        let labels: Vec<&str> = completions.iter().map(|c| c.label.as_str()).collect();
+        assert!(labels.contains(&"len"), "should contain 'len' after dot");
+        assert!(labels.contains(&"push"), "should contain 'push' after dot");
+    }
+
+    #[test]
+    fn test_diagnostics_type_error() {
+        let source = "f add(a: Int, b: Int) -> Str = a + b\n";
+        let diagnostics = analyze_diagnostics(source);
+        assert!(
+            !diagnostics.is_empty(),
+            "type mismatch should produce diagnostics"
+        );
+        let has_type_diag = diagnostics
+            .iter()
+            .any(|d| d.code == Some(NumberOrString::String("TYPE".to_string())));
+        assert!(has_type_diag, "should have TYPE diagnostic code");
     }
 }
