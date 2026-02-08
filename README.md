@@ -211,6 +211,20 @@ f main()
 - **REPL**: Interactive development with `forma repl`
 - **Grammar export**: EBNF and JSON for constrained AI decoding
 
+## CI/CD
+
+[![CI](https://github.com/sfw/forma/actions/workflows/ci.yml/badge.svg)](https://github.com/sfw/forma/actions/workflows/ci.yml)
+
+| Job | What it checks |
+|-----|---------------|
+| **Test** | `cargo test --all` — 307+ unit and integration tests |
+| **Clippy** | `cargo clippy -- -D warnings` — zero warnings |
+| **Format** | `cargo fmt --all -- --check` — consistent style |
+| **LLVM Feature Check** | Clippy + compile check with `--features llvm` (LLVM 18) |
+| **Runtime Crate Tests** | `cd runtime && cargo test` — 33 FFI runtime tests |
+| **FORMA Integration Tests** | Runs 32 `.forma` test files via the interpreter (7 skipped: network/db/process deps) |
+| **Showcase Examples** | Runs all `examples/showcase/*.forma` end-to-end |
+
 ## Status
 
 FORMA is in **active development**. The core language and standard library are functional:
