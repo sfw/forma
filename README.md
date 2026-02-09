@@ -1,5 +1,7 @@
 # FORMA
 
+[![CI](https://github.com/sfw/forma/actions/workflows/ci.yml/badge.svg)](https://github.com/sfw/forma/actions/workflows/ci.yml)
+
 **Code that writes itself correctly — and proves it.**
 
 ---
@@ -294,8 +296,6 @@ When running `forma verify`, capabilities are revoked by default. Use `--allow-s
 
 ## CI/CD
 
-[![CI](https://github.com/sfw/forma/actions/workflows/ci.yml/badge.svg)](https://github.com/sfw/forma/actions/workflows/ci.yml)
-
 | Job | What it checks |
 |-----|---------------|
 | **Test** | `cargo test --all` — 400+ unit and integration tests |
@@ -382,7 +382,7 @@ The generation side (grammar export, structured errors, token efficiency) means 
 
 ## License
 
-Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT License](LICENSE-MIT) at your option.
+Licensed under the [MIT License](LICENSE-MIT).
 
 ---
 

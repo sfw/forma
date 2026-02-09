@@ -162,7 +162,7 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-MIT OR Apache-2.0 (same as Rust)
+MIT
 
 ---
 
