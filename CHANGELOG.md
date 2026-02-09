@@ -33,6 +33,15 @@ All notable changes to FORMA are documented in this file.
 - Added `textDocument/references` (single-file scope).
 - Improved hover with inferred type information for user-defined symbols.
 
+### Public Repo Hardening
+
+- Replaced deprecated `apt-key` with scoped `/usr/share/keyrings` keyring for LLVM apt repo.
+- Switched LLVM apt source from `http` to `https`.
+- Pinned all GitHub Actions to immutable SHA hashes (actions/checkout, dtolnay/rust-toolchain, Swatinem/rust-cache, actions/upload-artifact).
+- Added top-level `permissions: contents: read` to CI workflow.
+- Added security warnings for `--allow-all` and capability flags to README, reference.md, and ai-reference.md.
+- Replaced predictable `/tmp/forma_*` paths with `mktemp` and `trap` cleanup in contract test script.
+
 ### Test + Coverage Improvements
 
 - Added CLI JSON failure-matrix tests for `run/check/build` across lex/parse/module/type failures.

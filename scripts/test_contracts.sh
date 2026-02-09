@@ -6,6 +6,10 @@ cd "$ROOT_DIR"
 
 FORMA_BIN="${FORMA_BIN:-./target/release/forma}"
 
+# Create temp files and clean up on exit
+TMPDIR_CONTRACTS="$(mktemp -d)"
+trap 'rm -rf "$TMPDIR_CONTRACTS"' EXIT
+
 echo "Contract test suite"
 echo "==================="
 
@@ -20,9 +24,11 @@ cargo test verify -- --nocapture
 echo "Running contract-focused CLI checks..."
 "$FORMA_BIN" explain tests/fixtures/with_contracts.forma --examples --seed 42 --max-examples 3 > /dev/null
 "$FORMA_BIN" verify tests/fixtures/verify_contract_pass.forma --report --format json --examples 10 --seed 42 > /dev/null
-"$FORMA_BIN" --error-format json verify tests/fixtures/missing_import.forma --report --format json > /tmp/forma_contract_missing_import.json || true
 
-if ! grep -q "\"file_error\"" /tmp/forma_contract_missing_import.json; then
+MISSING_IMPORT_OUT="$TMPDIR_CONTRACTS/missing_import.json"
+"$FORMA_BIN" --error-format json verify tests/fixtures/missing_import.forma --report --format json > "$MISSING_IMPORT_OUT" || true
+
+if ! grep -q "\"file_error\"" "$MISSING_IMPORT_OUT"; then
   echo "Expected missing-import verify output to include file_error"
   exit 1
 fi
@@ -37,13 +43,14 @@ echo "Running FORMA contract integration files..."
 "$FORMA_BIN" run --allow-all --no-check-contracts tests/forma/test_contract_expressions.forma > /dev/null
 
 echo "Running intentional error-path contract test..."
-if "$FORMA_BIN" run --allow-all tests/forma/test_contract_errors.forma > /tmp/forma_contract_errors.out 2>&1; then
+CONTRACT_ERRORS_OUT="$TMPDIR_CONTRACTS/contract_errors.out"
+if "$FORMA_BIN" run --allow-all tests/forma/test_contract_errors.forma > "$CONTRACT_ERRORS_OUT" 2>&1; then
   echo "Expected test_contract_errors.forma to fail, but it succeeded"
   exit 1
 fi
-if ! grep -Eq "Contract violation|precondition" /tmp/forma_contract_errors.out; then
+if ! grep -Eq "Contract violation|precondition" "$CONTRACT_ERRORS_OUT"; then
   echo "Expected contract error output to mention contract violation"
-  cat /tmp/forma_contract_errors.out
+  cat "$CONTRACT_ERRORS_OUT"
   exit 1
 fi
 

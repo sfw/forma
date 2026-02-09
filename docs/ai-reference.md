@@ -427,7 +427,7 @@ f main()
 
 ```bash
 forma run <file>                        # run program
-forma run <file> --allow-all            # run with all capabilities
+forma run <file> --allow-all            # run with all capabilities (DO NOT use on untrusted code)
 forma run <file> --no-check-contracts   # disable contracts (enabled by default)
 forma check <file>                      # type check only
 forma check <file> --error-format json  # JSON errors
@@ -446,3 +446,5 @@ forma repl                              # interactive REPL
 forma typeof <file> --position L:C      # type at position
 forma complete <file> --position L:C    # completions
 ```
+
+**Security:** `--allow-all` enables file, network, process, env, and unsafe operations. Do not use on untrusted code. Prefer least-privilege: `--allow-read`, `--allow-write`, `--allow-network`, `--allow-exec`, `--allow-env`, `--allow-unsafe`. The `--allow-exec` flag permits shell command execution and should be treated as full shell access.

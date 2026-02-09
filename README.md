@@ -259,7 +259,7 @@ f main()
 - **Pattern matching**: Exhaustive, with guards
 - **Result types**: No exceptions, explicit error handling with `?` and `!`
 - **Linear types**: Affine and linear ownership tracking
-- **Capability system**: Fine-grained `read/write/network/exec/env/unsafe` permissions
+- **Capability system**: Fine-grained `read/write/network/exec/env/unsafe` permissions (see [Security Note](#security-note))
 - **Contracts**: `@pre`/`@post` with 12 named patterns, `old()`, quantifiers
 - **Verification UX**: `forma explain` and `forma verify --report` for contract trust reports
 - **Modules**: Simple `us std.collections` imports
@@ -275,6 +275,22 @@ f main()
 - **LSP server**: diagnostics, completions, hover, goto definition, symbols, signature help, formatting, references (single-file)
 - **REPL**: Interactive development with `forma repl`
 - **Grammar export**: EBNF and JSON for constrained AI decoding
+
+## Security Note
+
+FORMA's capability system gates access to the host system. **Do not run untrusted FORMA code with `--allow-all`.** This flag enables file, network, process execution, environment variable, and unsafe memory operations.
+
+Prefer least-privilege flags for the capabilities you actually need:
+
+```bash
+forma run myfile.forma --allow-read              # file reads only
+forma run myfile.forma --allow-read --allow-write # file I/O only
+forma run myfile.forma --allow-network            # networking only
+```
+
+The `--allow-exec` flag is particularly sensitive — it permits shell command execution via the `exec` builtin. Treat it as equivalent to giving the program full shell access.
+
+When running `forma verify`, capabilities are revoked by default. Use `--allow-side-effects` only when you trust the code being verified.
 
 ## CI/CD
 

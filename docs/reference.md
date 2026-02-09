@@ -1195,7 +1195,7 @@ forma run <file> --allow-network   # Allow networking
 forma run <file> --allow-exec      # Allow process execution
 forma run <file> --allow-env       # Allow env var access
 forma run <file> --allow-unsafe    # Allow pointer/unsafe builtins
-forma run <file> --allow-all       # Allow all capabilities
+forma run <file> --allow-all       # Allow all capabilities (see warning below)
 forma check <file>                 # Type check without running
 forma check <file> --partial       # Partial checking
 forma build <file>                 # Build native executable (LLVM feature)
@@ -1216,6 +1216,21 @@ forma init                         # Initialize project in current dir
 forma typeof <file> --position 5:10  # Query type at position
 forma complete <file> --position 5:10  # Get completions
 ```
+
+### Security Note
+
+**Do not run untrusted FORMA code with `--allow-all`.** This flag enables file I/O, networking, process execution, environment variable access, and unsafe memory operations — equivalent to giving the program full host access.
+
+Prefer least-privilege flags:
+
+```bash
+forma run myfile.forma --allow-read --allow-write  # file I/O only
+forma run myfile.forma --allow-network             # networking only
+```
+
+The `--allow-exec` flag is particularly sensitive — it permits shell command execution via the `exec` builtin and should be treated as equivalent to full shell access.
+
+When running `forma verify`, capabilities are revoked by default. Only use `--allow-side-effects` when you trust the code being verified.
 
 ### Verification and Explain Reports
 
