@@ -5,6 +5,8 @@
 **Code that writes itself correctly — and proves it.**
 
 ---
+This began as a simple experiment into the competency of claude code. As coding quickly shifts to generative AI, there are simple trust and quality concerns that we can engineer out. This project is a discussion starter about how to adapt to this future.
+---
 
 ## The Problem
 
