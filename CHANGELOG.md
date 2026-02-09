@@ -13,6 +13,11 @@ All notable changes to FORMA are documented in this file.
 - Added `forma verify --report` for trust reporting over a file or directory.
 - Added verification controls (`--examples`, `--seed`, `--max-steps`, `--timeout`, `--allow-side-effects`) and `PASS/SKIP/WARN/FAIL` status output.
 - Added safe-by-default verify execution (capabilities revoked unless side effects are explicitly enabled).
+- Improved contract explanation with richer English translations (quantifiers, `old()`, membership, implications, conjunctions).
+- Added box-drawing output format for human-readable `explain`.
+- Added `@pure` contract pattern (postcondition marker for side-effect-free functions).
+- Fixed `max_steps` default regression (reverted from 100M to 1M; verify/explain set their own limits).
+- Replaced pointer-based `old()` expression keys with span-based keys for stability.
 
 ### CLI Error-Consistency Hardening
 

@@ -850,12 +850,80 @@ Disable runtime contract checks explicitly with:
 forma run --no-check-contracts myfile.forma
 ```
 
-Contracts also support:
-- `old(...)` in `@post` conditions
-- Quantifiers: `forall x in xs: ...`, `exists x in xs: ...`
-- Membership checks with `in`
-- Pattern shorthands such as `@sorted(result)`, `@unique(items)`, `@permutation(before, after)`, `@bounded(x, min, max)`
-- Pattern context rules: `@nonempty(...)` is precondition-only, `@unchanged(...)` is postcondition-only
+### Contract Expressions
+
+Contracts support rich expression syntax:
+
+- **`old(expr)`** in `@post` — captures the value of `expr` before the function body executes
+- **`forall x in xs: predicate`** — universal quantifier over a collection or range
+- **`exists x in xs: predicate`** — existential quantifier
+- **`x in collection`** — membership test
+- **`A => B`** — implication (if A then B)
+- **`result`** — refers to the return value in `@post` conditions
+
+### Named Contract Patterns
+
+FORMA provides 12 named patterns that expand to contract expressions:
+
+| Pattern | Context | Expansion |
+|---------|---------|-----------|
+| `@nonempty(x)` | Pre-only | `x.len() > 0` |
+| `@nonnegative(x)` | Both | `x >= 0` |
+| `@positive(x)` | Both | `x > 0` |
+| `@nonzero(x)` | Both | `x != 0` |
+| `@bounded(x, lo, hi)` | Both | `x >= lo && x <= hi` |
+| `@sorted(x)` | Both | `forall i in 0..x.len()-1: x[i] <= x[i+1]` |
+| `@sorted_desc(x)` | Both | `forall i in 0..x.len()-1: x[i] >= x[i+1]` |
+| `@unique(x)` | Both | `forall i,j: i != j => x[i] != x[j]` |
+| `@same_length(a, b)` | Both | `a.len() == b.len()` |
+| `@permutation(a, b)` | Both | `permutation(a, b)` |
+| `@unchanged(x)` | Post-only | `x == old(x)` |
+| `@pure` | Post-only | `true` (no side effects marker) |
+
+Patterns used as `@pre` default to preconditions. When the first argument is `result`, they become postconditions.
+
+### Contract Explainability
+
+The `forma explain` command translates contract expressions into readable English:
+
+```bash
+# Human-readable output with box-drawing
+forma explain myfile.forma --format human
+
+# Machine-readable JSON
+forma explain myfile.forma --format json
+
+# With deterministic example generation
+forma explain myfile.forma --format markdown --examples=3 --seed 42
+```
+
+Example output:
+```
+┌─ verified_sort(items: [Int]) -> [Int]
+│  Requires:
+│    - items is not empty
+│  Guarantees:
+│    - [@sorted] for every i in 0..result.len() - 1, result[i] is at most result[i + 1]
+│    - [@permutation] permutation(items, result)
+└─ Examples:
+     [valid] ([3]) -> [3]
+     [valid] ([0, -6]) -> [-6, 0]
+     [invalid] ([]) -> []
+```
+
+### Contract Verification
+
+The `forma verify` command runs contract verification over files or directories:
+
+```bash
+# Generate a trust report
+forma verify src --report --format json --examples 20 --seed 42
+
+# Human-readable report
+forma verify src --report --format human
+```
+
+Verification runs with capabilities revoked by default (no file/network/exec side effects) unless `--allow-side-effects` is explicitly set. This makes it CI-safe and reproducible.
 
 Example:
 

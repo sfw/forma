@@ -22,7 +22,7 @@ echo "Running contract-focused CLI checks..."
 "$FORMA_BIN" verify tests/fixtures/verify_contract_pass.forma --report --format json --examples 10 --seed 42 > /dev/null
 "$FORMA_BIN" --error-format json verify tests/fixtures/missing_import.forma --report --format json > /tmp/forma_contract_missing_import.json || true
 
-if ! rg -q "\"file_error\"" /tmp/forma_contract_missing_import.json; then
+if ! grep -q "\"file_error\"" /tmp/forma_contract_missing_import.json; then
   echo "Expected missing-import verify output to include file_error"
   exit 1
 fi
@@ -41,7 +41,7 @@ if "$FORMA_BIN" run --allow-all tests/forma/test_contract_errors.forma > /tmp/fo
   echo "Expected test_contract_errors.forma to fail, but it succeeded"
   exit 1
 fi
-if ! rg -q "Contract violation|precondition" /tmp/forma_contract_errors.out; then
+if ! grep -Eq "Contract violation|precondition" /tmp/forma_contract_errors.out; then
   echo "Expected contract error output to mention contract violation"
   cat /tmp/forma_contract_errors.out
   exit 1

@@ -773,23 +773,155 @@ fn compile_program_for_analysis(
 
 fn explain_contract_text(expr: &str) -> String {
     let trimmed = expr.trim();
+
+    // Trivially-true (e.g. @pure pattern)
+    if trimmed == "true" {
+        return "always holds".to_string();
+    }
+
+    // Conjunction: split on && and explain each part
+    if trimmed.contains(" && ") {
+        let parts: Vec<&str> = trimmed.split(" && ").collect();
+        let explained: Vec<String> = parts.iter().map(|p| explain_contract_text(p)).collect();
+        return explained.join(", and ");
+    }
+
+    // Implication pattern: !A || B → "if A then B"
+    if let Some(rest) = trimmed.strip_prefix('!')
+        && let Some(idx) = rest.find(" || ")
+    {
+        let a = rest[..idx].trim();
+        let b = rest[idx + 4..].trim();
+        return format!("if {} then {}", a, explain_contract_text(b));
+    }
+
+    // X == old(X) → "X is unchanged"
+    if let Some(idx) = trimmed.find(" == old(") {
+        let x = trimmed[..idx].trim();
+        if trimmed.ends_with(')') {
+            let inner = &trimmed[idx + 8..trimmed.len() - 1];
+            if x == inner {
+                return format!("{} is unchanged", x);
+            }
+        }
+    }
+
+    // forall VAR in RANGE: PRED
+    if let Some(rest) = trimmed.strip_prefix("forall ")
+        && let Some(colon_idx) = rest.find(": ")
+    {
+        let binding = &rest[..colon_idx];
+        let pred = &rest[colon_idx + 2..];
+        return format!("for every {}, {}", binding, explain_contract_text(pred));
+    }
+
+    // exists VAR in COLL: PRED
+    if let Some(rest) = trimmed.strip_prefix("exists ")
+        && let Some(colon_idx) = rest.find(": ")
+    {
+        let binding = &rest[..colon_idx];
+        let pred = &rest[colon_idx + 2..];
+        return format!(
+            "there exists some {} where {}",
+            binding,
+            explain_contract_text(pred)
+        );
+    }
+
+    // result.len() == X.len() → "result has the same length as X"
+    if trimmed.starts_with("result.len() == ") && trimmed.ends_with(".len()") {
+        let other = &trimmed[16..trimmed.len() - 6];
+        return format!("result has the same length as {}", other);
+    }
+
+    // X.len() == Y.len() → "X and Y have the same length"
+    if let Some(idx) = trimmed.find(".len() == ") {
+        let lhs = &trimmed[..idx];
+        let rhs = &trimmed[idx + 10..];
+        if let Some(rhs_name) = rhs.strip_suffix(".len()") {
+            return format!("{} and {} have the same length", lhs, rhs_name);
+        }
+    }
+
+    // X.len() > 0 → "X is not empty"
     if trimmed.ends_with(".len() > 0") {
         let name = trimmed.trim_end_matches(".len() > 0");
         return format!("{} is not empty", name);
     }
-    if trimmed.contains(" != 0") {
-        return trimmed.replace(" != 0", " is non-zero");
+
+    // old(EXPR) references → "the original value of EXPR (before the call)"
+    let result = trimmed.to_string();
+    let result = replace_old_refs(&result);
+
+    // X in Y membership → "X is a member of Y"
+    if let Some(idx) = result.find(" in ") {
+        // Avoid matching "forall x in" which is handled above
+        let before = &result[..idx];
+        if !before.contains("forall") && !before.contains("exists") {
+            let x = before.trim();
+            let y = result[idx + 4..].trim();
+            return format!("{} is a member of {}", x, y);
+        }
     }
-    if trimmed.contains(" >= 0") {
-        return trimmed.replace(" >= 0", " is non-negative");
+
+    // Comparison operators with context
+    if result.contains(" != 0") {
+        return result.replace(" != 0", " is non-zero");
     }
-    if trimmed.contains(" > 0") {
-        return trimmed.replace(" > 0", " is positive");
+    if result.contains(" >= 0") {
+        return result.replace(" >= 0", " is non-negative");
     }
-    if trimmed.contains("result ==") {
-        return trimmed.replacen("result ==", "result equals", 1);
+    if result.contains(" > 0") {
+        return result.replace(" > 0", " is positive");
     }
-    trimmed.to_string()
+    if result.contains(" <= ") {
+        return result.replace(" <= ", " is at most ");
+    }
+    if result.contains(" >= ") {
+        return result.replace(" >= ", " is at least ");
+    }
+    if result.contains("result ==") {
+        return result.replacen("result ==", "result equals", 1);
+    }
+
+    result
+}
+
+/// Replace `old(EXPR)` with "the original value of EXPR (before the call)"
+fn replace_old_refs(s: &str) -> String {
+    let mut result = s.to_string();
+    while let Some(start) = result.find("old(") {
+        // Find matching close paren
+        let after = &result[start + 4..];
+        let mut depth = 1;
+        let mut end = None;
+        for (i, ch) in after.char_indices() {
+            match ch {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = Some(i);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some(end_idx) = end {
+            let inner = &after[..end_idx];
+            let replacement = format!("the original value of {} (before the call)", inner);
+            result = format!(
+                "{}{}{}",
+                &result[..start],
+                replacement,
+                &result[start + 4 + end_idx + 1..]
+            );
+        } else {
+            break;
+        }
+    }
+    result
 }
 
 fn format_function_signature(func: &forma::mir::Function) -> String {
@@ -1247,48 +1379,58 @@ fn explain(
         }
         ExplainFormat::Human => {
             for function in &output.functions {
-                println!("{}", function.signature);
-                if function.preconditions.is_empty() && function.postconditions.is_empty() {
-                    println!("  No contracts.");
+                let has_contracts =
+                    !function.preconditions.is_empty() || !function.postconditions.is_empty();
+                let has_examples = function.examples.is_some() || function.example_note.is_some();
+                let has_body = has_contracts || has_examples;
+
+                if has_body {
+                    println!("\u{250c}\u{2500} {}", function.signature);
                 } else {
-                    if !function.preconditions.is_empty() {
-                        println!("  Requires:");
-                        for c in &function.preconditions {
-                            if let Some(pattern) = &c.pattern_name {
-                                println!("    - [@{}] {}", pattern, c.english);
-                            } else {
-                                println!("    - {}", c.english);
-                            }
+                    println!("\u{250c}\u{2500} {}", function.signature);
+                    println!("\u{2502}  No contracts.");
+                    println!("\u{2514}\u{2500}");
+                    println!();
+                    continue;
+                }
+
+                if !function.preconditions.is_empty() {
+                    println!("\u{2502}  Requires:");
+                    for c in &function.preconditions {
+                        if let Some(pattern) = &c.pattern_name {
+                            println!("\u{2502}    - [@{}] {}", pattern, c.english);
+                        } else {
+                            println!("\u{2502}    - {}", c.english);
                         }
                     }
-                    if !function.postconditions.is_empty() {
-                        println!("  Guarantees:");
-                        for c in &function.postconditions {
-                            if let Some(pattern) = &c.pattern_name {
-                                println!("    - [@{}] {}", pattern, c.english);
-                            } else {
-                                println!("    - {}", c.english);
-                            }
+                }
+                if !function.postconditions.is_empty() {
+                    println!("\u{2502}  Guarantees:");
+                    for c in &function.postconditions {
+                        if let Some(pattern) = &c.pattern_name {
+                            println!("\u{2502}    - [@{}] {}", pattern, c.english);
+                        } else {
+                            println!("\u{2502}    - {}", c.english);
                         }
                     }
                 }
                 if let Some(note) = &function.example_note {
-                    println!("  Examples: skipped ({})", note);
+                    println!("\u{2514}\u{2500} Examples: skipped ({})", note);
                 } else if let Some(examples) = &function.examples {
-                    println!("  Examples:");
+                    println!("\u{2514}\u{2500} Examples:");
                     for ex in examples {
                         let prefix = if matches!(ex.kind.as_deref(), Some("invalid")) {
-                            "[invalid] "
+                            "[invalid]"
                         } else {
-                            "[valid] "
+                            "[valid]"
                         };
                         match (&ex.output, &ex.error) {
                             (Some(out), _) => {
-                                println!("    - {}({}) -> {}", prefix, ex.input.join(", "), out)
+                                println!("     {} ({}) -> {}", prefix, ex.input.join(", "), out)
                             }
                             (_, Some(err)) => {
                                 println!(
-                                    "    - {}({}) -> ERROR: {}",
+                                    "     {} ({}) -> ERROR: {}",
                                     prefix,
                                     ex.input.join(", "),
                                     err
@@ -1297,6 +1439,8 @@ fn explain(
                             _ => {}
                         }
                     }
+                } else {
+                    println!("\u{2514}\u{2500}");
                 }
                 println!();
             }

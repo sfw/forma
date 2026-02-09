@@ -1,23 +1,20 @@
 # FORMA
 
-**Code that writes itself correctly.**
+**Code that writes itself correctly — and proves it.**
 
 ---
 
 ## The Problem
 
-AI code generation is transforming software development. But there's a catch: **AI fails spectacularly at systems programming.**
+AI is writing more code than ever. But the toolchain is broken in six places.
 
-When researchers tested LLMs on Rust code generation:
-- **94.8%** of failures were lifetime/borrow checker errors
-- **33.6%** were type mismatches
-- AI models hallucinate syntax, invent APIs, and struggle with memory semantics
+AI models **can't write systems code reliably** — 94.8% of Rust generation failures are lifetime/borrow checker errors, 33.6% are type mismatches, and models routinely hallucinate APIs and syntax. AI models also **waste tokens** — verbose keywords and type annotations drive up API costs and latency. And even when AI does produce working code, **nobody can review it fast enough** — teams are shipping AI-generated functions they haven't fully read, because code review doesn't scale to hundreds of functions a day.
 
-The issue isn't AI capability—it's language design. Rust, C++, and Go were designed for humans with compilers. Not for AI with humans.
+The issue isn't AI capability — it's language design. Rust, C++, and Go were designed for humans with compilers. Not for AI with humans. And none of them give you tools to understand and trust AI-generated code at scale.
 
 ## The Solution
 
-**FORMA is the first programming language designed for generative AI.**
+**FORMA is the first programming language designed for generative AI — from generation through verification.**
 
 ```forma
 f fetch_users(db: Database) -> Result[Vec[User], Str]
@@ -33,13 +30,15 @@ f fetch_users(db: Database) -> Result[Vec[User], Str]
     Ok(users)
 ```
 
-Same memory safety as Rust. None of the complexity that trips up AI.
+Same memory safety as Rust. None of the complexity that trips up AI. Built-in tools to verify what was generated.
 
 ## Why FORMA Works
 
-### Memory Safety Without Lifetimes
+FORMA solves six problems that every other AI coding stack leaves open.
 
-FORMA uses **second-class references**—references can't be stored in structs or returned from functions. This eliminates lifetime annotations entirely while preserving memory safety.
+### 1. Memory Safety Without Lifetimes
+
+FORMA uses **second-class references** — references can't be stored in structs or returned from functions. This eliminates lifetime annotations entirely while preserving memory safety.
 
 ```forma
 # Rust: fn longest<'a>(x: &'a str, y: &'a str) -> &'a str
@@ -48,37 +47,11 @@ f longest(x: Str, y: Str) -> Str
     if len(x) > len(y) then x else y
 ```
 
-The compiler guarantees memory safety through scope analysis. AI doesn't need to reason about lifetimes.
+The compiler guarantees memory safety through scope analysis. AI doesn't need to reason about lifetimes because they don't exist.
 
-### 96% Fewer Syntax Errors
+### 2. Strong Type Inference + Structured Errors
 
-FORMA's grammar is designed for **constrained decoding**. AI models can generate only syntactically valid code:
-
-```bash
-# Export grammar for any LLM toolkit
-forma grammar --format ebnf > forma.ebnf
-forma grammar --format json > forma.json
-```
-
-When AI generates tokens, invalid syntax is impossible.
-
-### 38% Fewer Tokens
-
-Every character costs API tokens. FORMA's concise syntax reduces costs and latency:
-
-| Feature | Rust | FORMA |
-|---------|------|-------|
-| Function | `fn` | `f` |
-| Struct | `struct` | `s` |
-| Enum | `enum` | `e` |
-| Match | `match` | `m` |
-| While | `while` | `wh` |
-| Return | `return` | `ret` / `return` |
-| Use/Import | `use` | `us` |
-
-### AI Self-Correction
-
-Errors are structured JSON that AI can parse and fix automatically:
+FORMA uses Hindley-Milner type inference, so AI rarely needs explicit type annotations. When types do mismatch, errors are machine-readable JSON with fix suggestions that AI can parse and self-correct:
 
 ```json
 {
@@ -94,20 +67,77 @@ Errors are structured JSON that AI can parse and fix automatically:
 forma check --error-format json myfile.forma
 ```
 
-### Contract Explainability + Trust Reports
+### 3. No API Hallucination
 
-FORMA includes first-class verification UX so AI-generated code is not only compilable, but auditable:
+FORMA exports available methods for any type, letting AI tooling constrain generation to real APIs:
 
 ```bash
-# Explain contract intent in human/markdown/json form
-forma explain myfile.forma --format markdown --examples=3 --seed 42
+forma typeof myfile.forma --position "5:10"
+```
+
+AI pipelines can use this to only generate method calls that actually exist.
+
+### 4. No Syntax Errors
+
+FORMA's grammar is designed for **constrained decoding**. AI models can generate only syntactically valid code:
+
+```bash
+# Export grammar for any LLM toolkit
+forma grammar --format ebnf > forma.ebnf
+forma grammar --format json > forma.json
+```
+
+This eliminates syntax errors entirely — not by catching them, but by making them impossible.
+
+### 5. 38% Fewer Tokens
+
+Every character costs API tokens. FORMA's concise syntax reduces costs and latency:
+
+| Feature | Rust | FORMA |
+|---------|------|-------|
+| Function | `fn` | `f` |
+| Struct | `struct` | `s` |
+| Enum | `enum` | `e` |
+| Match | `match` | `m` |
+| While | `while` | `wh` |
+| Return | `return` | `ret` / `return` |
+| Use/Import | `use` | `us` |
+
+Across typical codebases, FORMA uses 38% fewer tokens than equivalent Rust. That's 38% lower API costs, 38% faster generation, and 38% more code fitting in context windows.
+
+### 6. Verifiable AI Intent
+
+When AI writes your code, you need to know what it actually does. FORMA includes first-class verification UX so AI-generated code is not only compilable, but auditable:
+
+```bash
+# Explain contract intent in human-readable English
+forma explain myfile.forma --format human
+
+# Machine-readable JSON for CI integration
+forma explain myfile.forma --format json --examples=3 --seed 42
 
 # Run deterministic contract verification over a file or directory tree
 forma verify src --report --format json --examples 20 --seed 42
 ```
 
-`verify` defaults to side-effect-safe execution for generated examples (capabilities revoked unless `--allow-side-effects` is explicitly set), which makes it CI-friendly and reproducible.
-For `explain`, use `--examples=N` (or `--max-examples N`) to set a count.
+For example, an AI generates a sort function with contracts. `forma explain` translates:
+
+```
+┌─ verified_sort(items: [Int]) -> [Int]
+│  Requires:
+│    - items is not empty
+│  Guarantees:
+│    - [@sorted] for every i in 0..result.len() - 1, result[i] is at most result[i + 1]
+│    - [@permutation] permutation(items, result)
+└─ Examples:
+     [valid] ([3]) -> [3]
+     [valid] ([0, -6]) -> [-6, 0]
+     [invalid] ([]) -> []
+```
+
+`verify --report` produces a trust report showing PASS/FAIL/WARN/SKIP status for every function's contracts — consumable by CI, QA teams, and code reviewers without reading source. Code review stops being "read 500 lines of sort logic" and becomes "confirm that the contract says what I wanted."
+
+`verify` defaults to side-effect-safe execution (capabilities revoked unless `--allow-side-effects` is explicitly set), making it CI-friendly and reproducible.
 
 ## Quick Start
 
@@ -212,6 +242,8 @@ f main()
 - **Result types**: No exceptions, explicit error handling with `?` and `!`
 - **Linear types**: Affine and linear ownership tracking
 - **Capability system**: Fine-grained `read/write/network/exec/env/unsafe` permissions
+- **Contracts**: `@pre`/`@post` with 12 named patterns, `old()`, quantifiers
+- **Verification UX**: `forma explain` and `forma verify --report` for contract trust reports
 - **Modules**: Simple `us std.collections` imports
 - **Async/await**: Native coroutines with spawn
 - **HTTP client & server**: Built-in networking primitives
@@ -222,7 +254,6 @@ f main()
 - **FFI**: C interop with `extern` functions and safety layer
 - **LLVM backend**: Native compilation (optional, requires LLVM 18)
 - **Formatter**: `forma fmt` for consistent code style
-- **Verification UX**: `forma explain` and `forma verify --report` for contract trust reports
 - **LSP server**: diagnostics, completions, hover, goto definition, symbols, signature help, formatting, references (single-file)
 - **REPL**: Interactive development with `forma repl`
 - **Grammar export**: EBNF and JSON for constrained AI decoding
@@ -270,7 +301,7 @@ FORMA is in **active development**. The core language and standard library are f
 
 ## For AI Developers
 
-FORMA provides first-class tooling for AI code generation:
+FORMA provides first-class tooling for the full AI code generation lifecycle — from generation through review:
 
 ```bash
 # Grammar-constrained generation (EBNF or JSON)
@@ -280,13 +311,18 @@ forma grammar --format json
 # Structured errors for self-correction
 forma check --error-format json myfile.forma
 
-# Contract explanation + trust reports
+# Understand what AI-generated code actually does
+forma explain myfile.forma --format human
 forma explain myfile.forma --format json --examples=3 --seed 42
+
+# Verify AI-generated code at scale — CI-safe, deterministic
 forma verify src --report --format json --examples 20 --seed 42
 
 # Type queries for constrained decoding
 forma typeof myfile.forma --position "5:10"
 ```
+
+The generation side (grammar export, structured errors, token efficiency) means AI writes correct FORMA code. The verification side (`explain`, `verify`) means humans can actually understand and trust it. Together, they close the loop that every other AI coding stack leaves open: *AI writes it, FORMA proves what it does, you decide if that's what you wanted.*
 
 ## Documentation
 
@@ -302,5 +338,5 @@ Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT L
 
 <p align="center">
   <strong>FORMA</strong><br>
-  Code that writes itself correctly.
+  Code that writes itself correctly — and proves it.
 </p>

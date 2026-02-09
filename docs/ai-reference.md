@@ -211,9 +211,26 @@ f factorial(n: Int) -> Int
     if n <= 1 then 1 else n * factorial(n - 1)
 
 @post(old(balance) + delta == result)
-@post(forall i in 0..result.len()-1: result[i] <= result[i+1])
 f deposit(balance: Int, delta: Int) -> Int
     balance + delta
+
+@pre(values.len() > 0)
+@post(forall i in 0..result.len()-1: result[i] <= result[i+1])
+@post(permutation(values, result))
+f sort(values: [Int]) -> [Int]
+    sort_ints(values)
+```
+
+Named contract patterns (expand to expressions):
+- `@nonempty(x)` (pre-only), `@nonnegative(x)`, `@positive(x)`, `@nonzero(x)`
+- `@bounded(x, lo, hi)`, `@sorted(x)`, `@sorted_desc(x)`, `@unique(x)`
+- `@same_length(a, b)`, `@permutation(a, b)`
+- `@unchanged(x)` (post-only), `@pure` (post-only, no args)
+
+Contract CLI:
+```bash
+forma explain file.forma --format human|json|markdown --examples=N --seed S
+forma verify dir --report --format json --examples N --seed S
 ```
 
 ### Async

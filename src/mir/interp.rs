@@ -412,8 +412,8 @@ struct Frame {
     current_block: BlockId,
     /// Result value for postcondition checking (the 'result' keyword)
     contract_result: Option<Value>,
-    /// Captured pre-state values for old(expr), keyed by expression pointer.
-    contract_old_values: HashMap<usize, Value>,
+    /// Captured pre-state values for old(expr), keyed by expression span (start, end).
+    contract_old_values: HashMap<(usize, usize), Value>,
     /// Contract-local bindings (e.g., quantifier variables).
     contract_bindings: HashMap<String, Value>,
 }
@@ -498,7 +498,7 @@ impl Interpreter {
         Ok(Self {
             program: Arc::new(program),
             call_stack: Vec::new(),
-            max_steps: 100_000_000,
+            max_steps: 1_000_000,
             step_counter: 0,
             run_timeout_ms: None,
             run_deadline: None,
@@ -600,7 +600,7 @@ impl Interpreter {
         Ok(Self {
             program,
             call_stack: Vec::new(),
-            max_steps: 100_000_000,
+            max_steps: 1_000_000,
             step_counter: 0,
             run_timeout_ms: None,
             run_deadline: None,
@@ -1324,8 +1324,8 @@ impl Interpreter {
         }
     }
 
-    fn contract_expr_key(expr: &crate::parser::Expr) -> usize {
-        expr as *const crate::parser::Expr as usize
+    fn contract_expr_key(expr: &crate::parser::Expr) -> (usize, usize) {
+        (expr.span.start, expr.span.end)
     }
 
     fn collect_old_expr_args<'a>(

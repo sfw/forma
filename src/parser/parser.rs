@@ -598,6 +598,14 @@ impl<'a> Parser<'a> {
                     PatternContext::PostOnly,
                 )
             }
+            "pure" => {
+                if !attr.args.is_empty() {
+                    return Err(
+                        ParseError::new("@pure takes no arguments".to_string(), attr.span).into(),
+                    );
+                }
+                ("true".to_string(), true, PatternContext::PostOnly)
+            }
             _ => return Ok(None),
         };
 
