@@ -96,9 +96,9 @@ FORMA v1.2 completes all planned v1.x features, achieving full async parallelism
 
 ## [1.0.0] - January 26, 2026
 
-### 🎉 Initial Production Release
+### 🎉 Initial Release
 
-FORMA v1.0 is the first production-ready release of the AI-optimized programming language.
+FORMA v1.0 is the first public release of the AI-optimized programming language.
 
 **288 tests passing** (250 Rust + 38 FORMA integration)
 
