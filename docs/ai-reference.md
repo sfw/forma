@@ -209,6 +209,11 @@ type Handler[T] = (T) -> Unit
 @post(result > 0, "must be positive")
 f factorial(n: Int) -> Int
     if n <= 1 then 1 else n * factorial(n - 1)
+
+@post(old(balance) + delta == result)
+@post(forall i in 0..result.len()-1: result[i] <= result[i+1])
+f deposit(balance: Int, delta: Int) -> Int
+    balance + delta
 ```
 
 ### Async
@@ -378,6 +383,11 @@ f main()
 ### Networking (needs --allow-network)
 `http_get(url)` `http_post(url,body)` `http_post_json(url,j)` `http_serve(port,handler)` `tcp_connect(h,p)` `tcp_read(c)` `tcp_write(c,d)` `tls_connect(h,p)`
 
+### Process/Env/Unsafe capabilities
+- Process builtins require `--allow-exec`
+- Environment builtins require `--allow-env`
+- Pointer/memory/FFI-style builtins require `--allow-unsafe`
+
 ### Database
 `db_open(path)` `db_open_memory()` `db_execute(db,sql)` `db_query(db,sql)` `db_close(db)` `row_get_int(r,i)` `row_get_str(r,i)` `row_get_float(r,i)`
 
@@ -401,9 +411,17 @@ f main()
 ```bash
 forma run <file>                        # run program
 forma run <file> --allow-all            # run with all capabilities
-forma run <file> --check-contracts      # enable contracts
+forma run <file> --no-check-contracts   # disable contracts (enabled by default)
 forma check <file>                      # type check only
 forma check <file> --error-format json  # JSON errors
+forma explain <file> --format json      # contract intent in JSON
+forma explain <file> --examples=3 --seed 42
+# or: forma explain <file> --max-examples 3 --seed 42
+# explain --examples includes valid + invalid (precondition-violating) cases
+forma verify <path> --report --format human
+forma verify <path> --report --format json --examples 20 --seed 42
+forma verify <path> --report --max-steps 10000 --timeout 1000
+forma verify <path> --report --allow-side-effects
 forma grammar --format ebnf             # export grammar
 forma grammar --format json             # export grammar (JSON)
 forma fmt <file>                        # format code

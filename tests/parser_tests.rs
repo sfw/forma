@@ -562,6 +562,77 @@ fn test_use_glob() {
 }
 
 // ============================================================================
+// Contract Parsing
+// ============================================================================
+
+#[test]
+fn test_contract_quantifiers_parse() {
+    let ast = parse_ok(
+        r#"
+@post(forall i in 0..result.len()-1: result[i] <= result[i+1])
+@post(exists x in result: x > 0)
+f ordered(result: [Int]) -> [Int] = result
+"#,
+    );
+    if let ItemKind::Function(f) = &ast.items[0].kind {
+        assert_eq!(f.postconditions.len(), 2);
+    } else {
+        panic!("expected function");
+    }
+}
+
+#[test]
+fn test_contract_old_post_only() {
+    assert!(parse_err(
+        r#"
+@pre(old(x) > 0)
+f bad(x: Int) -> Int = x
+"#
+    ));
+}
+
+#[test]
+fn test_contract_pattern_expansion_sorted() {
+    let ast = parse_ok(
+        r#"
+@sorted(result)
+f already_sorted(result: [Int]) -> [Int] = result
+"#,
+    );
+    if let ItemKind::Function(f) = &ast.items[0].kind {
+        assert_eq!(f.postconditions.len(), 1);
+        assert!(f.preconditions.is_empty());
+    } else {
+        panic!("expected function");
+    }
+}
+
+#[test]
+fn test_contract_pattern_expansion_permutation() {
+    let ast = parse_ok(
+        r#"
+@permutation(items, result)
+f same_items(items: [Int], result: [Int]) -> [Int] = result
+"#,
+    );
+    if let ItemKind::Function(f) = &ast.items[0].kind {
+        assert_eq!(f.postconditions.len(), 1);
+    } else {
+        panic!("expected function");
+    }
+}
+
+#[test]
+fn test_contract_pattern_wrong_context() {
+    assert!(parse_err(
+        r#"
+@nonempty(result)
+f bad(result: [Int]) -> [Int] = result
+"#
+    ));
+}
+
+// ============================================================================
 // Error Cases
 // ============================================================================
 

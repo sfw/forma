@@ -72,6 +72,8 @@ pub struct MirContract {
     pub expr_string: String,
     /// Optional error message
     pub message: Option<String>,
+    /// Optional named-pattern source, when created from shorthand attributes.
+    pub pattern_name: Option<String>,
     /// The actual condition expression (for evaluation)
     pub condition: Option<Box<crate::parser::Expr>>,
 }

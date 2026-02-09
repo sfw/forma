@@ -43,7 +43,15 @@ A collection of canonical programming examples demonstrating FORMA's features an
 ### Error Handling (Tier 6)
 | # | Example | Description | Key Concepts |
 |---|---------|-------------|--------------|
-| 17 | Error Handling | Option, Result, safe patterns | Option/Result, `?`, `??`, match guards, builtins |
+| 17a | Error Handling | Option, Result, safe patterns | Option/Result, `?`, `??`, match guards, builtins |
+
+### Verification UX (Tier 7)
+| # | File | Description | Key Concepts |
+|---|------|-------------|--------------|
+| 17 | `17_verified_sort.forma` | Sorting with full behavioral contracts | `@pre`, `@sorted`, `@permutation`, trust report |
+| 18 | `18_verified_stack.forma` | Stack operations with pre/post state checks | `old(...)`, tuple postconditions |
+| 19 | `19_verified_math.forma` | Numeric and collection invariants | named patterns, quantifiers |
+| 20 | `20_verification_demo.forma` | End-to-end explain/verify workflow | PASS/WARN visibility, CI-friendly output |
 
 ## Running Examples
 
@@ -58,6 +66,12 @@ for f in examples/showcase/*.forma; do
     cargo run --quiet -- run "$f"
     echo ""
 done
+
+# Inspect contracts in human-readable form
+cargo run -- explain --examples examples/showcase/17_verified_sort.forma
+
+# Generate trust report for showcase directory
+cargo run -- verify --report examples/showcase/
 ```
 
 ## Verification Script
@@ -100,6 +114,7 @@ These examples collectively demonstrate:
 - **Array Operations**: Indexing, mutation, parallel arrays, safe access (`vec_get`)
 - **Algorithms**: Sorting, searching, backtracking, constraint satisfaction
 - **Mathematical**: GCD, LCM, primes, factorials, Fibonacci
+- **Verification UX**: Contract explanation, deterministic examples, PASS/WARN/SKIP/FAIL reporting
 
 ## Performance Notes
 
@@ -116,3 +131,4 @@ To add a new example:
 2. Include header comment explaining the algorithm
 3. Add entry to this README
 4. Ensure it compiles and runs with `cargo run -- run`
+5. If contract-heavy, validate `cargo run -- explain --examples` and `cargo run -- verify --report`

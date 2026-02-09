@@ -1,0 +1,26 @@
+# Quantifier behavior coverage
+
+@post(forall x in result: x >= 0)
+f abs_all(items: [Int]) -> [Int]
+    out := vec_new()
+    for x in items
+        out = vec_push(out, abs(x))
+    out
+
+@pre(forall i in 0..items.len(): items[i] >= 0)
+@post(result >= 0)
+f sum_nonnegative(items: [Int]) -> Int
+    total := 0
+    for x in items
+        total := total + x
+    total
+
+@post(exists x in result: x == target)
+f include_target(items: [Int], target: Int) -> [Int]
+    vec_push(items, target)
+
+f main() -> Int
+    _ := abs_all([-1, 2, -3])
+    _ := sum_nonnegative([1, 2, 3])
+    _ := include_target([1, 2], 3)
+    0

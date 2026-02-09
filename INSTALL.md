@@ -65,6 +65,12 @@ echo 'f main()
     print("Hello, FORMA!")' > hello.forma
 ./target/release/forma run hello.forma
 
+# Show contract explanations
+./target/release/forma explain hello.forma --format human
+
+# Emit machine-readable diagnostics
+./target/release/forma check --error-format json hello.forma
+
 # Run the showcase examples
 for f in examples/showcase/*.forma; do
     echo "=== $(basename $f) ==="

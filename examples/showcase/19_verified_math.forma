@@ -1,0 +1,23 @@
+# Verified Math - algebraic + collection invariants
+# Demonstrates: @nonzero, @same_length, @sorted, quantified postconditions
+
+@nonzero(b)
+@post(result * b == a)
+f safe_div(a: Int, b: Int) -> Int
+    a / b
+
+@same_length(values, result)
+@sorted(result)
+@post(forall i in result: i >= 0)
+f normalize_and_sort(values: [Int]) -> [Int]
+    out := vec_new()
+    for v in values
+        out = vec_push(out, abs(v))
+    sort_ints(out)
+
+f main()
+    q := safe_div(84, 7)
+    normalized := normalize_and_sort([5, -3, 0, -12, 4])
+    print("Verified math demo")
+    print(f"  safe_div(84, 7) = {q}")
+    print(f"  normalize_and_sort(...) = {normalized}")

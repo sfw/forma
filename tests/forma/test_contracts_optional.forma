@@ -1,0 +1,18 @@
+# Contracts remain optional for mixed codebases
+
+f no_contract(x: Int) -> Int
+    x + 1
+
+@pre(x >= 0)
+@post(result >= x)
+f with_contract(x: Int) -> Int
+    x + 1
+
+f calls_mixed(x: Int) -> Int
+    y := no_contract(x)
+    with_contract(y)
+
+f main() -> Int
+    _ := calls_mixed(1)
+    _ := no_contract(10)
+    0

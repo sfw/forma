@@ -8,8 +8,12 @@ use forma::lexer::Span;
 use forma::mir::{Interpreter, Lowerer, Value};
 use forma::module::ModuleLoader;
 use forma::{BorrowChecker, Parser as FormaParser, Scanner, TypeChecker};
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::fs;
+use std::path::Path;
 use std::path::PathBuf;
 use std::process;
 
@@ -30,6 +34,28 @@ enum GrammarFormat {
     #[default]
     Ebnf,
     /// JSON schema format
+    Json,
+}
+
+/// Explain command output format
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum ExplainFormat {
+    /// Human-readable output (default)
+    #[default]
+    Human,
+    /// JSON output for tooling
+    Json,
+    /// Markdown output
+    Markdown,
+}
+
+/// Verify command output format
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum VerifyFormat {
+    /// Human-readable output (default)
+    #[default]
+    Human,
+    /// JSON output for tooling
     Json,
 }
 
@@ -222,6 +248,66 @@ enum Commands {
 
     /// Start the LSP server for IDE support
     Lsp,
+
+    /// Explain function contracts in plain English
+    Explain {
+        /// Input file
+        file: PathBuf,
+
+        /// Only explain a specific function name
+        #[arg(long)]
+        function: Option<String>,
+
+        /// Output format
+        #[arg(long, value_enum, default_value = "human")]
+        format: ExplainFormat,
+
+        /// Include generated input/output examples (optionally set count)
+        #[arg(long, num_args = 0..=1, default_missing_value = "3", require_equals = true)]
+        examples: Option<usize>,
+
+        /// RNG seed for deterministic examples
+        #[arg(long)]
+        seed: Option<u64>,
+
+        /// Number of examples per function (alias for --examples N)
+        #[arg(long)]
+        max_examples: Option<usize>,
+    },
+
+    /// Verify contracts and produce a trust report
+    Verify {
+        /// Input file or directory
+        path: PathBuf,
+
+        /// Generate a verification report
+        #[arg(long)]
+        report: bool,
+
+        /// Output format
+        #[arg(long, value_enum, default_value = "human")]
+        format: VerifyFormat,
+
+        /// Number of generated examples per function
+        #[arg(long, default_value_t = 20)]
+        examples: usize,
+
+        /// RNG seed for deterministic example generation
+        #[arg(long, default_value_t = 42)]
+        seed: u64,
+
+        /// Max interpreter steps per generated example
+        #[arg(long, default_value_t = 10_000)]
+        max_steps: usize,
+
+        /// Timeout per generated example in milliseconds
+        #[arg(long, default_value_t = 1_000)]
+        timeout: u64,
+
+        /// Allow generated examples to run with full capabilities
+        #[arg(long)]
+        allow_side_effects: bool,
+    },
 }
 
 fn main() {
@@ -281,6 +367,44 @@ fn main() {
         Commands::Repl => repl(),
         Commands::Fmt { file, write, check } => fmt(&file, write, check, error_format),
         Commands::Lsp => lsp(),
+        Commands::Explain {
+            file,
+            function,
+            format,
+            examples,
+            seed,
+            max_examples,
+        } => explain(
+            &file,
+            function.as_deref(),
+            format,
+            examples,
+            seed,
+            max_examples,
+            error_format,
+        ),
+        Commands::Verify {
+            path,
+            report,
+            format,
+            examples,
+            seed,
+            max_steps,
+            timeout,
+            allow_side_effects,
+        } => verify(
+            &path,
+            VerifyConfig {
+                report,
+                format,
+                examples,
+                seed,
+                max_steps,
+                timeout_ms: timeout,
+                allow_side_effects,
+            },
+            error_format,
+        ),
     };
 
     if let Err(e) = result {
@@ -370,6 +494,1041 @@ fn output_json_errors(errors: Vec<JsonError>, items_count: Option<usize>) {
         items_count,
     };
     print_json(&output);
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "UPPERCASE")]
+enum VerificationStatus {
+    Pass,
+    Skip,
+    Warn,
+    Fail,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct ExplainContract {
+    expression: String,
+    english: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pattern_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct ExplainExample {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind: Option<String>,
+    input: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct ExplainFunction {
+    name: String,
+    signature: String,
+    preconditions: Vec<ExplainContract>,
+    postconditions: Vec<ExplainContract>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    examples: Option<Vec<ExplainExample>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    example_note: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct ExplainOutput {
+    functions: Vec<ExplainFunction>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct VerifyFunctionReport {
+    name: String,
+    status: VerificationStatus,
+    contract_count: usize,
+    examples_run: usize,
+    examples_passed: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    skip_reason: Option<String>,
+    issues: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct VerifyFileReport {
+    path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file_error: Option<String>,
+    functions: Vec<VerifyFunctionReport>,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+struct VerifySummary {
+    total_functions: usize,
+    functions_with_contracts: usize,
+    verified: usize,
+    skipped: usize,
+    warnings: usize,
+    failures: usize,
+    total_examples: usize,
+    examples_passed: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct VerifyOutput {
+    files: Vec<VerifyFileReport>,
+    summary: VerifySummary,
+}
+
+#[derive(Clone, Debug)]
+struct SafetyConfig {
+    max_steps: usize,
+    timeout_ms: u64,
+    allow_side_effects: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct VerifyConfig {
+    report: bool,
+    format: VerifyFormat,
+    examples: usize,
+    seed: u64,
+    max_steps: usize,
+    timeout_ms: u64,
+    allow_side_effects: bool,
+}
+
+fn compile_program_for_analysis(
+    file: &PathBuf,
+    error_format: ErrorFormat,
+    emit_errors: bool,
+) -> Result<forma::mir::Program, String> {
+    let source = read_file(file)?;
+    let filename = file.to_string_lossy().to_string();
+    let ctx = ErrorContext::new(&filename, &source);
+    let mut json_errors: Vec<JsonError> = vec![];
+
+    // Lex
+    let scanner = Scanner::new(&source);
+    let (tokens, lex_errors) = scanner.scan_all();
+    if !lex_errors.is_empty() {
+        if emit_errors {
+            for error in &lex_errors {
+                match error_format {
+                    ErrorFormat::Human => ctx.error(error.span, &error.message),
+                    ErrorFormat::Json => json_errors.push(span_to_json_error(
+                        &filename,
+                        error.span,
+                        "LEX",
+                        &error.message,
+                        None,
+                    )),
+                }
+            }
+            if matches!(error_format, ErrorFormat::Json) {
+                output_json_errors(json_errors, None);
+            }
+        }
+        return Err(format!("{} lexer error(s)", lex_errors.len()));
+    }
+
+    // Parse
+    let parser = FormaParser::new(&tokens);
+    let parsed_ast = match parser.parse() {
+        Ok(ast) => ast,
+        Err(errors) => {
+            if emit_errors {
+                for error in &errors {
+                    match error_format {
+                        ErrorFormat::Human => ctx.error_with_help(
+                            error.span(),
+                            &format!("{}", error),
+                            error.help().unwrap_or("check syntax"),
+                        ),
+                        ErrorFormat::Json => {
+                            json_errors.push(span_to_json_error(
+                                &filename,
+                                error.span(),
+                                "PARSE",
+                                &format!("{}", error),
+                                error.help(),
+                            ));
+                        }
+                    }
+                }
+                if matches!(error_format, ErrorFormat::Json) {
+                    output_json_errors(json_errors, None);
+                }
+            }
+            return Err(format!("{} parse error(s)", errors.len()));
+        }
+    };
+
+    // Load imports
+    let mut module_loader = ModuleLoader::from_source_file(file);
+    let ast = match module_loader.load_imports(&parsed_ast) {
+        Ok(imported_items) => {
+            let mut combined_items = imported_items;
+            combined_items.extend(parsed_ast.items);
+            forma::parser::SourceFile {
+                items: combined_items,
+                span: parsed_ast.span,
+            }
+        }
+        Err(e) => {
+            let error_span = e.span.unwrap_or(forma::lexer::Span {
+                start: 0,
+                end: 0,
+                line: 1,
+                column: 1,
+            });
+            if emit_errors {
+                match error_format {
+                    ErrorFormat::Human => ctx.error(error_span, &format!("module error: {}", e)),
+                    ErrorFormat::Json => {
+                        json_errors.push(span_to_json_error(
+                            &filename,
+                            error_span,
+                            "MODULE",
+                            &format!("{}", e),
+                            None,
+                        ));
+                        output_json_errors(json_errors, None);
+                    }
+                }
+            }
+            return Err(format!("module error: {}", e));
+        }
+    };
+
+    // Type check
+    let mut type_checker = TypeChecker::new();
+    if let Err(errors) = type_checker.check(&ast) {
+        if emit_errors {
+            for error in &errors {
+                match error_format {
+                    ErrorFormat::Human => ctx.error(error.span, &format!("{}", error)),
+                    ErrorFormat::Json => json_errors.push(span_to_json_error(
+                        &filename,
+                        error.span,
+                        "TYPE",
+                        &format!("{}", error),
+                        None,
+                    )),
+                }
+            }
+            if matches!(error_format, ErrorFormat::Json) {
+                output_json_errors(json_errors, None);
+            }
+        }
+        return Err(format!("{} type error(s)", errors.len()));
+    }
+
+    // Borrow check
+    let mut borrow_checker = BorrowChecker::new();
+    if let Err(errors) = borrow_checker.check(&ast) {
+        if emit_errors {
+            for error in &errors {
+                match error_format {
+                    ErrorFormat::Human => ctx.error(error.span, &format!("{}", error)),
+                    ErrorFormat::Json => json_errors.push(span_to_json_error(
+                        &filename,
+                        error.span,
+                        "BORROW",
+                        &format!("{}", error),
+                        None,
+                    )),
+                }
+            }
+            if matches!(error_format, ErrorFormat::Json) {
+                output_json_errors(json_errors, None);
+            }
+        }
+        return Err(format!("{} borrow error(s)", errors.len()));
+    }
+
+    let program = match Lowerer::new().lower(&ast) {
+        Ok(prog) => prog,
+        Err(errors) => {
+            if emit_errors {
+                for e in &errors {
+                    match error_format {
+                        ErrorFormat::Human => ctx.error(e.span, &e.message),
+                        ErrorFormat::Json => json_errors.push(span_to_json_error(
+                            &filename, e.span, "LOWER", &e.message, None,
+                        )),
+                    }
+                }
+                if matches!(error_format, ErrorFormat::Json) {
+                    output_json_errors(json_errors, None);
+                }
+            }
+            return Err(format!("{} lowering error(s)", errors.len()));
+        }
+    };
+
+    Ok(program)
+}
+
+fn explain_contract_text(expr: &str) -> String {
+    let trimmed = expr.trim();
+    if trimmed.ends_with(".len() > 0") {
+        let name = trimmed.trim_end_matches(".len() > 0");
+        return format!("{} is not empty", name);
+    }
+    if trimmed.contains(" != 0") {
+        return trimmed.replace(" != 0", " is non-zero");
+    }
+    if trimmed.contains(" >= 0") {
+        return trimmed.replace(" >= 0", " is non-negative");
+    }
+    if trimmed.contains(" > 0") {
+        return trimmed.replace(" > 0", " is positive");
+    }
+    if trimmed.contains("result ==") {
+        return trimmed.replacen("result ==", "result equals", 1);
+    }
+    trimmed.to_string()
+}
+
+fn format_function_signature(func: &forma::mir::Function) -> String {
+    let params = if func.param_names.is_empty() {
+        func.params
+            .iter()
+            .enumerate()
+            .map(|(i, (_, ty))| format!("arg{}: {}", i, ty))
+            .collect::<Vec<_>>()
+            .join(", ")
+    } else {
+        func.param_names
+            .iter()
+            .map(|(name, ty)| format!("{}: {}", name, ty))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    format!("{}({}) -> {}", func.name, params, func.return_ty)
+}
+
+fn is_capability_error(msg: &str) -> bool {
+    msg.contains("capability '") && msg.contains("required for operation")
+}
+
+fn value_for_type(ty: &forma::types::Ty, rng: &mut StdRng, depth: usize) -> Option<Value> {
+    if depth > 4 {
+        return None;
+    }
+    use forma::types::Ty;
+    match ty {
+        Ty::Int | Ty::I8 | Ty::I16 | Ty::I32 | Ty::I64 | Ty::I128 => {
+            Some(Value::Int(rng.gen_range(-8..=8)))
+        }
+        Ty::UInt | Ty::U8 | Ty::U16 | Ty::U32 | Ty::U64 | Ty::U128 | Ty::Isize | Ty::Usize => {
+            Some(Value::Int(rng.gen_range(0..=8)))
+        }
+        Ty::Float | Ty::F32 | Ty::F64 => Some(Value::Float(rng.gen_range(-8.0..=8.0))),
+        Ty::Bool => Some(Value::Bool(rng.r#gen())),
+        Ty::Char => {
+            let chars = ['a', 'b', 'c', 'x', 'y', 'z'];
+            Some(Value::Char(chars[rng.gen_range(0..chars.len())]))
+        }
+        Ty::Str => {
+            let samples = ["", "a", "hello", "forma", "123"];
+            Some(Value::Str(
+                samples[rng.gen_range(0..samples.len())].to_string(),
+            ))
+        }
+        Ty::Unit => Some(Value::Unit),
+        Ty::List(inner) => {
+            let len = rng.gen_range(0..=3);
+            let mut out = Vec::with_capacity(len);
+            for _ in 0..len {
+                out.push(value_for_type(inner, rng, depth + 1)?);
+            }
+            Some(Value::Array(out))
+        }
+        Ty::Array(inner, len) => {
+            if *len > 32 {
+                return None;
+            }
+            let mut out = Vec::with_capacity(*len);
+            for _ in 0..*len {
+                out.push(value_for_type(inner, rng, depth + 1)?);
+            }
+            Some(Value::Array(out))
+        }
+        Ty::Tuple(items) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                out.push(value_for_type(item, rng, depth + 1)?);
+            }
+            Some(Value::Tuple(out))
+        }
+        Ty::Option(inner) => {
+            if rng.gen_bool(0.35) {
+                Some(Value::Enum {
+                    type_name: "Option".to_string(),
+                    variant: "None".to_string(),
+                    fields: vec![],
+                })
+            } else {
+                Some(Value::Enum {
+                    type_name: "Option".to_string(),
+                    variant: "Some".to_string(),
+                    fields: vec![value_for_type(inner, rng, depth + 1)?],
+                })
+            }
+        }
+        Ty::Result(ok, err) => {
+            if rng.gen_bool(0.65) {
+                Some(Value::Enum {
+                    type_name: "Result".to_string(),
+                    variant: "Ok".to_string(),
+                    fields: vec![value_for_type(ok, rng, depth + 1)?],
+                })
+            } else {
+                Some(Value::Enum {
+                    type_name: "Result".to_string(),
+                    variant: "Err".to_string(),
+                    fields: vec![value_for_type(err, rng, depth + 1)?],
+                })
+            }
+        }
+        Ty::Map(_, value_ty) => {
+            let mut out = HashMap::new();
+            let len = rng.gen_range(0..=2);
+            for i in 0..len {
+                out.insert(format!("k{}", i), value_for_type(value_ty, rng, depth + 1)?);
+            }
+            Some(Value::Map(out))
+        }
+        _ => None,
+    }
+}
+
+fn generate_inputs_for_function(
+    func: &forma::mir::Function,
+    count: usize,
+    seed: u64,
+) -> Result<Vec<Vec<Value>>, String> {
+    for mode in &func.param_pass_modes {
+        if *mode != forma::mir::mir::PassMode::Owned {
+            return Err("reference parameters are not supported by verify".to_string());
+        }
+    }
+
+    let mut rng = StdRng::seed_from_u64(seed);
+    let total = count.max(1);
+    let mut all = Vec::with_capacity(total);
+    for _ in 0..total {
+        let mut args = Vec::with_capacity(func.params.len());
+        for (_, ty) in &func.params {
+            let value = value_for_type(ty, &mut rng, 0).ok_or_else(|| {
+                format!("unsupported parameter type for example generation: {}", ty)
+            })?;
+            args.push(value);
+        }
+        satisfy_simple_preconditions(func, &mut args);
+        all.push(args);
+    }
+    Ok(all)
+}
+
+fn satisfy_simple_preconditions(func: &forma::mir::Function, args: &mut [Value]) {
+    let mut apply_to_arg = |idx: usize, rule: &str| {
+        if idx >= args.len() {
+            return;
+        }
+        match (rule, &mut args[idx]) {
+            ("nonzero", Value::Int(n)) if *n == 0 => *n = 1,
+            ("nonzero", Value::Float(n)) if *n == 0.0 => *n = 1.0,
+            ("positive", Value::Int(n)) if *n <= 0 => *n = 1,
+            ("positive", Value::Float(n)) if *n <= 0.0 => *n = 1.0,
+            ("nonnegative", Value::Int(n)) if *n < 0 => *n = 0,
+            ("nonnegative", Value::Float(n)) if *n < 0.0 => *n = 0.0,
+            ("nonempty", Value::Str(s)) if s.is_empty() => *s = "x".to_string(),
+            ("nonempty", Value::Array(v)) if v.is_empty() => v.push(Value::Int(0)),
+            _ => {}
+        }
+    };
+
+    for contract in &func.preconditions {
+        let expr = contract.expr_string.replace(' ', "");
+        for (idx, (name, _ty)) in func.param_names.iter().enumerate() {
+            if expr == format!("{}!=0", name) {
+                apply_to_arg(idx, "nonzero");
+            } else if expr == format!("{}>0", name) {
+                apply_to_arg(idx, "positive");
+            } else if expr == format!("{}>=0", name) {
+                apply_to_arg(idx, "nonnegative");
+            } else if expr == format!("{}.len()>0", name) {
+                apply_to_arg(idx, "nonempty");
+            }
+        }
+    }
+}
+
+fn zero_for_type(ty: &forma::types::Ty) -> Option<Value> {
+    use forma::types::Ty;
+    match ty {
+        Ty::Int | Ty::I8 | Ty::I16 | Ty::I32 | Ty::I64 | Ty::I128 => Some(Value::Int(0)),
+        Ty::UInt | Ty::U8 | Ty::U16 | Ty::U32 | Ty::U64 | Ty::U128 | Ty::Isize | Ty::Usize => {
+            Some(Value::Int(0))
+        }
+        Ty::Float | Ty::F32 | Ty::F64 => Some(Value::Float(0.0)),
+        _ => None,
+    }
+}
+
+fn negative_one_for_type(ty: &forma::types::Ty) -> Option<Value> {
+    use forma::types::Ty;
+    match ty {
+        Ty::Int | Ty::I8 | Ty::I16 | Ty::I32 | Ty::I64 | Ty::I128 => Some(Value::Int(-1)),
+        Ty::Float | Ty::F32 | Ty::F64 => Some(Value::Float(-1.0)),
+        _ => None,
+    }
+}
+
+fn empty_for_type(ty: &forma::types::Ty) -> Option<Value> {
+    use forma::types::Ty;
+    match ty {
+        Ty::Str => Some(Value::Str(String::new())),
+        Ty::List(_) | Ty::Array(_, _) => Some(Value::Array(vec![])),
+        _ => None,
+    }
+}
+
+fn generate_invalid_inputs_for_function(
+    func: &forma::mir::Function,
+    count: usize,
+    seed: u64,
+) -> Vec<Vec<Value>> {
+    if count == 0 || func.preconditions.is_empty() {
+        return vec![];
+    }
+
+    let base = match generate_inputs_for_function(func, 1, seed) {
+        Ok(mut v) if !v.is_empty() => v.remove(0),
+        _ => return vec![],
+    };
+
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for contract in &func.preconditions {
+        let expr = contract.expr_string.replace(' ', "");
+        for (idx, (name, ty)) in func.param_names.iter().enumerate() {
+            let mutated = if expr == format!("{}!=0", name) || expr == format!("{}>0", name) {
+                zero_for_type(ty)
+            } else if expr == format!("{}>=0", name) {
+                negative_one_for_type(ty)
+            } else if expr == format!("{}.len()>0", name) {
+                empty_for_type(ty)
+            } else {
+                None
+            };
+
+            if let Some(value) = mutated {
+                let mut args = base.clone();
+                if idx < args.len() {
+                    args[idx] = value;
+                    let key = args
+                        .iter()
+                        .map(|v| format!("{}", v))
+                        .collect::<Vec<_>>()
+                        .join("|");
+                    if seen.insert(key) {
+                        out.push(args);
+                        if out.len() >= count {
+                            return out;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    out
+}
+
+fn run_function_with_safety(
+    program: &forma::mir::Program,
+    func_name: &str,
+    args: &[Value],
+    safety: &SafetyConfig,
+) -> Result<Value, String> {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let mut interp = Interpreter::new(program.clone())
+        .map_err(|e| format!("Failed to create interpreter: {}", e))?;
+    if safety.allow_side_effects {
+        interp.grant_capability("all");
+    } else {
+        interp.revoke_all_capabilities();
+    }
+    interp.set_max_steps(safety.max_steps);
+    interp.set_timeout_ms(Some(safety.timeout_ms));
+    match catch_unwind(AssertUnwindSafe(|| interp.run(func_name, args))) {
+        Ok(result) => result.map_err(|e| e.to_string()),
+        Err(_) => Err("execution panicked".to_string()),
+    }
+}
+
+fn explain(
+    file: &PathBuf,
+    function: Option<&str>,
+    format: ExplainFormat,
+    examples: Option<usize>,
+    seed: Option<u64>,
+    max_examples: Option<usize>,
+    error_format: ErrorFormat,
+) -> Result<(), String> {
+    let program = compile_program_for_analysis(file, error_format, true)?;
+    let mut functions: Vec<_> = program.functions.iter().collect();
+    functions.sort_by(|a, b| a.0.cmp(b.0));
+
+    let mut output_functions = Vec::new();
+    let safety = SafetyConfig {
+        max_steps: 128,
+        timeout_ms: 1_000,
+        allow_side_effects: false,
+    };
+    let base_seed = seed.unwrap_or(42);
+    let example_count = max_examples.or(examples).unwrap_or(0);
+    let include_examples = example_count > 0;
+
+    for (name, func) in functions {
+        if name == "main" {
+            continue;
+        }
+        if let Some(target) = function
+            && target != name
+        {
+            continue;
+        }
+
+        let preconditions = func
+            .preconditions
+            .iter()
+            .map(|c| ExplainContract {
+                expression: c.expr_string.clone(),
+                english: explain_contract_text(&c.expr_string),
+                pattern_name: c.pattern_name.clone(),
+                message: c.message.clone(),
+            })
+            .collect::<Vec<_>>();
+        let postconditions = func
+            .postconditions
+            .iter()
+            .map(|c| ExplainContract {
+                expression: c.expr_string.clone(),
+                english: explain_contract_text(&c.expr_string),
+                pattern_name: c.pattern_name.clone(),
+                message: c.message.clone(),
+            })
+            .collect::<Vec<_>>();
+
+        let mut examples = None;
+        let mut example_note = None;
+        if include_examples {
+            match generate_inputs_for_function(
+                func,
+                example_count,
+                base_seed.wrapping_add(name.bytes().map(u64::from).sum::<u64>()),
+            ) {
+                Ok(inputs) => {
+                    let generated = inputs
+                        .iter()
+                        .map(
+                            |args| match run_function_with_safety(&program, name, args, &safety) {
+                                Ok(value) => ExplainExample {
+                                    kind: Some("valid".to_string()),
+                                    input: args.iter().map(|v| format!("{}", v)).collect(),
+                                    output: Some(format!("{}", value)),
+                                    error: None,
+                                },
+                                Err(e) => ExplainExample {
+                                    kind: Some("valid".to_string()),
+                                    input: args.iter().map(|v| format!("{}", v)).collect(),
+                                    output: None,
+                                    error: Some(e),
+                                },
+                            },
+                        )
+                        .collect::<Vec<_>>();
+                    let mut all_examples = generated;
+                    let invalid_inputs = generate_invalid_inputs_for_function(
+                        func,
+                        example_count.min(2),
+                        base_seed
+                            .wrapping_add(1_000)
+                            .wrapping_add(name.bytes().map(u64::from).sum::<u64>()),
+                    );
+                    for args in invalid_inputs {
+                        let example = match run_function_with_safety(&program, name, &args, &safety)
+                        {
+                            Ok(value) => ExplainExample {
+                                kind: Some("invalid".to_string()),
+                                input: args.iter().map(|v| format!("{}", v)).collect(),
+                                output: Some(format!("{}", value)),
+                                error: None,
+                            },
+                            Err(e) => ExplainExample {
+                                kind: Some("invalid".to_string()),
+                                input: args.iter().map(|v| format!("{}", v)).collect(),
+                                output: None,
+                                error: Some(e),
+                            },
+                        };
+                        all_examples.push(example);
+                    }
+                    examples = Some(all_examples);
+                }
+                Err(e) => {
+                    example_note = Some(e);
+                }
+            }
+        }
+
+        output_functions.push(ExplainFunction {
+            name: name.clone(),
+            signature: format_function_signature(func),
+            preconditions,
+            postconditions,
+            examples,
+            example_note,
+        });
+    }
+
+    if let Some(target) = function
+        && !output_functions.iter().any(|f| f.name == target)
+    {
+        return Err(format!("function '{}' not found", target));
+    }
+
+    let output = ExplainOutput {
+        functions: output_functions,
+    };
+    match format {
+        ExplainFormat::Json => print_json(&output),
+        ExplainFormat::Markdown => {
+            for function in &output.functions {
+                println!("### `{}`", function.signature);
+                if function.preconditions.is_empty() && function.postconditions.is_empty() {
+                    println!();
+                    println!("No contracts.");
+                    println!();
+                } else {
+                    if !function.preconditions.is_empty() {
+                        println!();
+                        println!("Requires:");
+                        for c in &function.preconditions {
+                            if let Some(pattern) = &c.pattern_name {
+                                println!("- [@{}] {}", pattern, c.english);
+                            } else {
+                                println!("- {}", c.english);
+                            }
+                        }
+                    }
+                    if !function.postconditions.is_empty() {
+                        println!();
+                        println!("Guarantees:");
+                        for c in &function.postconditions {
+                            if let Some(pattern) = &c.pattern_name {
+                                println!("- [@{}] {}", pattern, c.english);
+                            } else {
+                                println!("- {}", c.english);
+                            }
+                        }
+                    }
+                    println!();
+                }
+            }
+        }
+        ExplainFormat::Human => {
+            for function in &output.functions {
+                println!("{}", function.signature);
+                if function.preconditions.is_empty() && function.postconditions.is_empty() {
+                    println!("  No contracts.");
+                } else {
+                    if !function.preconditions.is_empty() {
+                        println!("  Requires:");
+                        for c in &function.preconditions {
+                            if let Some(pattern) = &c.pattern_name {
+                                println!("    - [@{}] {}", pattern, c.english);
+                            } else {
+                                println!("    - {}", c.english);
+                            }
+                        }
+                    }
+                    if !function.postconditions.is_empty() {
+                        println!("  Guarantees:");
+                        for c in &function.postconditions {
+                            if let Some(pattern) = &c.pattern_name {
+                                println!("    - [@{}] {}", pattern, c.english);
+                            } else {
+                                println!("    - {}", c.english);
+                            }
+                        }
+                    }
+                }
+                if let Some(note) = &function.example_note {
+                    println!("  Examples: skipped ({})", note);
+                } else if let Some(examples) = &function.examples {
+                    println!("  Examples:");
+                    for ex in examples {
+                        let prefix = if matches!(ex.kind.as_deref(), Some("invalid")) {
+                            "[invalid] "
+                        } else {
+                            "[valid] "
+                        };
+                        match (&ex.output, &ex.error) {
+                            (Some(out), _) => {
+                                println!("    - {}({}) -> {}", prefix, ex.input.join(", "), out)
+                            }
+                            (_, Some(err)) => {
+                                println!(
+                                    "    - {}({}) -> ERROR: {}",
+                                    prefix,
+                                    ex.input.join(", "),
+                                    err
+                                )
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                println!();
+            }
+        }
+    }
+    Ok(())
+}
+
+fn collect_forma_files(path: &Path) -> Result<Vec<PathBuf>, String> {
+    if path.is_file() {
+        return Ok(vec![path.to_path_buf()]);
+    }
+    if !path.is_dir() {
+        return Err(format!("path not found: {}", path.display()));
+    }
+
+    let mut out = Vec::new();
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let entries = fs::read_dir(&dir)
+            .map_err(|e| format!("failed to read directory '{}': {}", dir.display(), e))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| format!("failed to read directory entry: {}", e))?;
+            let entry_path = entry.path();
+            if entry_path.is_dir() {
+                stack.push(entry_path);
+            } else if entry_path.extension().is_some_and(|ext| ext == "forma") {
+                out.push(entry_path);
+            }
+        }
+    }
+    out.sort();
+    Ok(out)
+}
+
+fn verify(path: &Path, config: VerifyConfig, error_format: ErrorFormat) -> Result<(), String> {
+    if !config.report {
+        return Err("verify currently requires --report".to_string());
+    }
+
+    let files = collect_forma_files(path)?;
+    if files.is_empty() {
+        return Err(format!("no .forma files found under '{}'", path.display()));
+    }
+
+    let safety = SafetyConfig {
+        max_steps: config.max_steps,
+        timeout_ms: config.timeout_ms,
+        allow_side_effects: config.allow_side_effects,
+    };
+    let mut report_files = Vec::new();
+    let mut summary = VerifySummary::default();
+    let mut had_failures = false;
+
+    if config.allow_side_effects && matches!(config.format, VerifyFormat::Human) {
+        eprintln!("WARNING: Running verification with side effects enabled");
+    }
+
+    for file in files {
+        let display = file.to_string_lossy().to_string();
+        let program = match compile_program_for_analysis(&file, error_format, false) {
+            Ok(p) => p,
+            Err(e) => {
+                report_files.push(VerifyFileReport {
+                    path: display,
+                    file_error: Some(e),
+                    functions: vec![],
+                });
+                had_failures = true;
+                continue;
+            }
+        };
+
+        let mut function_reports = Vec::new();
+        let mut funcs: Vec<_> = program.functions.iter().collect();
+        funcs.sort_by(|a, b| a.0.cmp(b.0));
+
+        for (name, func) in funcs {
+            if name == "main" {
+                continue;
+            }
+            summary.total_functions += 1;
+
+            let contract_count = func.preconditions.len() + func.postconditions.len();
+            if contract_count == 0 {
+                summary.warnings += 1;
+                function_reports.push(VerifyFunctionReport {
+                    name: name.clone(),
+                    status: VerificationStatus::Warn,
+                    contract_count,
+                    examples_run: 0,
+                    examples_passed: 0,
+                    skip_reason: None,
+                    issues: vec!["no contracts defined".to_string()],
+                });
+                continue;
+            }
+            summary.functions_with_contracts += 1;
+
+            let inputs = match generate_inputs_for_function(
+                func,
+                config.examples,
+                config
+                    .seed
+                    .wrapping_add(name.bytes().map(u64::from).sum::<u64>()),
+            ) {
+                Ok(inputs) => inputs,
+                Err(e) => {
+                    summary.skipped += 1;
+                    function_reports.push(VerifyFunctionReport {
+                        name: name.clone(),
+                        status: VerificationStatus::Skip,
+                        contract_count,
+                        examples_run: 0,
+                        examples_passed: 0,
+                        skip_reason: Some(e),
+                        issues: vec![],
+                    });
+                    continue;
+                }
+            };
+
+            let mut passed = 0;
+            let mut issues = Vec::new();
+            let mut skip_reason = None;
+
+            for args in &inputs {
+                match run_function_with_safety(&program, name, args, &safety) {
+                    Ok(_) => passed += 1,
+                    Err(e) if is_capability_error(&e) => {
+                        skip_reason = Some(e);
+                        break;
+                    }
+                    Err(e) => issues.push(e),
+                }
+            }
+
+            summary.total_examples += inputs.len();
+            summary.examples_passed += passed;
+
+            let status = if skip_reason.is_some() {
+                summary.skipped += 1;
+                VerificationStatus::Skip
+            } else if issues.is_empty() {
+                summary.verified += 1;
+                VerificationStatus::Pass
+            } else {
+                summary.failures += 1;
+                had_failures = true;
+                VerificationStatus::Fail
+            };
+
+            function_reports.push(VerifyFunctionReport {
+                name: name.clone(),
+                status,
+                contract_count,
+                examples_run: inputs.len(),
+                examples_passed: passed,
+                skip_reason,
+                issues,
+            });
+        }
+
+        report_files.push(VerifyFileReport {
+            path: display,
+            file_error: None,
+            functions: function_reports,
+        });
+    }
+
+    let output = VerifyOutput {
+        files: report_files,
+        summary,
+    };
+
+    match config.format {
+        VerifyFormat::Json => print_json(&output),
+        VerifyFormat::Human => {
+            println!("FORMA Verification Report");
+            println!();
+            for file in &output.files {
+                println!("{}", file.path);
+                if let Some(err) = &file.file_error {
+                    println!("  ✗ FILE ERROR: {}", err);
+                    println!();
+                    continue;
+                }
+                for function in &file.functions {
+                    let badge = match function.status {
+                        VerificationStatus::Pass => "✓ PASS",
+                        VerificationStatus::Skip => "⊘ SKIP",
+                        VerificationStatus::Warn => "⚠ WARN",
+                        VerificationStatus::Fail => "✗ FAIL",
+                    };
+                    println!(
+                        "  {} {:<24} contracts:{} examples:{}/{}",
+                        badge,
+                        function.name,
+                        function.contract_count,
+                        function.examples_passed,
+                        function.examples_run
+                    );
+                    if let Some(reason) = &function.skip_reason {
+                        println!("    reason: {}", reason);
+                    }
+                    for issue in &function.issues {
+                        println!("    issue: {}", issue);
+                    }
+                }
+                println!();
+            }
+            println!("Summary");
+            println!("  Functions: {}", output.summary.total_functions);
+            println!(
+                "  With contracts: {}",
+                output.summary.functions_with_contracts
+            );
+            println!("  Verified: {}", output.summary.verified);
+            println!("  Skipped: {}", output.summary.skipped);
+            println!("  Warnings: {}", output.summary.warnings);
+            println!("  Failures: {}", output.summary.failures);
+            println!(
+                "  Examples passed: {}/{}",
+                output.summary.examples_passed, output.summary.total_examples
+            );
+        }
+    }
+
+    if had_failures {
+        return Err("verification found failures".to_string());
+    }
+    Ok(())
 }
 
 fn run(

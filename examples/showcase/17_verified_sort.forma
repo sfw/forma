@@ -1,0 +1,18 @@
+# Verified Sort - Contract-driven sorting guarantees
+# Demonstrates: @pre/@post, @sorted, @permutation, explain/verify UX
+
+@pre(items.len() > 0, "input must be non-empty")
+@sorted(result)
+@permutation(items, result)
+f verified_sort(items: [Int]) -> [Int]
+    sort_ints(items)
+
+f main()
+    input := [9, 3, 5, 1, 5, 2]
+    output := verified_sort(input)
+    print("Verified sort demo")
+    print(f"  input:  {input}")
+    print(f"  output: {output}")
+    print("Try:")
+    print("  forma explain --examples examples/showcase/17_verified_sort.forma")
+    print("  forma verify --report examples/showcase/17_verified_sort.forma")

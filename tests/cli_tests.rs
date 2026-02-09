@@ -336,6 +336,183 @@ fn test_cli_run_missing_import_json() {
     );
 }
 
+#[test]
+fn test_cli_explain_human() {
+    let output = Command::new(forma_bin())
+        .args(["explain"])
+        .arg(fixture("with_contracts.forma"))
+        .output()
+        .expect("failed to execute forma");
+    assert!(output.status.success(), "forma explain should exit 0");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Requires:"),
+        "explain output should include preconditions, got: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("Guarantees:"),
+        "explain output should include postconditions, got: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_cli_explain_json() {
+    let output = Command::new(forma_bin())
+        .args(["explain", "--format", "json"])
+        .arg(fixture("with_contracts.forma"))
+        .output()
+        .expect("failed to execute forma");
+    assert!(
+        output.status.success(),
+        "forma explain --format json should exit 0"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("\"functions\""),
+        "JSON explain output should contain functions array, got: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_cli_explain_examples() {
+    let output = Command::new(forma_bin())
+        .args(["explain", "--examples", "--seed", "7"])
+        .arg(fixture("with_contracts.forma"))
+        .output()
+        .expect("failed to execute forma");
+    assert!(
+        output.status.success(),
+        "forma explain --examples should exit 0"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Examples:"),
+        "explain examples output should contain Examples section, got: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("[invalid]"),
+        "explain examples output should include invalid counterexamples, got: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_cli_explain_examples_count() {
+    let output = Command::new(forma_bin())
+        .args(["explain", "--examples=2", "--format", "json", "--seed", "7"])
+        .arg(fixture("with_contracts.forma"))
+        .output()
+        .expect("failed to execute forma");
+    assert!(
+        output.status.success(),
+        "forma explain --examples 2 should exit 0"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // 2 valid + up to 2 invalid counterexamples
+    let valid_count = stdout.matches("\"kind\": \"valid\"").count();
+    assert!(
+        valid_count >= 2,
+        "expected at least 2 valid examples in JSON output, got: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_cli_explain_missing_import_json() {
+    let output = Command::new(forma_bin())
+        .args([
+            "--error-format",
+            "json",
+            "explain",
+            "--format",
+            "json",
+            "--examples",
+        ])
+        .arg(fixture("missing_import.forma"))
+        .output()
+        .expect("failed to execute forma");
+    assert!(
+        !output.status.success(),
+        "explain on missing import should exit nonzero"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("\"MODULE\""),
+        "JSON explain error output should contain MODULE code, got: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_cli_verify_report_json() {
+    let output = Command::new(forma_bin())
+        .args(["verify", "--report", "--format", "json"])
+        .arg(fixture("verify_contract_pass.forma"))
+        .output()
+        .expect("failed to execute forma");
+    assert!(
+        output.status.success(),
+        "verify --report on valid contracts should exit 0"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("\"summary\""),
+        "verify JSON output should contain summary, got: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_cli_verify_report_missing_import_json() {
+    let output = Command::new(forma_bin())
+        .args(["verify", "--report", "--format", "json"])
+        .arg(fixture("missing_import.forma"))
+        .output()
+        .expect("failed to execute forma");
+    assert!(
+        !output.status.success(),
+        "verify --report should fail for missing import"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("\"file_error\""),
+        "verify JSON output should include file_error for compile failures, got: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_cli_verify_report_timeout() {
+    let output = Command::new(forma_bin())
+        .args([
+            "verify",
+            "--report",
+            "--format",
+            "json",
+            "--examples",
+            "1",
+            "--timeout",
+            "0",
+        ])
+        .arg(fixture("verify_contract_pass.forma"))
+        .output()
+        .expect("failed to execute forma");
+    assert!(
+        !output.status.success(),
+        "verify --timeout 0 should fail with timeout"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("timeout"),
+        "verify timeout output should mention timeout, got: {}",
+        stdout
+    );
+}
+
 // ---- JSON failure matrix tests (Sprint 45) ----
 // Verifies that every (command, error-class) pair emits valid JSON with correct structure.
 

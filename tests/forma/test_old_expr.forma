@@ -1,0 +1,15 @@
+# old(...) expression semantics
+
+@post(result.len() == old(items).len() + 1)
+@post(result[result.len() - 1] == value)
+f append_item(items: [Int], value: Int) -> [Int]
+    vec_push(items, value)
+
+@post(result == old(a) + old(b))
+f add(a: Int, b: Int) -> Int
+    a + b
+
+f main() -> Int
+    _ := append_item([1, 2, 3], 4)
+    _ := add(2, 3)
+    0

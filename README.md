@@ -94,6 +94,21 @@ Errors are structured JSON that AI can parse and fix automatically:
 forma check --error-format json myfile.forma
 ```
 
+### Contract Explainability + Trust Reports
+
+FORMA includes first-class verification UX so AI-generated code is not only compilable, but auditable:
+
+```bash
+# Explain contract intent in human/markdown/json form
+forma explain myfile.forma --format markdown --examples=3 --seed 42
+
+# Run deterministic contract verification over a file or directory tree
+forma verify src --report --format json --examples 20 --seed 42
+```
+
+`verify` defaults to side-effect-safe execution for generated examples (capabilities revoked unless `--allow-side-effects` is explicitly set), which makes it CI-friendly and reproducible.
+For `explain`, use `--examples=N` (or `--max-examples N`) to set a count.
+
 ## Quick Start
 
 ```bash
@@ -196,7 +211,7 @@ f main()
 - **Pattern matching**: Exhaustive, with guards
 - **Result types**: No exceptions, explicit error handling with `?` and `!`
 - **Linear types**: Affine and linear ownership tracking
-- **Capability system**: Fine-grained permissions for file, network, and FFI access
+- **Capability system**: Fine-grained `read/write/network/exec/env/unsafe` permissions
 - **Modules**: Simple `us std.collections` imports
 - **Async/await**: Native coroutines with spawn
 - **HTTP client & server**: Built-in networking primitives
@@ -207,7 +222,8 @@ f main()
 - **FFI**: C interop with `extern` functions and safety layer
 - **LLVM backend**: Native compilation (optional, requires LLVM 18)
 - **Formatter**: `forma fmt` for consistent code style
-- **LSP server**: IDE support with diagnostics, completions, hover, goto definition
+- **Verification UX**: `forma explain` and `forma verify --report` for contract trust reports
+- **LSP server**: diagnostics, completions, hover, goto definition, symbols, signature help, formatting, references (single-file)
 - **REPL**: Interactive development with `forma repl`
 - **Grammar export**: EBNF and JSON for constrained AI decoding
 
@@ -217,12 +233,12 @@ f main()
 
 | Job | What it checks |
 |-----|---------------|
-| **Test** | `cargo test --all` — 307+ unit and integration tests |
+| **Test** | `cargo test --all` — 400+ unit and integration tests |
 | **Clippy** | `cargo clippy -- -D warnings` — zero warnings |
 | **Format** | `cargo fmt --all -- --check` — consistent style |
 | **LLVM Feature Check** | Clippy + compile check with `--features llvm` (LLVM 18) |
-| **Runtime Crate Tests** | `cd runtime && cargo test` — 33 FFI runtime tests |
-| **FORMA Integration Tests** | Runs 32 `.forma` test files via the interpreter (7 skipped: network/db/process deps) |
+| **Runtime Crate Tests** | `cd runtime && cargo test` — runtime FFI coverage |
+| **FORMA Integration Tests** | Runs all `.forma` integration tests in CI, including expected-failure contract fixtures |
 | **Showcase Examples** | Runs all `examples/showcase/*.forma` end-to-end |
 
 ## Status
@@ -244,11 +260,12 @@ FORMA is in **active development**. The core language and standard library are f
 - [x] TCP/UDP sockets and TLS
 - [x] SQLite database
 - [x] Compression (gzip, zlib)
-- [x] LSP server (diagnostics, completions, hover, goto definition)
+- [x] LSP server (diagnostics, completions, hover, goto definition, symbols, signature help, formatting, references [single-file])
+- [x] Verification UX (`explain`, `verify --report`)
 - [x] Code formatter
 - [x] REPL
-- [x] 16 showcase examples passing (hello world through game of life)
-- [ ] Full LSP (refactoring, rename, references)
+- [x] 21 showcase examples passing (classic algorithms + verification UX demos)
+- [ ] Full LSP (rename/refactor and cross-file references)
 - [ ] Package registry
 
 ## For AI Developers
@@ -262,6 +279,10 @@ forma grammar --format json
 
 # Structured errors for self-correction
 forma check --error-format json myfile.forma
+
+# Contract explanation + trust reports
+forma explain myfile.forma --format json --examples=3 --seed 42
+forma verify src --report --format json --examples 20 --seed 42
 
 # Type queries for constrained decoding
 forma typeof myfile.forma --position "5:10"

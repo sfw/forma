@@ -1,0 +1,20 @@
+# Verification UX Demo
+# Demonstrates: PASS + WARN categories in verify reports
+
+@pre(x >= 0, "x must be non-negative")
+@post(result >= x)
+f grows(x: Int) -> Int
+    x + 1
+
+# No contracts on purpose. verify --report should show WARN for this function.
+f helper_without_contracts(x: Int) -> Int
+    x * 2
+
+f main()
+    print("Verification UX demo")
+    print(f"  grows(4) = {grows(4)}")
+    print(f"  helper_without_contracts(4) = {helper_without_contracts(4)}")
+    print("")
+    print("Try:")
+    print("  forma explain --examples examples/showcase/20_verification_demo.forma")
+    print("  forma verify --report examples/showcase/20_verification_demo.forma")

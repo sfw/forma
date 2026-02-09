@@ -1,0 +1,6 @@
+@post(result >= 0)
+f clamp_nonnegative(x: Int) -> Int
+    if x < 0 then 0 else x
+
+f main() -> Int
+    clamp_nonnegative(-5)

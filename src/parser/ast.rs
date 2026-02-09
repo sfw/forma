@@ -56,6 +56,8 @@ pub struct Contract {
     pub condition: Box<Expr>,
     /// Optional message for error reporting
     pub message: Option<String>,
+    /// Optional named-pattern source (e.g. "sorted")
+    pub pattern_name: Option<String>,
     pub span: Span,
 }
 

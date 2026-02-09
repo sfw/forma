@@ -159,6 +159,25 @@ FORMA uses single-character keywords and type shortcuts:
 
 Across typical codebases, FORMA uses **38% fewer tokens** than equivalent Rust. That's 38% lower API costs, 38% faster generation, and 38% more code fitting in context windows.
 
+## The Sixth Advantage: Verifiable AI Intent
+
+Most AI coding stacks stop at "it compiles." FORMA adds a verification UX that makes generated behavior inspectable and repeatable:
+
+```bash
+# Explain contract intent in plain English/Markdown/JSON
+forma explain myfile.forma --format markdown --examples --seed 42
+
+# Generate a trust report over files/directories
+forma verify src --report --format json --examples 20 --seed 42
+```
+
+This matters operationally:
+- Product and QA teams can read what contracts mean without reading the full AST.
+- CI can consume JSON trust reports with deterministic seeds.
+- Verification runs with side effects disabled by default, so generated examples are safer to run in automation.
+
+Instead of "the model said this function is safe," you get a reproducible artifact that shows what was checked and what still needs contracts.
+
 ## The Performance Question
 
 "Simpler language = slower code?"

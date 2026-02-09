@@ -297,12 +297,73 @@ impl Lowerer {
             ExprKind::Field(receiver, field) => {
                 format!("{}.{}", self.expr_to_string(receiver), field.name)
             }
+            ExprKind::TupleField(receiver, field) => {
+                format!("{}.{}", self.expr_to_string(receiver), field)
+            }
+            ExprKind::Index(base, index) => {
+                format!(
+                    "{}[{}]",
+                    self.expr_to_string(base),
+                    self.expr_to_string(index)
+                )
+            }
+            ExprKind::Range(start, end, inclusive) => {
+                let start_s = start
+                    .as_ref()
+                    .map(|e| self.expr_to_string(e))
+                    .unwrap_or_default();
+                let end_s = end
+                    .as_ref()
+                    .map(|e| self.expr_to_string(e))
+                    .unwrap_or_default();
+                if *inclusive {
+                    format!("{}..={}", start_s, end_s)
+                } else {
+                    format!("{}..{}", start_s, end_s)
+                }
+            }
             ExprKind::Call(callee, args) => {
+                if let ExprKind::Ident(ident) = &callee.kind {
+                    if ident.name == "__forall"
+                        && args.len() == 2
+                        && let ExprKind::Closure(closure) = &args[1].value.kind
+                        && closure.params.len() == 1
+                    {
+                        return format!(
+                            "forall {} in {}: {}",
+                            closure.params[0].name.name,
+                            self.expr_to_string(&args[0].value),
+                            self.expr_to_string(&closure.body)
+                        );
+                    }
+                    if ident.name == "__exists"
+                        && args.len() == 2
+                        && let ExprKind::Closure(closure) = &args[1].value.kind
+                        && closure.params.len() == 1
+                    {
+                        return format!(
+                            "exists {} in {}: {}",
+                            closure.params[0].name.name,
+                            self.expr_to_string(&args[0].value),
+                            self.expr_to_string(&closure.body)
+                        );
+                    }
+                    if ident.name == "old" && args.len() == 1 {
+                        return format!("old({})", self.expr_to_string(&args[0].value));
+                    }
+                }
                 let args_str: Vec<String> =
                     args.iter().map(|a| self.expr_to_string(&a.value)).collect();
                 format!("{}({})", self.expr_to_string(callee), args_str.join(", "))
             }
             ExprKind::MethodCall(receiver, method, args) => {
+                if method.name == "contains" && args.len() == 1 {
+                    return format!(
+                        "{} in {}",
+                        self.expr_to_string(&args[0].value),
+                        self.expr_to_string(receiver)
+                    );
+                }
                 let args_str: Vec<String> =
                     args.iter().map(|a| self.expr_to_string(&a.value)).collect();
                 format!(
@@ -396,6 +457,7 @@ impl Lowerer {
             mir_fn.preconditions.push(MirContract {
                 expr_string: self.expr_to_string(&contract.condition),
                 message: contract.message.clone(),
+                pattern_name: contract.pattern_name.clone(),
                 condition: Some(contract.condition.clone()),
             });
         }
@@ -403,6 +465,7 @@ impl Lowerer {
             mir_fn.postconditions.push(MirContract {
                 expr_string: self.expr_to_string(&contract.condition),
                 message: contract.message.clone(),
+                pattern_name: contract.pattern_name.clone(),
                 condition: Some(contract.condition.clone()),
             });
         }

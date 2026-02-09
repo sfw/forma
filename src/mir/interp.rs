@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock, Mutex as StdMutex, RwLock};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
@@ -412,6 +412,10 @@ struct Frame {
     current_block: BlockId,
     /// Result value for postcondition checking (the 'result' keyword)
     contract_result: Option<Value>,
+    /// Captured pre-state values for old(expr), keyed by expression pointer.
+    contract_old_values: HashMap<usize, Value>,
+    /// Contract-local bindings (e.g., quantifier variables).
+    contract_bindings: HashMap<String, Value>,
 }
 
 impl Frame {
@@ -422,6 +426,8 @@ impl Frame {
             ref_bindings: HashMap::new(),
             current_block: entry,
             contract_result: None,
+            contract_old_values: HashMap::new(),
+            contract_bindings: HashMap::new(),
         }
     }
 }
@@ -431,6 +437,12 @@ pub struct Interpreter {
     program: Arc<Program>,
     call_stack: Vec<Frame>,
     max_steps: usize,
+    /// Total executed interpreter steps for the current top-level run.
+    step_counter: usize,
+    /// Optional per-run timeout budget in milliseconds.
+    run_timeout_ms: Option<u64>,
+    /// Active deadline for the currently executing run.
+    run_deadline: Option<Instant>,
     /// Channel state: maps channel ID to (queue, capacity, closed)
     channels: std::collections::HashMap<u64, (Vec<Value>, usize, bool)>,
     /// Next channel ID
@@ -486,7 +498,10 @@ impl Interpreter {
         Ok(Self {
             program: Arc::new(program),
             call_stack: Vec::new(),
-            max_steps: 1_000_000,
+            max_steps: 100_000_000,
+            step_counter: 0,
+            run_timeout_ms: None,
+            run_deadline: None,
             channels: std::collections::HashMap::new(),
             next_channel_id: 0,
             mutexes: std::collections::HashMap::new(),
@@ -520,6 +535,16 @@ impl Interpreter {
         self
     }
 
+    /// Set the maximum number of steps to prevent infinite loops.
+    pub fn set_max_steps(&mut self, max: usize) {
+        self.max_steps = max;
+    }
+
+    /// Set an optional per-run timeout budget in milliseconds.
+    pub fn set_timeout_ms(&mut self, timeout_ms: Option<u64>) {
+        self.run_timeout_ms = timeout_ms;
+    }
+
     /// Set an environment variable in the interpreter's overlay.
     pub fn set_env(&self, key: &str, value: &str) {
         if let Ok(mut env) = self.env_vars.write() {
@@ -530,6 +555,11 @@ impl Interpreter {
     /// Grant a capability to this interpreter.
     pub fn grant_capability(&mut self, capability: &str) {
         self.capabilities.insert(capability.to_string());
+    }
+
+    /// Revoke all capabilities from this interpreter.
+    pub fn revoke_all_capabilities(&mut self) {
+        self.capabilities.clear();
     }
 
     /// Enable or disable @pre/@post contract checking.
@@ -570,7 +600,10 @@ impl Interpreter {
         Ok(Self {
             program,
             call_stack: Vec::new(),
-            max_steps: 1_000_000,
+            max_steps: 100_000_000,
+            step_counter: 0,
+            run_timeout_ms: None,
+            run_deadline: None,
             channels: std::collections::HashMap::new(),
             next_channel_id: 0,
             mutexes: std::collections::HashMap::new(),
@@ -633,11 +666,15 @@ impl Interpreter {
 
         self.call_stack.push(frame);
 
-        let result = self.execute(&func)?;
-
+        self.step_counter = 0;
+        self.run_deadline = self
+            .run_timeout_ms
+            .map(|ms| Instant::now() + Duration::from_millis(ms));
+        let result = self.execute(&func);
+        self.step_counter = 0;
+        self.run_deadline = None;
         self.call_stack.pop();
-
-        Ok(result)
+        result
     }
 
     /// Call a function with the given arguments (internal helper for builtins)
@@ -683,10 +720,15 @@ impl Interpreter {
                         Ok(Value::Bool(false)) => {
                             self.call_stack.pop();
                             let msg = contract.message.as_deref().unwrap_or("precondition failed");
+                            let pattern = contract
+                                .pattern_name
+                                .as_ref()
+                                .map(|p| format!(" [@{}]", p))
+                                .unwrap_or_default();
                             return Err(InterpError {
                                 message: format!(
-                                    "Contract violation in '{}': {} (condition: {})",
-                                    func.name, msg, contract.expr_string
+                                    "Contract violation{} in '{}': {} (condition: {})",
+                                    pattern, func.name, msg, contract.expr_string
                                 ),
                             });
                         }
@@ -705,6 +747,33 @@ impl Interpreter {
                         }
                     }
                 }
+            }
+        }
+
+        // Capture old(expr) values at function entry for postcondition checks.
+        if self.check_contracts {
+            let mut old_exprs: Vec<&crate::parser::Expr> = Vec::new();
+            for contract in &func.postconditions {
+                if let Some(ref condition) = contract.condition {
+                    Self::collect_old_expr_args(condition, &mut old_exprs);
+                }
+            }
+
+            for old_expr in old_exprs {
+                let key = Self::contract_expr_key(old_expr);
+                if self.current_frame()?.contract_old_values.contains_key(&key) {
+                    continue;
+                }
+                let value = match self.eval_contract_expr(old_expr) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        self.call_stack.pop();
+                        return Err(e);
+                    }
+                };
+                self.current_frame_mut()?
+                    .contract_old_values
+                    .insert(key, value);
             }
         }
 
@@ -727,10 +796,15 @@ impl Interpreter {
                                 .message
                                 .as_deref()
                                 .unwrap_or("postcondition failed");
+                            let pattern = contract
+                                .pattern_name
+                                .as_ref()
+                                .map(|p| format!(" [@{}]", p))
+                                .unwrap_or_default();
                             return Err(InterpError {
                                 message: format!(
-                                    "Contract violation in '{}': {} (condition: {})",
-                                    func.name, msg, contract.expr_string
+                                    "Contract violation{} in '{}': {} (condition: {})",
+                                    pattern, func.name, msg, contract.expr_string
                                 ),
                             });
                         }
@@ -796,6 +870,11 @@ impl Interpreter {
                     message: "no call frame for contract evaluation".to_string(),
                 })?;
 
+                // Quantifier-local bindings shadow function parameters.
+                if let Some(value) = frame.contract_bindings.get(name) {
+                    return Ok(value.clone());
+                }
+
                 // We need to find the local by name - check params and locals
                 // The frame stores locals by Local, but we need to find by name
                 // For contracts, parameters are stored by their Local which corresponds to param position
@@ -826,6 +905,47 @@ impl Interpreter {
             }
 
             ExprKind::Binary(left, op, right) => {
+                if let AstBinOp::Sub = op
+                    && let ExprKind::Range(start, end, inclusive) = &left.kind
+                {
+                    let delta = match self.eval_contract_expr(right)? {
+                        Value::Int(n) => n,
+                        other => {
+                            return Err(InterpError {
+                                message: format!(
+                                    "range offset must be Int in contract expression, got {:?}",
+                                    other
+                                ),
+                            });
+                        }
+                    };
+                    let start_val = match start {
+                        Some(expr) => match self.eval_contract_expr(expr)? {
+                            Value::Int(n) => n,
+                            other => {
+                                return Err(InterpError {
+                                    message: format!("range start must be Int, got {:?}", other),
+                                });
+                            }
+                        },
+                        None => 0,
+                    };
+                    let end_val = match end {
+                        Some(expr) => match self.eval_contract_expr(expr)? {
+                            Value::Int(n) => n - delta,
+                            other => {
+                                return Err(InterpError {
+                                    message: format!("range end must be Int, got {:?}", other),
+                                });
+                            }
+                        },
+                        None => start_val - delta,
+                    };
+                    return Ok(Value::Array(Self::build_int_range(
+                        start_val, end_val, *inclusive,
+                    )));
+                }
+
                 let left_val = self.eval_contract_expr(left)?;
                 let right_val = self.eval_contract_expr(right)?;
 
@@ -921,14 +1041,100 @@ impl Interpreter {
                 // Handle function calls in contracts (e.g., len(arr))
                 if let ExprKind::Ident(ident) = &callee.kind {
                     let func_name = &ident.name;
-                    let mut arg_vals = Vec::new();
-                    for arg in args {
-                        arg_vals.push(self.eval_contract_expr(&arg.value)?);
-                    }
-
-                    // Handle common builtin functions
                     match func_name.as_str() {
+                        "old" => {
+                            if args.len() != 1 {
+                                return Err(InterpError {
+                                    message: "old() takes exactly 1 argument".to_string(),
+                                });
+                            }
+                            let key = Self::contract_expr_key(&args[0].value);
+                            let frame = self.call_stack.last().ok_or_else(|| InterpError {
+                                message: "no call frame for contract evaluation".to_string(),
+                            })?;
+                            if let Some(value) = frame.contract_old_values.get(&key) {
+                                Ok(value.clone())
+                            } else {
+                                Err(InterpError {
+                                    message: "old(...) is only available in postconditions"
+                                        .to_string(),
+                                })
+                            }
+                        }
+                        "__forall" | "__exists" => {
+                            if args.len() != 2 {
+                                return Err(InterpError {
+                                    message: format!("{}() takes exactly 2 arguments", func_name),
+                                });
+                            }
+                            let iterable = self.eval_contract_expr(&args[0].value)?;
+                            let values = self.contract_iter_values(iterable)?;
+                            let closure = match &args[1].value.kind {
+                                ExprKind::Closure(c) => c,
+                                _ => {
+                                    return Err(InterpError {
+                                        message: format!(
+                                            "{}() expects a closure as second argument",
+                                            func_name
+                                        ),
+                                    });
+                                }
+                            };
+                            if closure.params.len() != 1 {
+                                return Err(InterpError {
+                                    message: format!(
+                                        "{}() closure must have exactly one parameter",
+                                        func_name
+                                    ),
+                                });
+                            }
+                            let var_name = closure.params[0].name.name.clone();
+                            let is_forall = func_name == "__forall";
+                            let empty_result = is_forall;
+                            if values.is_empty() {
+                                return Ok(Value::Bool(empty_result));
+                            }
+
+                            for value in values {
+                                let previous = {
+                                    let frame = self.current_frame_mut()?;
+                                    frame.contract_bindings.insert(var_name.clone(), value)
+                                };
+                                let pred = self.eval_contract_expr(&closure.body);
+                                {
+                                    let frame = self.current_frame_mut()?;
+                                    if let Some(prev) = previous {
+                                        frame.contract_bindings.insert(var_name.clone(), prev);
+                                    } else {
+                                        frame.contract_bindings.remove(&var_name);
+                                    }
+                                }
+                                let pred = pred?;
+                                let passed = match pred {
+                                    Value::Bool(b) => b,
+                                    other => {
+                                        return Err(InterpError {
+                                            message: format!(
+                                                "quantifier predicate must evaluate to Bool, got {:?}",
+                                                other
+                                            ),
+                                        });
+                                    }
+                                };
+                                if is_forall && !passed {
+                                    return Ok(Value::Bool(false));
+                                }
+                                if !is_forall && passed {
+                                    return Ok(Value::Bool(true));
+                                }
+                            }
+                            Ok(Value::Bool(is_forall))
+                        }
                         "len" => {
+                            let mut arg_vals = Vec::new();
+                            for arg in args {
+                                arg_vals.push(self.eval_contract_expr(&arg.value)?);
+                            }
                             if arg_vals.len() != 1 {
                                 return Err(InterpError {
                                     message: "len() takes exactly 1 argument".to_string(),
@@ -939,6 +1145,33 @@ impl Interpreter {
                                 Value::Str(s) => Ok(Value::Int(s.len() as i64)),
                                 _ => Err(InterpError {
                                     message: format!("len() not supported for {:?}", arg_vals[0]),
+                                }),
+                            }
+                        }
+                        "permutation" => {
+                            let mut arg_vals = Vec::new();
+                            for arg in args {
+                                arg_vals.push(self.eval_contract_expr(&arg.value)?);
+                            }
+                            if arg_vals.len() != 2 {
+                                return Err(InterpError {
+                                    message: "permutation() takes exactly 2 arguments".to_string(),
+                                });
+                            }
+                            match (&arg_vals[0], &arg_vals[1]) {
+                                (Value::Array(a), Value::Array(b)) => {
+                                    Ok(Value::Bool(Self::is_permutation_values(a, b)))
+                                }
+                                (Value::Str(a), Value::Str(b)) => {
+                                    let a_vals = a.chars().map(Value::Char).collect::<Vec<_>>();
+                                    let b_vals = b.chars().map(Value::Char).collect::<Vec<_>>();
+                                    Ok(Value::Bool(Self::is_permutation_values(&a_vals, &b_vals)))
+                                }
+                                _ => Err(InterpError {
+                                    message: format!(
+                                        "permutation() expects (Array, Array) or (Str, Str), got ({:?}, {:?})",
+                                        arg_vals[0], arg_vals[1]
+                                    ),
                                 }),
                             }
                         }
@@ -975,16 +1208,250 @@ impl Interpreter {
                             message: format!(".is_empty() not supported for {:?}", receiver_val),
                         }),
                     },
+                    "contains" => {
+                        if arg_vals.len() != 1 {
+                            return Err(InterpError {
+                                message: "contains() takes exactly 1 argument".to_string(),
+                            });
+                        }
+                        let needle = &arg_vals[0];
+                        match &receiver_val {
+                            Value::Array(items) => Ok(Value::Bool(
+                                items.iter().any(|item| self.values_equal(item, needle)),
+                            )),
+                            Value::Str(s) => match needle {
+                                Value::Char(c) => Ok(Value::Bool(s.contains(*c))),
+                                Value::Str(sub) => Ok(Value::Bool(s.contains(sub))),
+                                _ => Err(InterpError {
+                                    message: format!(
+                                        "contains() on Str expects Char or Str, got {:?}",
+                                        needle
+                                    ),
+                                }),
+                            },
+                            _ => Err(InterpError {
+                                message: format!(
+                                    ".contains() not supported for {:?}",
+                                    receiver_val
+                                ),
+                            }),
+                        }
+                    }
                     _ => Err(InterpError {
                         message: format!("method '{}' not supported in contracts", method.name),
                     }),
                 }
             }
 
+            ExprKind::TupleField(base, index) => {
+                let base_val = self.eval_contract_expr(base)?;
+                match base_val {
+                    Value::Tuple(fields) => {
+                        fields.get(*index).cloned().ok_or_else(|| InterpError {
+                            message: format!("tuple index {} out of bounds", index),
+                        })
+                    }
+                    other => Err(InterpError {
+                        message: format!("cannot access tuple field on {:?}", other),
+                    }),
+                }
+            }
+
+            ExprKind::Index(base, index) => {
+                let base_val = self.eval_contract_expr(base)?;
+                let index_val = self.eval_contract_expr(index)?;
+                let i = match index_val {
+                    Value::Int(i) if i >= 0 => i as usize,
+                    Value::Int(i) => {
+                        return Err(InterpError {
+                            message: format!("index must be non-negative, got {}", i),
+                        });
+                    }
+                    other => {
+                        return Err(InterpError {
+                            message: format!("index must be Int, got {:?}", other),
+                        });
+                    }
+                };
+                match base_val {
+                    Value::Array(items) => items.get(i).cloned().ok_or_else(|| InterpError {
+                        message: format!("index {} out of bounds", i),
+                    }),
+                    Value::Str(s) => s
+                        .chars()
+                        .nth(i)
+                        .map(Value::Char)
+                        .ok_or_else(|| InterpError {
+                            message: format!("string index {} out of bounds", i),
+                        }),
+                    other => Err(InterpError {
+                        message: format!("cannot index into {:?}", other),
+                    }),
+                }
+            }
+
+            ExprKind::Range(start, end, inclusive) => {
+                let start_val = match start {
+                    Some(expr) => match self.eval_contract_expr(expr)? {
+                        Value::Int(n) => n,
+                        other => {
+                            return Err(InterpError {
+                                message: format!("range start must be Int, got {:?}", other),
+                            });
+                        }
+                    },
+                    None => 0,
+                };
+                let end_val = match end {
+                    Some(expr) => match self.eval_contract_expr(expr)? {
+                        Value::Int(n) => n,
+                        other => {
+                            return Err(InterpError {
+                                message: format!("range end must be Int, got {:?}", other),
+                            });
+                        }
+                    },
+                    None => start_val,
+                };
+                Ok(Value::Array(Self::build_int_range(
+                    start_val, end_val, *inclusive,
+                )))
+            }
+
             _ => Err(InterpError {
                 message: format!("expression type {:?} not supported in contracts", expr.kind),
             }),
         }
+    }
+
+    fn contract_expr_key(expr: &crate::parser::Expr) -> usize {
+        expr as *const crate::parser::Expr as usize
+    }
+
+    fn collect_old_expr_args<'a>(
+        expr: &'a crate::parser::Expr,
+        out: &mut Vec<&'a crate::parser::Expr>,
+    ) {
+        use crate::parser::ast::ExprKind;
+
+        match &expr.kind {
+            ExprKind::Call(callee, args) => {
+                if let ExprKind::Ident(name) = &callee.kind
+                    && name.name == "old"
+                    && args.len() == 1
+                {
+                    out.push(&args[0].value);
+                }
+                Self::collect_old_expr_args(callee, out);
+                for arg in args {
+                    Self::collect_old_expr_args(&arg.value, out);
+                }
+            }
+            ExprKind::Binary(left, _, right)
+            | ExprKind::Coalesce(left, right)
+            | ExprKind::Pipeline(left, right)
+            | ExprKind::Index(left, right)
+            | ExprKind::Assign(left, right, _) => {
+                Self::collect_old_expr_args(left, out);
+                Self::collect_old_expr_args(right, out);
+            }
+            ExprKind::AssignOp(left, _, right) => {
+                Self::collect_old_expr_args(left, out);
+                Self::collect_old_expr_args(right, out);
+            }
+            ExprKind::Unary(_, inner)
+            | ExprKind::Field(inner, _)
+            | ExprKind::TupleField(inner, _)
+            | ExprKind::Try(inner)
+            | ExprKind::Await(inner)
+            | ExprKind::Spawn(inner)
+            | ExprKind::Paren(inner)
+            | ExprKind::Cast(inner, _) => Self::collect_old_expr_args(inner, out),
+            ExprKind::MethodCall(receiver, _, args) => {
+                Self::collect_old_expr_args(receiver, out);
+                for arg in args {
+                    Self::collect_old_expr_args(&arg.value, out);
+                }
+            }
+            ExprKind::Closure(closure) => Self::collect_old_expr_args(&closure.body, out),
+            ExprKind::Tuple(items) | ExprKind::Array(items) => {
+                for item in items {
+                    Self::collect_old_expr_args(item, out);
+                }
+            }
+            ExprKind::ArrayRepeat(value, count) => {
+                Self::collect_old_expr_args(value, out);
+                Self::collect_old_expr_args(count, out);
+            }
+            ExprKind::MapOrSet(entries) => {
+                for entry in entries {
+                    Self::collect_old_expr_args(&entry.key, out);
+                    if let Some(value) = &entry.value {
+                        Self::collect_old_expr_args(value, out);
+                    }
+                }
+            }
+            ExprKind::Range(start, end, _) => {
+                if let Some(start) = start {
+                    Self::collect_old_expr_args(start, out);
+                }
+                if let Some(end) = end {
+                    Self::collect_old_expr_args(end, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn contract_iter_values(&self, iterable: Value) -> Result<Vec<Value>, InterpError> {
+        match iterable {
+            Value::Array(items) => Ok(items),
+            Value::Str(s) => Ok(s.chars().map(Value::Char).collect()),
+            other => Err(InterpError {
+                message: format!(
+                    "quantifier iterable must be Array, Str, or Range, got {:?}",
+                    other
+                ),
+            }),
+        }
+    }
+
+    fn build_int_range(start: i64, end: i64, inclusive: bool) -> Vec<Value> {
+        let iter: Box<dyn Iterator<Item = i64>> = if inclusive {
+            if start <= end {
+                Box::new(start..=end)
+            } else {
+                Box::new((end..=start).rev())
+            }
+        } else if start <= end {
+            Box::new(start..end)
+        } else {
+            Box::new((end..start).rev())
+        };
+        iter.map(Value::Int).collect()
+    }
+
+    fn is_permutation_values(a: &[Value], b: &[Value]) -> bool {
+        if a.len() != b.len() {
+            return false;
+        }
+        let mut counts: HashMap<String, i64> = HashMap::new();
+        for v in a {
+            *counts.entry(format!("{:?}", v)).or_insert(0) += 1;
+        }
+        for v in b {
+            let key = format!("{:?}", v);
+            match counts.get_mut(&key) {
+                Some(count) => {
+                    *count -= 1;
+                    if *count == 0 {
+                        counts.remove(&key);
+                    }
+                }
+                None => return false,
+            }
+        }
+        counts.is_empty()
     }
 
     /// Compare two values with a comparison function
@@ -1038,11 +1505,18 @@ impl Interpreter {
     }
 
     fn execute(&mut self, func: &Function) -> Result<Value, InterpError> {
-        let mut steps = 0;
-
         loop {
-            steps += 1;
-            if steps > self.max_steps {
+            if let Some(deadline) = self.run_deadline
+                && Instant::now() > deadline
+            {
+                let ms = self.run_timeout_ms.unwrap_or(0);
+                return Err(InterpError {
+                    message: format!("execution timeout exceeded ({}ms)", ms),
+                });
+            }
+
+            self.step_counter += 1;
+            if self.step_counter > self.max_steps {
                 return Err(InterpError {
                     message: "maximum steps exceeded (possible infinite loop)".to_string(),
                 });
@@ -10944,6 +11418,153 @@ f main() -> Int = checked(-1)
         let result = interp.run("main", &[]);
         assert!(result.is_ok(), "with contracts disabled, should succeed");
         assert_eq!(result.unwrap(), Value::Int(-1));
+    }
+
+    #[test]
+    fn test_contract_old_postcondition() {
+        let source = r#"
+@post(result == old(x) + 1)
+f inc(x: Int) -> Int = x + 1
+
+f main() -> Int = inc(41)
+"#;
+        let result = run_source(source).unwrap();
+        assert_eq!(result, Value::Int(42));
+    }
+
+    #[test]
+    fn test_contract_old_rejected_in_precondition() {
+        let source = r#"
+@pre(old(x) > 0)
+f bad(x: Int) -> Int = x
+
+f main() -> Int = bad(1)
+"#;
+        let result = run_source(source);
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("old"),
+            "error should mention old() misuse"
+        );
+    }
+
+    #[test]
+    fn test_contract_forall_range_index() {
+        let source = r#"
+@post(forall i in 0..result.len()-1: result[i] <= result[i+1])
+f ordered(items: [Int]) -> [Int] = items
+
+f main() -> Int
+    m out := ordered([1, 2, 3, 4])
+    out.len()
+"#;
+        let result = run_source(source).unwrap();
+        assert_eq!(result, Value::Int(4));
+    }
+
+    #[test]
+    fn test_contract_exists_membership() {
+        let source = r#"
+@post(exists x in result: x == target)
+f findable(target: Int) -> [Int] = [target, target + 1]
+
+f main() -> Int = findable(7).len()
+"#;
+        let result = run_source(source).unwrap();
+        assert_eq!(result, Value::Int(2));
+    }
+
+    #[test]
+    fn test_contract_implication_semantics() {
+        let source = r#"
+@post(n == 0 => result == 1)
+f one_if_zero(n: Int) -> Int
+    if n == 0 then 1 else 2
+
+f main() -> Int = one_if_zero(0)
+"#;
+        let result = run_source(source).unwrap();
+        assert_eq!(result, Value::Int(1));
+    }
+
+    #[test]
+    fn test_contract_pattern_sorted_expansion() {
+        let source = r#"
+@sorted(result)
+f keep_sorted(items: [Int]) -> [Int] = items
+
+f main() -> Int = keep_sorted([1, 2, 3]).len()
+"#;
+        let result = run_source(source).unwrap();
+        assert_eq!(result, Value::Int(3));
+    }
+
+    #[test]
+    fn test_contract_pattern_permutation_expansion() {
+        let source = r#"
+@permutation(items, result)
+f same_items(items: [Int]) -> [Int] = items
+
+f main() -> Int = same_items([3, 1, 3, 2]).len()
+"#;
+        let result = run_source(source).unwrap();
+        assert_eq!(result, Value::Int(4));
+    }
+
+    #[test]
+    fn test_contract_tuple_field_out_of_bounds_error() {
+        let source = r#"
+@post(result == pair.2)
+f bad_tuple(pair: (Int, Int), x: Int) -> Int = x
+
+f main() -> Int = bad_tuple((1, 2), 1)
+"#;
+        let result = run_source(source);
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("tuple index 2 out of bounds"),
+            "expected tuple out-of-bounds error"
+        );
+    }
+
+    #[test]
+    fn test_contract_index_out_of_bounds_error() {
+        let source = r#"
+@post(result[3] == 0)
+f short() -> [Int] = [1, 2]
+
+f main() -> Int = short().len()
+"#;
+        let result = run_source(source);
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("out of bounds"),
+            "expected index out-of-bounds error"
+        );
+    }
+
+    #[test]
+    fn test_contract_membership_operator_array() {
+        let source = r#"
+@post(3 in result)
+f add_three(items: [Int]) -> [Int] = vec_push(items, 3)
+
+f main() -> Int = add_three([1, 2]).len()
+"#;
+        let result = run_source(source).unwrap();
+        assert_eq!(result, Value::Int(3));
+    }
+
+    #[test]
+    fn test_contract_contains_method_string() {
+        let source = r#"
+@post(result.contains('x'))
+f append_x(s: Str) -> Str = s + "x"
+
+f main() -> Int = append_x("forma").len()
+"#;
+        let result = run_source(source).unwrap();
+        assert_eq!(result, Value::Int(6));
     }
 
     // =========================================================================

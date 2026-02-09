@@ -1,0 +1,26 @@
+# Verified Stack - old(...) postconditions over structural changes
+# Demonstrates: old(expr), tuple postconditions, preconditions
+
+@post(result.len() == old(stack).len() + 1)
+@post(result[result.len() - 1] == value)
+f stack_push(stack: [Int], value: Int) -> [Int]
+    next := stack
+    next = vec_push(next, value)
+    next
+
+@pre(stack.len() > 0, "cannot pop from empty stack")
+@post(result.0 == old(stack)[old(stack).len() - 1])
+@post(result.1.len() + 1 == old(stack).len())
+f stack_pop(stack: [Int]) -> (Int, [Int])
+    top := stack[len(stack) - 1]
+    rest := vec_slice(stack, 0, len(stack) - 1)
+    (top, rest)
+
+f main()
+    stack := [10, 20, 30]
+    pushed := stack_push(stack, 40)
+    popped := stack_pop(pushed)
+    print("Verified stack demo")
+    print(f"  after push: {pushed}")
+    print(f"  pop value:  {popped.0}")
+    print(f"  pop rest:   {popped.1}")

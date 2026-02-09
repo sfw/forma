@@ -838,10 +838,33 @@ f factorial(n: Int) -> Int
     else n * factorial(n - 1)
 ```
 
-Contracts are checked at runtime when the `--check-contracts` flag is passed:
+Contracts are checked at runtime by default:
 
 ```bash
-forma run --check-contracts myfile.forma
+forma run myfile.forma
+```
+
+Disable runtime contract checks explicitly with:
+
+```bash
+forma run --no-check-contracts myfile.forma
+```
+
+Contracts also support:
+- `old(...)` in `@post` conditions
+- Quantifiers: `forall x in xs: ...`, `exists x in xs: ...`
+- Membership checks with `in`
+- Pattern shorthands such as `@sorted(result)`, `@unique(items)`, `@permutation(before, after)`, `@bounded(x, min, max)`
+- Pattern context rules: `@nonempty(...)` is precondition-only, `@unchanged(...)` is postcondition-only
+
+Example:
+
+```forma
+@pre(values.len() > 0)
+@post(forall i in 0..result.len()-1: result[i] <= result[i+1])
+@post(permutation(values, result))
+f sort(values: [Int]) -> [Int]
+    sort_ints(values)
 ```
 
 ---
@@ -939,7 +962,7 @@ mutex_unlock(mtx)
 
 ## Standard Library Overview
 
-FORMA includes 320+ builtin functions. Here are the key categories:
+FORMA includes 298+ builtin functions. Here are the key categories:
 
 ### I/O
 
@@ -1032,6 +1055,13 @@ Requires `--allow-network` capability flag:
 | `tcp_write(conn, data)` | Write to TCP |
 | `tls_connect(host, port)` | TLS connection |
 
+### Process / Environment / Unsafe
+
+Capability-gated groups:
+- `--allow-exec`: process execution builtins
+- `--allow-env`: environment variable builtins (`env_get`, `env_set`, `env_remove`, `env_vars`)
+- `--allow-unsafe`: pointer/memory allocation and low-level unsafe builtins
+
 ### Database (SQLite)
 
 | Function | Description |
@@ -1090,13 +1120,23 @@ Requires `--allow-network` capability flag:
 ```bash
 forma run <file>                   # Run a FORMA program
 forma run <file> --dump-mir        # Run with MIR dump
-forma run <file> --check-contracts # Enable contract checking
+forma run <file> --no-check-contracts # Disable runtime contracts
 forma run <file> --allow-read      # Allow file reads
 forma run <file> --allow-write     # Allow file writes
 forma run <file> --allow-network   # Allow networking
+forma run <file> --allow-exec      # Allow process execution
+forma run <file> --allow-env       # Allow env var access
+forma run <file> --allow-unsafe    # Allow pointer/unsafe builtins
 forma run <file> --allow-all       # Allow all capabilities
 forma check <file>                 # Type check without running
 forma check <file> --partial       # Partial checking
+forma build <file>                 # Build native executable (LLVM feature)
+forma explain <file>               # Explain contracts in plain English
+forma explain <file> --examples=3 --seed 42 --format json
+forma explain <file> --max-examples 3 --seed 42 --format json
+forma verify <file-or-dir> --report --format human
+forma verify <file-or-dir> --report --format json --examples 20 --seed 42
+forma verify <file-or-dir> --report --max-steps 10000 --timeout 1000
 forma lex <file>                   # Dump tokens
 forma parse <file>                 # Dump AST
 forma grammar --format ebnf        # Export grammar as EBNF
@@ -1108,6 +1148,22 @@ forma init                         # Initialize project in current dir
 forma typeof <file> --position 5:10  # Query type at position
 forma complete <file> --position 5:10  # Get completions
 ```
+
+### Verification and Explain Reports
+
+- `forma explain` converts function contracts into readable intent (`human`, `json`, or `markdown`).
+- `--examples` generates deterministic I/O samples when paired with `--seed`.
+- Use `--examples=N` or `--max-examples N` to request an explicit explain-example count.
+- `explain --examples` includes both satisfying examples and counterexamples that violate detected preconditions.
+- `forma verify --report` executes generated examples and emits per-function status:
+  - `PASS`: all generated examples satisfied contract checks
+  - `SKIP`: function could not be safely/meaningfully executed (for example, capability-restricted paths)
+  - `WARN`: no contracts defined
+  - `FAIL`: one or more generated examples violated checks or errored
+- Generated examples run side-effect safe by default; `--allow-side-effects` opts into full capabilities.
+- Resource controls for verify:
+  - `--max-steps` limits interpreter steps per generated example
+  - `--timeout` sets per-example timeout budget in milliseconds
 
 ### Error Formats
 

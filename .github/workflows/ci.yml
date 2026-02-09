@@ -88,6 +88,16 @@ jobs:
           FAIL=0
           for f in tests/forma/*.forma; do
             name=$(basename "$f")
+            if [ "$name" = "test_contract_errors.forma" ]; then
+              if ./target/release/forma run --allow-all "$f" > /dev/null 2>&1; then
+                echo "FAIL (unexpected pass): $name"
+                FAIL=$((FAIL + 1))
+              else
+                echo "XFAIL (expected contract violation): $name"
+                PASS=$((PASS + 1))
+              fi
+              continue
+            fi
             if ./target/release/forma run --allow-all "$f" > /dev/null 2>&1; then
               echo "PASS: $name"
               PASS=$((PASS + 1))
@@ -99,6 +109,18 @@ jobs:
           echo ""
           echo "Results: $PASS passed, $FAIL failed"
           if [ "$FAIL" -gt 0 ]; then exit 1; fi
+
+  contract-tests:
+    name: Contract Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release binary
+        run: cargo build --release
+      - name: Run contract verification suite
+        run: bash scripts/test_contracts.sh
 
   coverage-audit:
     name: Builtin Coverage Audit

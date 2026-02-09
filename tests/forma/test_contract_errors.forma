@@ -1,0 +1,9 @@
+# Intentional contract violations for error-path testing
+
+@pre(x > 0, "x must be positive")
+f must_be_positive(x: Int) -> Int
+    x
+
+f main() -> Int
+    # Intentional precondition violation
+    must_be_positive(0)

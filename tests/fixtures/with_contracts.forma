@@ -1,0 +1,7 @@
+@pre(b != 0)
+@post(result * b == a)
+f divide(a: Int, b: Int) -> Int
+    a / b
+
+f main() -> Int
+    divide(10, 2)

@@ -96,26 +96,35 @@ impl<'a> Parser<'a> {
             return Err(self.error("expected item (f, s, e, t, i, type, us, md)"));
         };
 
-        // Extract @pre/@post contracts and add them to the function
-        if let ItemKind::Function(ref mut func) = kind {
-            for attr in &attrs {
+        let remaining_attrs = if let ItemKind::Function(ref mut func) = kind {
+            let mut keep = Vec::new();
+            for attr in attrs {
                 if (attr.name.name == "pre" || attr.name.name == "post")
-                    && let Some(contract) = Self::extract_contract(attr)
+                    && let Some(contract) = Self::extract_contract(&attr)
                 {
                     if attr.name.name == "pre" {
                         func.preconditions.push(contract);
                     } else {
                         func.postconditions.push(contract);
                     }
+                    continue;
                 }
-            }
-        }
 
-        // Filter out @pre/@post from attrs (they're now in the function)
-        let remaining_attrs: Vec<_> = attrs
-            .into_iter()
-            .filter(|a| a.name.name != "pre" && a.name.name != "post")
-            .collect();
+                if let Some((is_post, contract)) = self.expand_contract_pattern(&attr)? {
+                    if is_post {
+                        func.postconditions.push(contract);
+                    } else {
+                        func.preconditions.push(contract);
+                    }
+                    continue;
+                }
+
+                keep.push(attr);
+            }
+            keep
+        } else {
+            attrs
+        };
 
         let end = self.previous_span();
         Ok(Item {
@@ -148,6 +157,7 @@ impl<'a> Parser<'a> {
         Some(Contract {
             condition,
             message,
+            pattern_name: None,
             span: attr.span,
         })
     }
@@ -171,7 +181,7 @@ impl<'a> Parser<'a> {
 
         let args = if self.match_token(TokenKind::LParen) {
             if is_contract {
-                self.parse_contract_attr_args()?
+                self.parse_contract_attr_args(name.name == "post")?
             } else {
                 let args = self.parse_attr_args()?;
                 self.expect(TokenKind::RParen)?;
@@ -189,9 +199,9 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse contract attribute arguments: @pre(condition) or @pre(condition, "message")
-    fn parse_contract_attr_args(&mut self) -> Result<Vec<AttrArg>> {
+    fn parse_contract_attr_args(&mut self, allow_old: bool) -> Result<Vec<AttrArg>> {
         let start = self.current_span();
-        let expr = self.parse_expr()?;
+        let expr = self.parse_contract_expr(allow_old)?;
         let mut args = vec![AttrArg {
             name: Ident::new("condition", start),
             value: None,
@@ -221,29 +231,472 @@ impl<'a> Parser<'a> {
         Ok(args)
     }
 
+    fn parse_contract_expr(&mut self, allow_old: bool) -> Result<Expr> {
+        self.skip_whitespace_tokens();
+        let mut expr = if self.is_contract_quantifier_start() {
+            self.parse_contract_quantifier(allow_old)?
+        } else {
+            self.parse_contract_membership(allow_old)?
+        };
+
+        self.skip_whitespace_tokens();
+        if self.match_token(TokenKind::FatArrow) {
+            let right = self.parse_contract_expr(allow_old)?;
+            let not_left_span = expr.span;
+            let not_left = Expr {
+                kind: ExprKind::Unary(UnaryOp::Not, Box::new(expr)),
+                span: not_left_span,
+            };
+            expr = Expr {
+                kind: ExprKind::Binary(Box::new(not_left), BinOp::Or, Box::new(right.clone())),
+                span: not_left_span.merge(right.span),
+            };
+        }
+
+        self.validate_old_usage(&expr, allow_old)?;
+        Ok(expr)
+    }
+
+    fn is_contract_quantifier_start(&self) -> bool {
+        let head_is_quant = matches!(
+            self.current_kind(),
+            Some(TokenKind::Ident(ref name)) if name == "forall" || name == "exists"
+        );
+        if !head_is_quant {
+            return false;
+        }
+        matches!(self.peek_kind(1), Some(TokenKind::Ident(_)))
+            && matches!(self.peek_kind(2), Some(TokenKind::In))
+    }
+
+    fn parse_contract_quantifier(&mut self, allow_old: bool) -> Result<Expr> {
+        let start = self.current_span();
+        let quant_name = match self.current_kind() {
+            Some(TokenKind::Ident(name)) => name,
+            _ => return Err(self.error("expected 'forall' or 'exists'")),
+        };
+        self.advance(); // quantifier keyword
+
+        let var = self.parse_ident()?;
+        self.expect(TokenKind::In)?;
+        let iterable = self.parse_expr()?;
+        self.expect(TokenKind::Colon)?;
+        let predicate = self.parse_contract_expr(allow_old)?;
+
+        let closure = Expr {
+            kind: ExprKind::Closure(Closure {
+                params: vec![ClosureParam {
+                    name: var.clone(),
+                    ty: None,
+                    span: var.span,
+                }],
+                return_type: None,
+                body: Box::new(predicate.clone()),
+                span: var.span.merge(predicate.span),
+            }),
+            span: var.span.merge(predicate.span),
+        };
+
+        let call_name = if quant_name == "forall" {
+            "__forall"
+        } else {
+            "__exists"
+        };
+        let callee = Expr {
+            kind: ExprKind::Ident(Ident::new(call_name, start)),
+            span: start,
+        };
+
+        let iter_span = iterable.span;
+        Ok(Expr {
+            kind: ExprKind::Call(
+                Box::new(callee),
+                vec![
+                    Arg {
+                        name: None,
+                        value: iterable,
+                        pass_mode: PassMode::Owned,
+                        span: iter_span,
+                    },
+                    Arg {
+                        name: None,
+                        value: closure,
+                        pass_mode: PassMode::Owned,
+                        span: var.span.merge(predicate.span),
+                    },
+                ],
+            ),
+            span: start.merge(predicate.span),
+        })
+    }
+
+    fn parse_contract_membership(&mut self, _allow_old: bool) -> Result<Expr> {
+        let start = self.current_span();
+        let left = self.parse_expr()?;
+        self.skip_whitespace_tokens();
+        if self.match_token(TokenKind::In) {
+            let right = self.parse_expr()?;
+            let right_span = right.span;
+            let left_span = left.span;
+            return Ok(Expr {
+                kind: ExprKind::MethodCall(
+                    Box::new(right),
+                    Ident::new("contains", start),
+                    vec![Arg {
+                        name: None,
+                        value: left,
+                        pass_mode: PassMode::Owned,
+                        span: left_span,
+                    }],
+                ),
+                span: start.merge(right_span),
+            });
+        }
+        Ok(left)
+    }
+
+    fn validate_old_usage(&self, expr: &Expr, allow_old: bool) -> Result<()> {
+        match &expr.kind {
+            ExprKind::Binary(left, _, right)
+            | ExprKind::Coalesce(left, right)
+            | ExprKind::Pipeline(left, right)
+            | ExprKind::Index(left, right)
+            | ExprKind::Assign(left, right, _) => {
+                self.validate_old_usage(left, allow_old)?;
+                self.validate_old_usage(right, allow_old)?;
+            }
+            ExprKind::AssignOp(left, _, right) => {
+                self.validate_old_usage(left, allow_old)?;
+                self.validate_old_usage(right, allow_old)?;
+            }
+            ExprKind::Unary(_, inner)
+            | ExprKind::Field(inner, _)
+            | ExprKind::TupleField(inner, _)
+            | ExprKind::Try(inner)
+            | ExprKind::Await(inner)
+            | ExprKind::Spawn(inner)
+            | ExprKind::Paren(inner)
+            | ExprKind::Cast(inner, _) => {
+                self.validate_old_usage(inner, allow_old)?;
+            }
+            ExprKind::Call(callee, args) => {
+                if let ExprKind::Ident(name) = &callee.kind
+                    && name.name == "old"
+                {
+                    if !allow_old {
+                        return Err(ParseError::new(
+                            "old(...) is only valid in @post contracts",
+                            expr.span,
+                        )
+                        .into());
+                    }
+                    if args.len() != 1 {
+                        return Err(ParseError::new(
+                            "old(...) takes exactly one argument",
+                            expr.span,
+                        )
+                        .into());
+                    }
+                }
+                self.validate_old_usage(callee, allow_old)?;
+                for arg in args {
+                    self.validate_old_usage(&arg.value, allow_old)?;
+                }
+            }
+            ExprKind::MethodCall(recv, _, args) => {
+                self.validate_old_usage(recv, allow_old)?;
+                for arg in args {
+                    self.validate_old_usage(&arg.value, allow_old)?;
+                }
+            }
+            ExprKind::Closure(closure) => self.validate_old_usage(&closure.body, allow_old)?,
+            ExprKind::Tuple(items) | ExprKind::Array(items) => {
+                for item in items {
+                    self.validate_old_usage(item, allow_old)?;
+                }
+            }
+            ExprKind::ArrayRepeat(value, count) => {
+                self.validate_old_usage(value, allow_old)?;
+                self.validate_old_usage(count, allow_old)?;
+            }
+            ExprKind::MapOrSet(entries) => {
+                for entry in entries {
+                    self.validate_old_usage(&entry.key, allow_old)?;
+                    if let Some(value) = &entry.value {
+                        self.validate_old_usage(value, allow_old)?;
+                    }
+                }
+            }
+            ExprKind::Range(start, end, _) => {
+                if let Some(start) = start {
+                    self.validate_old_usage(start, allow_old)?;
+                }
+                if let Some(end) = end {
+                    self.validate_old_usage(end, allow_old)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn parse_contract_expr_source(
+        &mut self,
+        expr_src: &str,
+        allow_old: bool,
+        span: Span,
+    ) -> Result<Expr> {
+        use crate::lexer::Scanner;
+
+        let scanner = Scanner::new(expr_src);
+        let (tokens, lex_errors) = scanner.scan_all();
+        if !lex_errors.is_empty() {
+            return Err(ParseError::new(
+                format!(
+                    "error in contract pattern expression: {}",
+                    lex_errors[0].message
+                ),
+                span,
+            )
+            .into());
+        }
+
+        let mut parser = Parser::new(&tokens);
+        let expr = parser.parse_contract_expr(allow_old)?;
+        parser.skip_whitespace_tokens();
+        if !parser.at_end() {
+            return Err(
+                ParseError::new("unexpected tokens in contract pattern expression", span).into(),
+            );
+        }
+        Ok(expr)
+    }
+
+    fn is_result_context(attr: &Attribute) -> bool {
+        attr.args.iter().any(|arg| arg.name.name == "result")
+    }
+
+    fn pattern_arg_name(attr: &Attribute, index: usize) -> Result<String> {
+        attr.args
+            .get(index)
+            .map(|arg| arg.name.name.clone())
+            .ok_or_else(|| {
+                ParseError::new(
+                    format!(
+                        "pattern @{} expects at least {} argument(s)",
+                        attr.name.name,
+                        index + 1
+                    ),
+                    attr.span,
+                )
+                .into()
+            })
+    }
+
+    fn expand_contract_pattern(&mut self, attr: &Attribute) -> Result<Option<(bool, Contract)>> {
+        #[derive(Clone, Copy)]
+        enum PatternContext {
+            PreOnly,
+            PostOnly,
+            Both,
+        }
+
+        let name = attr.name.name.as_str();
+        let (expr_src, is_post, context) = match name {
+            "nonempty" => {
+                let x = Self::pattern_arg_name(attr, 0)?;
+                (
+                    format!("{}.len() > 0", x),
+                    Self::is_result_context(attr),
+                    PatternContext::PreOnly,
+                )
+            }
+            "nonnegative" => {
+                let x = Self::pattern_arg_name(attr, 0)?;
+                (
+                    format!("{} >= 0", x),
+                    Self::is_result_context(attr),
+                    PatternContext::Both,
+                )
+            }
+            "positive" => {
+                let x = Self::pattern_arg_name(attr, 0)?;
+                (
+                    format!("{} > 0", x),
+                    Self::is_result_context(attr),
+                    PatternContext::Both,
+                )
+            }
+            "nonzero" => {
+                let x = Self::pattern_arg_name(attr, 0)?;
+                (
+                    format!("{} != 0", x),
+                    Self::is_result_context(attr),
+                    PatternContext::Both,
+                )
+            }
+            "bounded" => {
+                let x = Self::pattern_arg_name(attr, 0)?;
+                let lo = Self::pattern_arg_name(attr, 1)?;
+                let hi = Self::pattern_arg_name(attr, 2)?;
+                (
+                    format!("{} >= {} && {} <= {}", x, lo, x, hi),
+                    Self::is_result_context(attr),
+                    PatternContext::Both,
+                )
+            }
+            "sorted" => {
+                let x = Self::pattern_arg_name(attr, 0)?;
+                (
+                    format!("forall i in 0..{}.len()-1: {}[i] <= {}[i+1]", x, x, x),
+                    Self::is_result_context(attr),
+                    PatternContext::Both,
+                )
+            }
+            "sorted_desc" => {
+                let x = Self::pattern_arg_name(attr, 0)?;
+                (
+                    format!("forall i in 0..{}.len()-1: {}[i] >= {}[i+1]", x, x, x),
+                    Self::is_result_context(attr),
+                    PatternContext::Both,
+                )
+            }
+            "unique" => {
+                let x = Self::pattern_arg_name(attr, 0)?;
+                (
+                    format!(
+                        "forall i in 0..{}.len(): forall j in 0..{}.len(): i != j => {}[i] != {}[j]",
+                        x, x, x, x
+                    ),
+                    Self::is_result_context(attr),
+                    PatternContext::Both,
+                )
+            }
+            "same_length" => {
+                let a = Self::pattern_arg_name(attr, 0)?;
+                let b = Self::pattern_arg_name(attr, 1)?;
+                (
+                    format!("{}.len() == {}.len()", a, b),
+                    Self::is_result_context(attr),
+                    PatternContext::Both,
+                )
+            }
+            "permutation" => {
+                let a = Self::pattern_arg_name(attr, 0)?;
+                let b = Self::pattern_arg_name(attr, 1)?;
+                (
+                    format!("permutation({}, {})", a, b),
+                    Self::is_result_context(attr),
+                    PatternContext::Both,
+                )
+            }
+            "unchanged" => {
+                let x = Self::pattern_arg_name(attr, 0)?;
+                (
+                    format!("{} == old({})", x, x),
+                    true,
+                    PatternContext::PostOnly,
+                )
+            }
+            _ => return Ok(None),
+        };
+
+        match (context, is_post) {
+            (PatternContext::PreOnly, true) => {
+                return Err(ParseError::new(
+                    format!("@{} can only be used in precondition context", name),
+                    attr.span,
+                )
+                .into());
+            }
+            (PatternContext::PostOnly, false) => {
+                return Err(ParseError::new(
+                    format!("@{} can only be used in postcondition context", name),
+                    attr.span,
+                )
+                .into());
+            }
+            _ => {}
+        }
+
+        let expr = self.parse_contract_expr_source(&expr_src, is_post, attr.span)?;
+        Ok(Some((
+            is_post,
+            Contract {
+                condition: Box::new(expr),
+                message: None,
+                pattern_name: Some(name.to_string()),
+                span: attr.span,
+            },
+        )))
+    }
+
     fn parse_attr_args(&mut self) -> Result<Vec<AttrArg>> {
         let mut args = Vec::new();
         if !self.check(TokenKind::RParen) {
             loop {
                 let start = self.current_span();
-                let name = self.parse_ident()?;
-                let value = if self.match_token(TokenKind::Eq) {
-                    Some(self.parse_literal()?)
+                // Named literal arg: foo = 1
+                if self.check_ident() && matches!(self.peek_kind(1), Some(TokenKind::Eq)) {
+                    let name = self.parse_ident()?;
+                    self.expect(TokenKind::Eq)?;
+                    let value = self.parse_literal()?;
+                    args.push(AttrArg {
+                        name,
+                        value: Some(value),
+                        expr: None,
+                        span: start.merge(self.previous_span()),
+                    });
                 } else {
-                    None
-                };
-                args.push(AttrArg {
-                    name,
-                    value,
-                    expr: None,
-                    span: start.merge(self.previous_span()),
-                });
+                    // Positional arg: ident/literal (used by contract shorthand patterns)
+                    let expr = self.parse_expr()?;
+                    let name = Self::attr_arg_expr_to_name(&expr).ok_or_else(|| {
+                        self.error("attribute positional arguments must be identifiers or literals")
+                    })?;
+                    args.push(AttrArg {
+                        name: Ident::new(name, expr.span),
+                        value: None,
+                        expr: Some(Box::new(expr.clone())),
+                        span: start.merge(expr.span),
+                    });
+                }
                 if !self.match_token(TokenKind::Comma) {
                     break;
                 }
             }
         }
         Ok(args)
+    }
+
+    fn attr_arg_expr_to_name(expr: &Expr) -> Option<String> {
+        match &expr.kind {
+            ExprKind::Ident(ident) => Some(ident.name.clone()),
+            ExprKind::Path(path) => Some(
+                path.segments
+                    .iter()
+                    .map(|s| s.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join("."),
+            ),
+            ExprKind::Literal(lit) => Some(Self::literal_to_source(lit)),
+            ExprKind::Unary(UnaryOp::Neg, inner) => {
+                let inner = Self::attr_arg_expr_to_name(inner)?;
+                Some(format!("-{}", inner))
+            }
+            ExprKind::Paren(inner) => Self::attr_arg_expr_to_name(inner),
+            _ => None,
+        }
+    }
+
+    fn literal_to_source(lit: &Literal) -> String {
+        match &lit.kind {
+            LiteralKind::Int(n) => n.to_string(),
+            LiteralKind::Float(f) => f.to_string(),
+            LiteralKind::String(s) => format!("{:?}", s),
+            LiteralKind::Char(c) => format!("{:?}", c),
+            LiteralKind::Bool(b) => b.to_string(),
+            LiteralKind::None => "None".to_string(),
+        }
     }
 
     fn parse_visibility(&mut self) -> Result<Visibility> {

@@ -1,0 +1,36 @@
+# Contract expression coverage
+
+@pre(idx >= 0)
+@pre(idx < items.len())
+@post(result == items[idx])
+f at_index(items: [Int], idx: Int) -> Int
+    items[idx]
+
+@post(result == pair.0 + pair.1)
+f sum_pair(pair: (Int, Int)) -> Int
+    pair.0 + pair.1
+
+@post(result == old(x) + 1)
+f inc(x: Int) -> Int
+    x + 1
+
+@post(forall i in 0..result.len()-1: result[i] <= result[i+1])
+f sorted_copy(items: [Int]) -> [Int]
+    sort_ints(items)
+
+@post(exists x in result: x == target)
+f with_target(items: [Int], target: Int) -> [Int]
+    vec_push(items, target)
+
+@post('a' in result)
+f append_a(s: Str) -> Str
+    s + "a"
+
+f main() -> Int
+    _ := at_index([9, 8, 7], 1)
+    _ := sum_pair((2, 3))
+    _ := inc(4)
+    _ := sorted_copy([3, 1, 2])
+    _ := with_target([1, 2], 3)
+    _ := append_a("form")
+    0

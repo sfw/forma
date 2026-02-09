@@ -4,6 +4,38 @@ All notable changes to FORMA are documented in this file.
 
 ---
 
+## [Unreleased]
+
+### Verification + Explain UX
+
+- Added `forma explain` for contract intent output in `human`, `json`, and `markdown` formats.
+- Added deterministic example generation controls for explain (`--examples`, `--seed`, `--max-examples`).
+- Added `forma verify --report` for trust reporting over a file or directory.
+- Added verification controls (`--examples`, `--seed`, `--max-steps`, `--timeout`, `--allow-side-effects`) and `PASS/SKIP/WARN/FAIL` status output.
+- Added safe-by-default verify execution (capabilities revoked unless side effects are explicitly enabled).
+
+### CLI Error-Consistency Hardening
+
+- `forma check` now loads imports before reporting success/failure, preventing false success on missing modules.
+- `forma build --error-format json` now emits JSON for lex/module/type failures consistently.
+- Added regression fixtures/tests for missing-import handling across `run`, `check`, and `build`.
+
+### LSP Improvements
+
+- Added `textDocument/formatting`.
+- Added `textDocument/documentSymbol`.
+- Added `textDocument/signatureHelp`.
+- Added `textDocument/references` (single-file scope).
+- Improved hover with inferred type information for user-defined symbols.
+
+### Test + Coverage Improvements
+
+- Added CLI JSON failure-matrix tests for `run/check/build` across lex/parse/module/type failures.
+- Added capability matrix integration tests.
+- Expanded builtin coverage and added coverage enforcement support in CI.
+
+---
+
 ## [1.3.0] - January 26, 2026
 
 ### 🛡️ Production-Grade Stability Release

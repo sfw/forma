@@ -33,6 +33,31 @@ for f in examples/showcase/*.forma; do
 done
 
 echo ""
+echo "Checking explain --examples output for showcase examples..."
+for f in examples/showcase/*.forma; do
+    name=$(basename "$f" .forma)
+    printf "explain %-17s " "$name"
+    if cargo run --quiet -- explain --examples --max-examples 1 "$f" > /tmp/forma_explain_$$.txt 2>/dev/null; then
+        echo "✓ PASS"
+    else
+        echo "✗ FAIL"
+        cargo run --quiet -- explain --examples --max-examples 1 "$f" > /tmp/forma_explain_full_$$.txt 2>&1
+        sed 's/^/    /' /tmp/forma_explain_full_$$.txt | head -10
+        ((FAIL++))
+    fi
+done
+
+echo ""
+echo "Generating verify report for showcase examples..."
+if cargo run --quiet -- verify examples/showcase --report --format json > /tmp/forma_verify_showcase_$$.json 2>/tmp/forma_verify_showcase_$$.err; then
+    echo "verify report ✓ PASS"
+else
+    echo "verify report ✗ FAIL"
+    sed 's/^/    /' /tmp/forma_verify_showcase_$$.err | head -20
+    ((FAIL++))
+fi
+
+echo ""
 echo "==========================="
 echo "Results: $PASS/$TOTAL passed"
 
