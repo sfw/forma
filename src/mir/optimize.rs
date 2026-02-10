@@ -381,24 +381,33 @@ fn copy_propagate(func: &mut Function, stats: &mut OptStats) {
             // Step 1: Substitute operands in this statement using the current map
             total_count += substitute_stmt(stmt, &subst);
 
-            // Step 2: If this statement assigns to a local, update the map
-            if let StatementKind::Assign(dest, rvalue) = &stmt.kind {
-                let dest_local = *dest;
+            // Step 2: If this statement writes to a local, update the map
+            match &stmt.kind {
+                StatementKind::Assign(dest, rvalue) => {
+                    let dest_local = *dest;
 
-                // Invalidate any mapping where dest or src equals the assigned local
-                subst.retain(|d, s| *d != dest_local && *s != dest_local);
+                    // Invalidate any mapping where dest or src equals the assigned local
+                    subst.retain(|d, s| *d != dest_local && *s != dest_local);
 
-                // If this is a simple copy to a compiler temp, add to map
-                if let Rvalue::Use(operand) = rvalue {
-                    let dest_idx = dest_local.0 as usize;
-                    let is_temp = dest_idx < locals.len() && locals[dest_idx].name.is_none();
-                    if is_temp
-                        && let Operand::Copy(src) | Operand::Local(src) | Operand::Move(src) =
-                            operand
-                    {
-                        subst.insert(dest_local, *src);
+                    // If this is a simple copy to a compiler temp, add to map
+                    if let Rvalue::Use(operand) = rvalue {
+                        let dest_idx = dest_local.0 as usize;
+                        let is_temp = dest_idx < locals.len() && locals[dest_idx].name.is_none();
+                        if is_temp
+                            && let Operand::Copy(src) | Operand::Local(src) | Operand::Move(src) =
+                                operand
+                        {
+                            subst.insert(dest_local, *src);
+                        }
                     }
                 }
+                StatementKind::IndexAssign(local, _, _) => {
+                    // Mutating an element of `local` — invalidate any mapping
+                    // involving this local to prevent unsound substitution.
+                    let written = *local;
+                    subst.retain(|d, s| *d != written && *s != written);
+                }
+                StatementKind::Nop => {}
             }
         }
 
@@ -1380,6 +1389,45 @@ mod tests {
             stats.copies_propagated >= 2,
             "Expected at least 2 substitutions, got {}",
             stats.copies_propagated
+        );
+    }
+
+    #[test]
+    fn test_copy_prop_index_assign_invalidation() {
+        // _1 = Copy(_0); IndexAssign(_0, idx, val); return Copy(_1)
+        // The IndexAssign mutates _0, so _1 → _0 must be invalidated.
+        let locals = vec![
+            make_local(Some("arr")), // _0 = user var (array)
+            make_local(None),        // _1 = temp
+        ];
+        let stmts = vec![
+            assign(1, Rvalue::Use(Operand::Copy(Local(0)))),
+            Statement {
+                kind: StatementKind::IndexAssign(
+                    Local(0),
+                    Operand::Constant(Constant::Int(0)),
+                    Operand::Constant(Constant::Int(999)),
+                ),
+            },
+        ];
+        let block = make_block(0, stmts, Terminator::Return(Some(Operand::Copy(Local(1)))));
+        let mut func = make_function(locals, vec![block]);
+
+        let mut stats = OptStats::default();
+        copy_propagate(&mut func, &mut stats);
+
+        // _1 → _0 should have been invalidated by IndexAssign on _0
+        if let Some(Terminator::Return(Some(Operand::Copy(local)))) = &func.blocks[0].terminator {
+            assert_eq!(
+                local.0, 1,
+                "Return should still reference _1, not _0 (IndexAssign mutated _0)"
+            );
+        } else {
+            panic!("Expected Return(Copy(_1))");
+        }
+        assert_eq!(
+            stats.copies_propagated, 0,
+            "No substitutions should occur after IndexAssign invalidation"
         );
     }
 
