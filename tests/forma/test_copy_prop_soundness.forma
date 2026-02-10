@@ -1,0 +1,51 @@
+# Copy propagation soundness test
+# Verifies that variable reassignment after copy is handled correctly.
+# Must produce identical results with and without --no-optimize.
+
+f check(label: Str, actual: Int, expected: Int) -> Int
+    if actual != expected then print("FAIL: " + label + " expected " + str(expected) + ", got " + str(actual))
+    if actual != expected then 1 else 0
+
+# Test 1: Reassignment after copy
+# The copy of x should capture x's value BEFORE reassignment.
+f test_reassign_after_copy() -> Int
+    x := 10
+    y := x
+    x := 999
+    y
+
+# Test 2: Reassignment in branch
+# Only one branch reassigns x; the copy should retain the original value.
+f test_branch_reassign(flag: Bool) -> Int
+    x := 42
+    y := x
+    if flag then x := 0
+    y
+
+# Test 3: Multiple reassignments
+f test_multi_reassign() -> Int
+    x := 1
+    a := x
+    x := 2
+    b := x
+    x := 3
+    c := x
+    a * 100 + b * 10 + c
+
+# Test 4: Copy chain with reassignment in the middle
+f test_chain_with_reassign() -> Int
+    x := 5
+    y := x
+    x := 50
+    z := x
+    y * 10 + z
+
+f main() -> Int
+    fails := 0
+    fails := fails + check("reassign_after_copy", test_reassign_after_copy(), 10)
+    fails := fails + check("branch_reassign_true", test_branch_reassign(true), 42)
+    fails := fails + check("branch_reassign_false", test_branch_reassign(false), 42)
+    fails := fails + check("multi_reassign", test_multi_reassign(), 123)
+    fails := fails + check("chain_with_reassign", test_chain_with_reassign(), 100)
+    if fails == 0 then print("All copy prop soundness tests passed")
+    fails

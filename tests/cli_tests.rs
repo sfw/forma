@@ -801,3 +801,35 @@ fn test_cli_optimization_output_equivalence() {
         "Stdout should be identical with and without optimization"
     );
 }
+
+#[test]
+fn test_cli_copy_prop_soundness() {
+    // Copy propagation soundness: reassignment after copy must not break semantics
+    let opt_output = Command::new(forma_bin())
+        .args(["run", "--allow-all"])
+        .arg(forma_test("test_copy_prop_soundness.forma"))
+        .output()
+        .expect("failed to execute forma");
+
+    let noopt_output = Command::new(forma_bin())
+        .args(["run", "--allow-all", "--no-optimize"])
+        .arg(forma_test("test_copy_prop_soundness.forma"))
+        .output()
+        .expect("failed to execute forma");
+
+    assert!(
+        opt_output.status.success(),
+        "copy prop soundness should pass with optimization: {}",
+        String::from_utf8_lossy(&opt_output.stderr)
+    );
+    assert!(
+        noopt_output.status.success(),
+        "copy prop soundness should pass without optimization: {}",
+        String::from_utf8_lossy(&noopt_output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&opt_output.stdout),
+        String::from_utf8_lossy(&noopt_output.stdout),
+        "Copy prop soundness output should be identical with and without optimization"
+    );
+}

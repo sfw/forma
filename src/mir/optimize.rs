@@ -4,7 +4,7 @@
 //! to a fixed point (or max 3 rounds):
 //!
 //! 1. **Constant folding** — evaluate constant expressions at compile time
-//! 2. **Copy propagation** — replace uses of a copy with the original
+//! 2. **Copy propagation** — block-local forward propagation of copy temps
 //! 3. **Dead block elimination** — remove unreachable blocks, simplify constant branches
 //! 4. **Peephole optimizations** — local pattern replacements within a block
 
@@ -367,86 +367,48 @@ fn fold_unop(op: UnOp, c: &Constant) -> Option<Constant> {
 
 /// Eliminate redundant temporaries by replacing uses of a copy with the original.
 ///
-/// Only propagates compiler temporaries (LocalDecl.name == None) that are
-/// assigned exactly once from a simple copy/local/move.
+/// Uses block-local forward propagation: each block starts with an empty
+/// substitution map, so reassignments in other blocks cannot cause unsound
+/// cross-block substitutions.
 fn copy_propagate(func: &mut Function, stats: &mut OptStats) {
-    // Phase 1: Build substitution map.
-    // For each Assign(dest, Use(Copy(src)|Local(src)|Move(src))) where dest
-    // is a compiler temporary assigned exactly once, record dest → src.
+    let locals = &func.locals;
+    let mut total_count = 0usize;
 
-    // First count assignments per local
-    let mut assign_count: HashMap<Local, usize> = HashMap::new();
-    for block in &func.blocks {
-        for stmt in &block.stmts {
-            if let StatementKind::Assign(dest, _) = &stmt.kind {
-                *assign_count.entry(*dest).or_insert(0) += 1;
-            }
-        }
-    }
-
-    // Build raw substitution map
-    let mut subst: HashMap<Local, Local> = HashMap::new();
-    for block in &func.blocks {
-        for stmt in &block.stmts {
-            if let StatementKind::Assign(dest, Rvalue::Use(operand)) = &stmt.kind {
-                // Only compiler temporaries (no user name)
-                let dest_idx = dest.0 as usize;
-                if dest_idx >= func.locals.len() {
-                    continue;
-                }
-                if func.locals[dest_idx].name.is_some() {
-                    continue;
-                }
-
-                // Only singly-assigned
-                if assign_count.get(dest).copied().unwrap_or(0) != 1 {
-                    continue;
-                }
-
-                // Extract source local
-                let src = match operand {
-                    Operand::Copy(s) | Operand::Local(s) | Operand::Move(s) => *s,
-                    _ => continue,
-                };
-
-                subst.insert(*dest, src);
-            }
-        }
-    }
-
-    if subst.is_empty() {
-        return;
-    }
-
-    // Chain substitutions: if _1 → x and _2 → _1, then _2 → x
-    let mut changed = true;
-    while changed {
-        changed = false;
-        let keys: Vec<Local> = subst.keys().copied().collect();
-        for key in keys {
-            let val = subst[&key];
-            if let Some(&transitive) = subst.get(&val) {
-                // Only update if different from current mapping and avoids self-loops
-                if transitive != subst[&key] && transitive != key {
-                    subst.insert(key, transitive);
-                    changed = true;
-                }
-            }
-        }
-    }
-
-    // Phase 2: Apply substitution to all operands in the function.
-    let mut count = 0usize;
     for block in &mut func.blocks {
+        let mut subst: HashMap<Local, Local> = HashMap::new();
+
         for stmt in &mut block.stmts {
-            count += substitute_stmt(stmt, &subst);
+            // Step 1: Substitute operands in this statement using the current map
+            total_count += substitute_stmt(stmt, &subst);
+
+            // Step 2: If this statement assigns to a local, update the map
+            if let StatementKind::Assign(dest, rvalue) = &stmt.kind {
+                let dest_local = *dest;
+
+                // Invalidate any mapping where dest or src equals the assigned local
+                subst.retain(|d, s| *d != dest_local && *s != dest_local);
+
+                // If this is a simple copy to a compiler temp, add to map
+                if let Rvalue::Use(operand) = rvalue {
+                    let dest_idx = dest_local.0 as usize;
+                    let is_temp = dest_idx < locals.len() && locals[dest_idx].name.is_none();
+                    if is_temp
+                        && let Operand::Copy(src) | Operand::Local(src) | Operand::Move(src) =
+                            operand
+                    {
+                        subst.insert(dest_local, *src);
+                    }
+                }
+            }
         }
+
+        // Step 3: Substitute operands in the block's terminator
         if let Some(ref mut term) = block.terminator {
-            count += substitute_terminator(term, &subst);
+            total_count += substitute_terminator(term, &subst);
         }
     }
 
-    stats.copies_propagated += count;
+    stats.copies_propagated += total_count;
 }
 
 /// Substitute locals in a statement's operands. Returns number of substitutions made.
@@ -1282,6 +1244,145 @@ mod tests {
         assert_eq!(stats.copies_propagated, 0);
     }
 
+    #[test]
+    fn test_copy_prop_source_reassignment_barrier() {
+        // _1 = Copy(_0); _0 = Const(999); return Copy(_1)
+        // The reassignment of _0 must invalidate the _1 → _0 mapping,
+        // so the return must NOT become Copy(_0).
+        let locals = vec![
+            make_local(Some("x")), // _0 = user var
+            make_local(None),      // _1 = temp
+        ];
+        let stmts = vec![
+            assign(1, Rvalue::Use(Operand::Copy(Local(0)))),
+            assign(0, Rvalue::Use(Operand::Constant(Constant::Int(999)))),
+        ];
+        let block = make_block(0, stmts, Terminator::Return(Some(Operand::Copy(Local(1)))));
+        let mut func = make_function(locals, vec![block]);
+
+        let mut stats = OptStats::default();
+        copy_propagate(&mut func, &mut stats);
+
+        // _1 → _0 should have been invalidated by the reassignment of _0
+        if let Some(Terminator::Return(Some(Operand::Copy(local)))) = &func.blocks[0].terminator {
+            assert_eq!(
+                local.0, 1,
+                "Return should still reference _1, not _0 (source was reassigned)"
+            );
+        } else {
+            panic!("Expected Return(Copy(_1))");
+        }
+        assert_eq!(stats.copies_propagated, 0, "No substitutions should occur");
+    }
+
+    #[test]
+    fn test_copy_prop_cross_block_barrier() {
+        // Block 0: _1 = Copy(_0); Goto(Block 1)
+        // Block 1: return Copy(_1)
+        // The mapping from block 0 must NOT carry to block 1.
+        let locals = vec![
+            make_local(Some("x")), // _0 = user var
+            make_local(None),      // _1 = temp
+        ];
+        let blocks = vec![
+            make_block(
+                0,
+                vec![assign(1, Rvalue::Use(Operand::Copy(Local(0))))],
+                Terminator::Goto(BlockId(1)),
+            ),
+            make_block(1, vec![], Terminator::Return(Some(Operand::Copy(Local(1))))),
+        ];
+        let mut func = make_function(locals, blocks);
+
+        let mut stats = OptStats::default();
+        copy_propagate(&mut func, &mut stats);
+
+        // Block 1's return should still reference _1
+        if let Some(Terminator::Return(Some(Operand::Copy(local)))) = &func.blocks[1].terminator {
+            assert_eq!(
+                local.0, 1,
+                "Return in block 1 should still reference _1 (cross-block barrier)"
+            );
+        } else {
+            panic!("Expected Return(Copy(_1)) in block 1");
+        }
+        assert_eq!(
+            stats.copies_propagated, 0,
+            "No cross-block substitutions should occur"
+        );
+    }
+
+    #[test]
+    fn test_copy_prop_dest_reassignment_barrier() {
+        // _1 = Copy(_0); _1 = Const(42); _2 = Copy(_1); return Copy(_2)
+        // The reassignment of _1 invalidates _1 → _0.
+        // Then _2 = Copy(_1) maps _2 → _1 (the reassigned one).
+        // Return Copy(_2) becomes Copy(_1).
+        let locals = vec![
+            make_local(Some("x")), // _0 = user var
+            make_local(None),      // _1 = temp
+            make_local(None),      // _2 = temp
+        ];
+        let stmts = vec![
+            assign(1, Rvalue::Use(Operand::Copy(Local(0)))),
+            assign(1, Rvalue::Use(Operand::Constant(Constant::Int(42)))),
+            assign(2, Rvalue::Use(Operand::Copy(Local(1)))),
+        ];
+        let block = make_block(0, stmts, Terminator::Return(Some(Operand::Copy(Local(2)))));
+        let mut func = make_function(locals, vec![block]);
+
+        let mut stats = OptStats::default();
+        copy_propagate(&mut func, &mut stats);
+
+        // Return should be Copy(_1) (via _2 → _1), not Copy(_0)
+        if let Some(Terminator::Return(Some(Operand::Copy(local)))) = &func.blocks[0].terminator {
+            assert_eq!(
+                local.0, 1,
+                "Return should be Copy(_1) via _2→_1, not Copy(_0)"
+            );
+        } else {
+            panic!("Expected Return(Copy(_1))");
+        }
+        assert_eq!(stats.copies_propagated, 1, "Only _2 → _1 substitution");
+    }
+
+    #[test]
+    fn test_copy_prop_valid_within_block() {
+        // _1 = Copy(_0); _2 = Copy(_1); return Copy(_2)
+        // Within a single block, chaining should work:
+        // _1 → _0, then _2 = Copy(_1) substitutes to Copy(_0), adds _2 → _0
+        // Return Copy(_2) becomes Copy(_0)
+        let locals = vec![
+            make_local(Some("x")), // _0 = user var
+            make_local(None),      // _1 = temp
+            make_local(None),      // _2 = temp
+        ];
+        let stmts = vec![
+            assign(1, Rvalue::Use(Operand::Copy(Local(0)))),
+            assign(2, Rvalue::Use(Operand::Copy(Local(1)))),
+        ];
+        let block = make_block(0, stmts, Terminator::Return(Some(Operand::Copy(Local(2)))));
+        let mut func = make_function(locals, vec![block]);
+
+        let mut stats = OptStats::default();
+        copy_propagate(&mut func, &mut stats);
+
+        // Return should be Copy(_0) via chaining
+        if let Some(Terminator::Return(Some(Operand::Copy(local)))) = &func.blocks[0].terminator {
+            assert_eq!(
+                local.0, 0,
+                "Return should be Copy(_0) via chain propagation"
+            );
+        } else {
+            panic!("Expected Return(Copy(_0))");
+        }
+        assert!(
+            stats.copies_propagated >= 2,
+            "Expected at least 2 substitutions, got {}",
+            stats.copies_propagated
+        );
+    }
+
     // ---- Dead Block Elimination ----
 
     #[test]
@@ -1523,6 +1624,14 @@ mod tests {
         // First pass should optimize
         let stats1 = optimize(&mut program);
         assert!(stats1.total() > 0);
+
+        // Validate MIR after optimization
+        let errors = validate_mir(&program);
+        assert!(
+            errors.is_empty(),
+            "MIR should be valid after optimization: {:?}",
+            errors
+        );
 
         // Second pass should be idempotent
         let stats2 = optimize(&mut program);
