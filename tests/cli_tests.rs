@@ -719,3 +719,85 @@ fn test_cli_check_partial_success_json() {
         stdout
     );
 }
+
+// ---------------------------------------------------------------------------
+// MIR Optimization tests
+// ---------------------------------------------------------------------------
+
+/// Get the path to a .forma test file in tests/forma/.
+fn forma_test(name: &str) -> PathBuf {
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("tests");
+    path.push("forma");
+    path.push(name);
+    path
+}
+
+#[test]
+fn test_cli_run_with_optimization() {
+    // test_optimization.forma should pass with optimization enabled (default)
+    let output = Command::new(forma_bin())
+        .args(["run", "--allow-all"])
+        .arg(forma_test("test_optimization.forma"))
+        .output()
+        .expect("failed to execute forma");
+    assert!(
+        output.status.success(),
+        "test_optimization.forma should pass with optimization: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("All optimization tests passed"),
+        "Expected pass message, got: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_cli_run_without_optimization() {
+    // test_optimization.forma should produce identical output with --no-optimize
+    let output = Command::new(forma_bin())
+        .args(["run", "--allow-all", "--no-optimize"])
+        .arg(forma_test("test_optimization.forma"))
+        .output()
+        .expect("failed to execute forma");
+    assert!(
+        output.status.success(),
+        "test_optimization.forma should pass with --no-optimize: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("All optimization tests passed"),
+        "Expected pass message with --no-optimize, got: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_cli_optimization_output_equivalence() {
+    // Run with and without optimization, compare stdout
+    let opt_output = Command::new(forma_bin())
+        .args(["run", "--allow-all"])
+        .arg(forma_test("test_optimization.forma"))
+        .output()
+        .expect("failed to execute forma");
+
+    let noopt_output = Command::new(forma_bin())
+        .args(["run", "--allow-all", "--no-optimize"])
+        .arg(forma_test("test_optimization.forma"))
+        .output()
+        .expect("failed to execute forma");
+
+    assert_eq!(
+        opt_output.status.code(),
+        noopt_output.status.code(),
+        "Exit codes should match"
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&opt_output.stdout),
+        String::from_utf8_lossy(&noopt_output.stdout),
+        "Stdout should be identical with and without optimization"
+    );
+}

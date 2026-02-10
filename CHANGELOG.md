@@ -42,11 +42,36 @@ All notable changes to FORMA are documented in this file.
 - Added security warnings for `--allow-all` and capability flags to README, reference.md, and ai-reference.md.
 - Replaced predictable `/tmp/forma_*` paths with `mktemp` and `trap` cleanup in contract test script.
 
+### MIR Optimization Pass (Phase 1)
+
+- Added `src/mir/optimize.rs` with four optimization passes: constant folding, copy propagation, dead block elimination, and peephole optimizations.
+- Optimization runs by default between MIR lowering and interpretation/codegen; disable with `--no-optimize`.
+- Passes run in fixed-point rounds (max 3) so one pass can unlock another.
+- Constant folding evaluates compile-time arithmetic, comparisons, and boolean logic; simplifies constant-condition `If`/`Switch` to `Goto`.
+- Copy propagation eliminates redundant compiler temporaries with chain resolution.
+- Dead block elimination removes unreachable blocks with BlockId remapping; includes jump threading for empty goto chains.
+- Peephole optimizations: nop removal, identity ops (`x+0`, `x*1`), `x*0` folding, double negation elimination, redundant return-temp elimination.
+- Added MIR validity checker (`validate_mir()`) for post-optimization invariant checking.
+- Added `--no-optimize` CLI flag to `run`, `build`, and `compile` commands.
+- 24 unit tests covering all optimization passes and safety guards.
+- 3 CLI integration tests verifying output equivalence with and without optimization.
+- `.forma` correctness test (`test_optimization.forma`) and benchmark script (`scripts/bench_optimize.sh`).
+
+### Contract Patterns Expansion
+
+- Expanded named contract patterns from 12 to 35 across 6 categories (numeric, collection, set, sequence, ordering, state).
+- Added 8 runtime contract helpers (`set_equals`, `is_prefix`, `is_suffix`, `is_reversed`, `is_rotated`, `is_partitioned`, `stable`, `value_le`).
+- Added `pattern_to_english()` for human-readable pattern descriptions in explain output.
+- Fixed `@rotated` panic on negative k values (uses `rem_euclid`).
+- Fixed `@stable` correctness: now enforces permutation check + nondecreasing key order + stable relative ordering.
+- Fixed `is_partitioned` negative index guard.
+
 ### Test + Coverage Improvements
 
 - Added CLI JSON failure-matrix tests for `run/check/build` across lex/parse/module/type failures.
 - Added capability matrix integration tests.
 - Expanded builtin coverage and added coverage enforcement support in CI.
+- Removed global `reset_type_var_counter()` calls from tests to fix parallel test flakes.
 
 ---
 

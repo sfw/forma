@@ -1,0 +1,73 @@
+# MIR Optimization correctness test
+# Exercises constant expressions, copy chains, dead branches, and identity ops.
+# Run with and without --no-optimize to verify identical output.
+
+# Constant folding: these should be computed at compile time
+f test_constant_fold() -> Int
+    x := 2 + 3
+    y := x * 10
+    z := 100 / 4
+    w := 7 - 3
+    r := 15 % 4
+    x + z + w + r
+
+# Boolean constant folding
+f test_bool_fold() -> Bool
+    a := true && false
+    b := true || false
+    c := 1 < 2
+    d := 3 >= 3
+    !a && b && c && d
+
+# Identity operations: x+0, 0+x, x*1, 1*x, x-0
+f test_identity_ops() -> Int
+    x := 42
+    a := x + 0
+    b := 0 + a
+    c := b * 1
+    d := 1 * c
+    e := d - 0
+    e
+
+# Multiplication by zero
+f test_mul_zero() -> Int
+    x := 99
+    a := x * 0
+    b := 0 * 99
+    a + b
+
+# Copy chain (intermediate temps)
+f test_copy_chain(n: Int) -> Int
+    a := n
+    b := a
+    c := b
+    c + 1
+
+# Fibonacci to exercise optimizer on real computation
+f fib(n: Int) -> Int
+    if n <= 1 then n
+    else fib(n - 1) + fib(n - 2)
+
+# Nested arithmetic with constants
+f test_nested() -> Int
+    a := (1 + 2) * (3 + 4)
+    b := a + (10 - 5)
+    c := b * 2
+    c
+
+# Check helper
+f check(label: Str, actual: Int, expected: Int) -> Int
+    if actual != expected then print("FAIL: " + label + " expected " + str(expected) + ", got " + str(actual))
+    if actual != expected then 1 else 0
+
+f main() -> Int
+    fails := 0
+    fails := fails + check("constant_fold", test_constant_fold(), 37)
+    if !test_bool_fold() then fails := fails + 1
+    fails := fails + check("identity_ops", test_identity_ops(), 42)
+    fails := fails + check("mul_zero", test_mul_zero(), 0)
+    fails := fails + check("copy_chain", test_copy_chain(5), 6)
+    fails := fails + check("fib_10", fib(10), 55)
+    fails := fails + check("nested", test_nested(), 52)
+    if fails == 0 then print("All optimization tests passed")
+    fails

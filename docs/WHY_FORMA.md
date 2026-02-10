@@ -181,6 +181,8 @@ Interpreted languages work well with AI — but they're not systems languages. Y
 
 No. FORMA compiles to native code via LLVM — the same backend powering Rust, Clang, and Swift. The second-class reference model doesn't prevent optimization; it just changes how the compiler reasons about memory.
 
+Before execution, FORMA runs a MIR optimization pass (constant folding, copy propagation, dead block elimination, peephole optimizations) that eliminates redundant temporaries and simplifies control flow. For LLVM builds, these MIR-level optimizations complement LLVM's own passes.
+
 For the same algorithms, FORMA should produce comparable machine code to Rust. We're not trading performance for simplicity — we're trading *language complexity* for *AI compatibility*.
 
 ## Who Is FORMA For?

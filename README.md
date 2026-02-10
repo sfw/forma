@@ -314,7 +314,7 @@ FORMA is in **active development**. The core language and standard library are f
 
 - [x] Lexer, parser, type checker
 - [x] Borrow checker (second-class references)
-- [x] MIR interpreter
+- [x] MIR interpreter with optimization pass (constant fold, copy propagation, dead block elimination, peephole)
 - [x] Generics with monomorphization
 - [x] Linear types and capability system
 - [x] Module system

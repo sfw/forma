@@ -1239,6 +1239,7 @@ Capability-gated groups:
 forma run <file>                   # Run a FORMA program
 forma run <file> --dump-mir        # Run with MIR dump
 forma run <file> --no-check-contracts # Disable runtime contracts
+forma run <file> --no-optimize     # Disable MIR optimization pass
 forma run <file> --allow-read      # Allow file reads
 forma run <file> --allow-write     # Allow file writes
 forma run <file> --allow-network   # Allow networking
@@ -1249,6 +1250,7 @@ forma run <file> --allow-all       # Allow all capabilities (see warning below)
 forma check <file>                 # Type check without running
 forma check <file> --partial       # Partial checking
 forma build <file>                 # Build native executable (LLVM feature)
+forma build <file> --no-optimize   # Build without MIR optimization
 forma explain <file>               # Explain contracts in plain English
 forma explain <file> --examples=3 --seed 42 --format json
 forma explain <file> --max-examples 3 --seed 42 --format json

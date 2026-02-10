@@ -110,6 +110,10 @@ enum Commands {
         /// Optimization level (0-3)
         #[arg(short = 'O', long, default_value = "0")]
         opt_level: u8,
+
+        /// Disable MIR optimization pass
+        #[arg(long)]
+        no_optimize: bool,
     },
 
     /// Run a FORMA program
@@ -127,6 +131,10 @@ enum Commands {
         /// Disable @pre/@post contract checking
         #[arg(long)]
         no_check_contracts: bool,
+
+        /// Disable MIR optimization pass
+        #[arg(long)]
+        no_optimize: bool,
 
         /// Allow file read access
         #[arg(long)]
@@ -211,6 +219,10 @@ enum Commands {
         /// Optimization level (0-3)
         #[arg(short = 'O', long, default_value = "0")]
         opt_level: u8,
+
+        /// Disable MIR optimization pass
+        #[arg(long)]
+        no_optimize: bool,
     },
 
     /// Export the FORMA grammar
@@ -319,12 +331,20 @@ fn main() {
             file,
             output,
             opt_level,
-        } => build(&file, output.as_ref(), opt_level, error_format),
+            no_optimize,
+        } => build(
+            &file,
+            output.as_ref(),
+            opt_level,
+            !no_optimize,
+            error_format,
+        ),
         Commands::Run {
             file,
             args,
             dump_mir,
             no_check_contracts,
+            no_optimize,
             allow_read,
             allow_write,
             allow_network,
@@ -347,6 +367,7 @@ fn main() {
                 &args,
                 dump_mir,
                 !no_check_contracts,
+                !no_optimize,
                 &caps,
                 error_format,
             )
@@ -360,7 +381,14 @@ fn main() {
             file,
             output,
             opt_level,
-        } => build(&file, output.as_ref(), opt_level, error_format),
+            no_optimize,
+        } => build(
+            &file,
+            output.as_ref(),
+            opt_level,
+            !no_optimize,
+            error_format,
+        ),
         Commands::Grammar { format } => grammar(format),
         Commands::New { name } => new_project(&name),
         Commands::Init => init_project(),
@@ -1835,6 +1863,7 @@ fn run(
     program_args: &[String],
     dump_mir: bool,
     check_contracts: bool,
+    do_optimize: bool,
     caps: &CapabilityConfig,
     error_format: ErrorFormat,
 ) -> Result<(), String> {
@@ -1977,7 +2006,7 @@ fn run(
     }
 
     // Lower to MIR
-    let program = match Lowerer::new().lower(&ast) {
+    let mut program = match Lowerer::new().lower(&ast) {
         Ok(prog) => prog,
         Err(errors) => {
             for e in &errors {
@@ -1994,6 +2023,11 @@ fn run(
             return Err(format!("{} lowering error(s)", errors.len()));
         }
     };
+
+    // Optimize MIR
+    if do_optimize {
+        forma::mir::optimize::optimize(&mut program);
+    }
 
     // Dump MIR if requested
     if dump_mir {
@@ -2727,6 +2761,7 @@ fn build(
     file: &PathBuf,
     output: Option<&PathBuf>,
     opt_level: u8,
+    do_optimize: bool,
     error_format: ErrorFormat,
 ) -> Result<(), String> {
     let source = read_file(file)?;
@@ -2843,7 +2878,7 @@ fn build(
     let output_path = output.cloned().unwrap_or_else(|| file.with_extension(""));
 
     // Lower to MIR
-    let program = match Lowerer::new().lower(&ast) {
+    let mut program = match Lowerer::new().lower(&ast) {
         Ok(prog) => prog,
         Err(errors) => {
             for e in &errors {
@@ -2860,6 +2895,11 @@ fn build(
             return Err(format!("{} lowering error(s)", errors.len()));
         }
     };
+
+    // Optimize MIR
+    if do_optimize {
+        forma::mir::optimize::optimize(&mut program);
+    }
 
     // LLVM codegen
     #[cfg(feature = "llvm")]
@@ -3995,7 +4035,7 @@ fn repl_eval_expr(expr: &str, session_code: &str) {
     }
 
     // Lower to MIR
-    let program = match Lowerer::new().lower(&ast) {
+    let mut program = match Lowerer::new().lower(&ast) {
         Ok(prog) => prog,
         Err(errors) => {
             for e in errors.iter().take(1) {
@@ -4004,6 +4044,9 @@ fn repl_eval_expr(expr: &str, session_code: &str) {
             return;
         }
     };
+
+    // Optimize MIR
+    forma::mir::optimize::optimize(&mut program);
 
     // Check for __repl_main__ function
     if !program.functions.contains_key("__repl_main__") {

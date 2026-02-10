@@ -30,6 +30,7 @@
 pub mod interp;
 pub mod lower;
 pub mod mir;
+pub mod optimize;
 
 pub use interp::{InterpError, Interpreter, RuntimeError, Value};
 pub use lower::{LowerError, Lowerer};

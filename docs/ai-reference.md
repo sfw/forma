@@ -429,6 +429,7 @@ f main()
 forma run <file>                        # run program
 forma run <file> --allow-all            # run with all capabilities (DO NOT use on untrusted code)
 forma run <file> --no-check-contracts   # disable contracts (enabled by default)
+forma run <file> --no-optimize         # disable MIR optimization pass
 forma check <file>                      # type check only
 forma check <file> --error-format json  # JSON errors
 forma explain <file> --format json      # contract intent in JSON
@@ -441,6 +442,8 @@ forma verify <path> --report --max-steps 10000 --timeout 1000
 forma verify <path> --report --allow-side-effects
 forma grammar --format ebnf             # export grammar
 forma grammar --format json             # export grammar (JSON)
+forma build <file>                      # build native binary (LLVM)
+forma build <file> --no-optimize        # build without MIR optimization
 forma fmt <file>                        # format code
 forma repl                              # interactive REPL
 forma typeof <file> --position L:C      # type at position
