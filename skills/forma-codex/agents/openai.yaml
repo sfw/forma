@@ -1,0 +1,4 @@
+interface:
+  display_name: "FORMA Codex"
+  short_description: "Develop and validate FORMA compiler and code"
+  default_prompt: "Use $forma-codex to write FORMA code, run FORMA CLI tools, and implement safe compiler changes in this repository."
