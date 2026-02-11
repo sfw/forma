@@ -3170,7 +3170,7 @@ Item = Function
 (* Items *)
 (* ============================================ *)
 
-Function = [ "async" ] "f" Identifier [ GenericParams ] "(" [ ParamList ] ")" [ "->" Type ] FunctionBody ;
+Function = {{ Attribute }} [ "async" ] "f" Identifier [ GenericParams ] "(" [ ParamList ] ")" [ "->" Type ] FunctionBody ;
 
 FunctionBody = "=" Expression
              | Block
@@ -3178,7 +3178,9 @@ FunctionBody = "=" Expression
 
 ParamList = Param {{ "," Param }} [ "," ] ;
 
-Param = [ "mut" ] Identifier ":" Type ;
+Param = [ PassMode ] [ "mut" ] Identifier ":" Type ;
+
+PassMode = "ref" [ "mut" ] ;
 
 Struct = "s" Identifier [ GenericParams ] [ "=" StructBody ] ;
 
@@ -3224,6 +3226,19 @@ UseList = UsePath {{ "," UsePath }} [ "," ] ;
 Module = "mod" Identifier [ "{{" {{ Item }} "}}" ] ;
 
 Const = "const" Identifier ":" Type "=" Expression ;
+
+(* ============================================ *)
+(* Contracts / Attributes *)
+(* ============================================ *)
+
+Attribute = "@" Identifier [ "(" AttrArgList ")" ] ;
+
+AttrArgList = Expression [ "," String ] ;
+
+(* @pre(condition) or @pre(condition, "message") *)
+(* @post(condition) or @post(condition, "message") *)
+(* @post(old(x) + delta == result) — old() captures entry state *)
+(* Named patterns: @sorted(arr) @nonempty(x) @permutation(a,b) etc. *)
 
 (* ============================================ *)
 (* Types *)
@@ -3312,11 +3327,14 @@ Postfix = "(" [ ArgList ] ")"                 (* function call *)
         | "[" Expression "]"                  (* index *)
         | "." Identifier [ GenericArgs ]      (* field/method access *)
         | "." Integer                         (* tuple index *)
-        | "?"                                 (* try operator *)
+        | "?"                                 (* try operator - Result *)
+        | "??"                                (* unwrap or default - Option *)
         | "as" Type                           (* type cast *)
         ;
 
-ArgList = Expression {{ "," Expression }} [ "," ] ;
+ArgList = Argument {{ "," Argument }} [ "," ] ;
+
+Argument = [ "ref" [ "mut" ] ] Expression ;
 
 PrimaryExpr = Literal
             | Identifier [ GenericArgs ]
@@ -3324,6 +3342,8 @@ PrimaryExpr = Literal
             | "(" [ Expression {{ "," Expression }} [ "," ] ] ")"  (* tuple *)
             | "[" [ Expression {{ "," Expression }} [ "," ] ] "]"  (* array *)
             | "[" Expression ";" Expression "]"                    (* array repeat *)
+            | MapLiteral
+            | SetLiteral
             | Block
             | IfExpr
             | MatchExpr
@@ -3347,25 +3367,29 @@ Block = INDENT {{ Statement }} [ Expression ] DEDENT
 (* Control Flow *)
 (* ============================================ *)
 
-IfExpr = "if" Expression Block [ "else" ( IfExpr | Block ) ] ;
+IfExpr = "if" Expression "then" Expression [ "else" Expression ]   (* inline *)
+       | "if" Expression Block [ "else" ( IfExpr | Block ) ]      (* block *)
+       ;
 
 MatchExpr = "m" Expression INDENT {{ MatchArm }} DEDENT ;
 
 MatchArm = Pattern {{ "|" Pattern }} [ "if" Expression ] "=>" Expression ;
 
-WhileExpr = "wh" Expression Block
-          | "wh" "let" Pattern "=" Expression Block
+WhileExpr = [ Label ] "wh" Expression Block
+          | [ Label ] "wh" "let" Pattern "=" Expression Block
           ;
 
-ForExpr = "for" Pattern "in" Expression Block ;
+ForExpr = [ Label ] "for" Pattern "in" Expression Block ;
 
-LoopExpr = "loop" Block ;
+LoopExpr = [ Label ] "loop" Block ;
+
+Label = "'" Identifier ":" ;                  (* e.g. 'outer: *)
 
 ReturnExpr = "ret" [ Expression ] ;
 
-BreakExpr = "break" [ Expression ] ;
+BreakExpr = "break" [ "'" Identifier ] [ Expression ] ;
 
-ContinueExpr = "continue" ;
+ContinueExpr = "continue" [ "'" Identifier ] ;
 
 AwaitExpr = "await" Expression ;
 
@@ -3376,6 +3400,12 @@ ClosureExpr = "|" [ ParamList ] "|" [ "->" Type ] Expression ;
 StructExpr = TypePath "{{" [ FieldInit {{ "," FieldInit }} [ "," ] ] "}}" ;
 
 FieldInit = Identifier [ ":" Expression ] ;
+
+MapLiteral = "{{" MapEntry {{ "," MapEntry }} [ "," ] "}}" ;
+
+MapEntry = Expression ":" Expression ;
+
+SetLiteral = "{{" Expression {{ "," Expression }} [ "," ] "}}" ;
 
 (* ============================================ *)
 (* Statements *)
@@ -3434,7 +3464,7 @@ IdentifierStart = "a".."z" | "A".."Z" | "_" ;
 
 IdentifierContinue = IdentifierStart | "0".."9" ;
 
-Literal = Integer | Float | String | Char | "true" | "false" ;
+Literal = Integer | Float | String | FString | Char | "true" | "false" ;
 
 Integer = DecimalInteger | HexInteger | BinaryInteger | OctalInteger ;
 
@@ -3451,6 +3481,8 @@ Float = Digit {{ Digit }} "." Digit {{ Digit }} [ Exponent ] ;
 Exponent = ( "e" | "E" ) [ "+" | "-" ] Digit {{ Digit }} ;
 
 String = '"' {{ StringChar | EscapeSequence }} '"' ;
+
+FString = 'f"' {{ StringChar | EscapeSequence | "{{" Expression "}}" }} '"' ;
 
 Char = "'" ( CharChar | EscapeSequence ) "'" ;
 
@@ -3573,6 +3605,7 @@ fn print_grammar_json() {
             "Function": {
                 "type": "sequence",
                 "elements": [
+                    {"type": "repeat", "element": {"type": "ref", "rule": "Attribute"}},
                     {"type": "optional", "element": {"type": "literal", "value": "async"}},
                     {"type": "literal", "value": "f"},
                     {"type": "ref", "rule": "Identifier"},
@@ -3639,13 +3672,29 @@ fn print_grammar_json() {
                     {"type": "literal", "value": "}"}
                 ]
             },
+            "Attribute": {
+                "type": "sequence",
+                "elements": [
+                    {"type": "literal", "value": "@"},
+                    {"type": "ref", "rule": "Identifier"},
+                    {"type": "optional", "element": {"type": "sequence", "elements": [
+                        {"type": "literal", "value": "("},
+                        {"type": "ref", "rule": "Expression"},
+                        {"type": "optional", "element": {"type": "sequence", "elements": [
+                            {"type": "literal", "value": ","},
+                            {"type": "ref", "rule": "String"}
+                        ]}},
+                        {"type": "literal", "value": ")"}
+                    ]}}
+                ]
+            },
             "Type": {
                 "type": "choice",
-                "alternatives": ["TypePath", "ArrayType", "TupleType", "FunctionType", "ReferenceType", "NeverType"]
+                "alternatives": ["TypePath", "ArrayType", "TupleType", "FunctionType", "ReferenceType", "PointerType", "ErrorType", "OptionType", "NeverType"]
             },
             "Expression": {
                 "type": "choice",
-                "alternatives": ["Literal", "Identifier", "BinaryExpr", "UnaryExpr", "CallExpr", "IndexExpr", "FieldExpr", "IfExpr", "MatchExpr", "WhileExpr", "ForExpr", "Block", "ClosureExpr"]
+                "alternatives": ["Literal", "FString", "Identifier", "BinaryExpr", "UnaryExpr", "CallExpr", "IndexExpr", "FieldExpr", "IfExpr", "MatchExpr", "WhileExpr", "ForExpr", "LoopExpr", "Block", "ClosureExpr", "StructExpr", "MapLiteral", "SetLiteral", "ReturnExpr", "BreakExpr", "ContinueExpr", "AwaitExpr", "SpawnExpr"]
             },
             "Statement": {
                 "type": "choice",
@@ -3656,14 +3705,14 @@ fn print_grammar_json() {
                 "alternatives": ["LiteralPattern", "IdentifierPattern", "WildcardPattern", "TuplePattern", "StructPattern", "EnumPattern"]
             },
             "primitiveTypes": ["Int", "Float", "Bool", "Char", "Str", "()"],
-            "keywords": ["f", "s", "e", "t", "impl", "type", "use", "mod", "const", "if", "else", "m", "wh", "for", "loop", "ret", "break", "continue", "let", "mut", "async", "await", "true", "false", "as", "where", "fn", "Self"],
+            "keywords": ["f", "s", "e", "t", "impl", "type", "use", "mod", "const", "if", "then", "else", "m", "wh", "for", "in", "loop", "ret", "break", "continue", "let", "mut", "ref", "async", "await", "spawn", "true", "false", "as", "where", "fn", "Self"],
             "operators": {
                 "arithmetic": ["+", "-", "*", "/", "%"],
                 "comparison": ["==", "!=", "<", "<=", ">", ">="],
                 "logical": ["&&", "||", "!"],
                 "bitwise": ["&", "|", "^", "<<", ">>"],
                 "assignment": ["=", "+=", "-=", "*=", "/=", "%=", "&&=", "||="],
-                "other": ["->", "=>", "::", ":", ".", "..", "..=", "?", ":="]
+                "other": ["->", "=>", "::", ":", ".", "..", "..=", "?", "??", ":=", "@"]
             }
         }
     });
