@@ -1,0 +1,14 @@
+# FORGE-RUST-GAP: FRG-016
+
+f open_database() -> Database!Str
+    db_open_memory()
+
+f main() -> Int
+    m open_database()
+        Err(_) -> 1
+        Ok(db) ->
+            m db_execute(db, "CREATE TABLE returned_resource_test (id INTEGER)")
+                Err(_) -> 2
+                Ok(_) ->
+                    db_close(db)
+                    0

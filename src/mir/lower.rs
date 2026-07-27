@@ -2076,7 +2076,7 @@ impl Lowerer {
         let scrutinee_ty = self.infer_expr_type(scrutinee);
 
         // Store scrutinee in a local for repeated access
-        let scrut_local = self.new_temp(scrutinee_ty);
+        let scrut_local = self.new_temp(scrutinee_ty.clone());
         self.emit(StatementKind::Assign(
             scrut_local,
             Rvalue::Use(scrutinee_op),
@@ -2378,25 +2378,43 @@ impl Lowerer {
                                         // Skip binding
                                     }
                                     PatternKind::Ident(inner_ident, _, _) => {
-                                        let field_local = self
-                                            .new_local(Ty::Unit, Some(inner_ident.name.clone()));
+                                        let field_ty = Self::enum_pattern_field_type(
+                                            &scrutinee_ty,
+                                            variant,
+                                            idx,
+                                        );
+                                        let field_local = self.new_local(
+                                            field_ty.clone(),
+                                            Some(inner_ident.name.clone()),
+                                        );
                                         self.vars.insert(inner_ident.name.clone(), field_local);
-                                        self.emit(StatementKind::Assign(
-                                            field_local,
-                                            Rvalue::EnumField(scrut_local, idx),
-                                        ));
+                                        let field_value =
+                                            if Self::is_affine_pattern_resource(&field_ty) {
+                                                Rvalue::Use(Operand::MovePlace(
+                                                    Place::new(scrut_local).tuple_field(idx),
+                                                ))
+                                            } else {
+                                                Rvalue::EnumField(scrut_local, idx)
+                                            };
+                                        self.emit(StatementKind::Assign(field_local, field_value));
                                     }
                                     _ => {}
                                 }
                             } else {
                                 // Bind directly with field name
+                                let field_ty =
+                                    Self::enum_pattern_field_type(&scrutinee_ty, variant, idx);
                                 let field_local =
-                                    self.new_local(Ty::Unit, Some(binding_name.clone()));
+                                    self.new_local(field_ty.clone(), Some(binding_name.clone()));
                                 self.vars.insert(binding_name.clone(), field_local);
-                                self.emit(StatementKind::Assign(
-                                    field_local,
-                                    Rvalue::EnumField(scrut_local, idx),
-                                ));
+                                let field_value = if Self::is_affine_pattern_resource(&field_ty) {
+                                    Rvalue::Use(Operand::MovePlace(
+                                        Place::new(scrut_local).tuple_field(idx),
+                                    ))
+                                } else {
+                                    Rvalue::EnumField(scrut_local, idx)
+                                };
+                                self.emit(StatementKind::Assign(field_local, field_value));
                             }
                         }
                         self.terminate(Terminator::Goto(pattern_target));
@@ -3345,6 +3363,13 @@ impl Lowerer {
                     // Floating point variants
                     "f32" => Ty::F32,
                     "f64" => Ty::F64,
+                    // Public affine database resources. Keep MIR types aligned
+                    // with the type checker so ownership normalization moves
+                    // these handles instead of treating them as nominal data.
+                    // FORGE-RUST-GAP: FRG-016.
+                    "Database" => Ty::Database,
+                    "Statement" => Ty::Statement,
+                    "Row" => Ty::DbRow,
                     // Generic built-ins
                     "Option" => {
                         if type_args.len() == 1 {
@@ -3415,6 +3440,27 @@ impl Lowerer {
 
             AstTypeKind::Never => Ty::Never,
         }
+    }
+
+    fn enum_pattern_field_type(scrutinee: &Ty, variant: &str, index: usize) -> Ty {
+        if index != 0 {
+            return Ty::Unit;
+        }
+        let candidate = match (scrutinee, variant) {
+            (Ty::Option(inner), "Some") => (**inner).clone(),
+            (Ty::Result(ok, _), "Ok") => (**ok).clone(),
+            (Ty::Result(_, err), "Err") => (**err).clone(),
+            _ => Ty::Unit,
+        };
+        if Self::is_affine_pattern_resource(&candidate) {
+            candidate
+        } else {
+            Ty::Unit
+        }
+    }
+
+    fn is_affine_pattern_resource(ty: &Ty) -> bool {
+        matches!(ty, Ty::Database | Ty::Statement)
     }
 
     // Helper methods
@@ -3787,6 +3833,14 @@ impl Lowerer {
             "print" | "println" | "eprint" | "eprintln" => Ty::Unit,
             "read_line" => Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str)),
             "read_file" | "write_file" => Ty::Result(Box::new(Ty::Unit), Box::new(Ty::Str)),
+
+            // Database resources. These return types participate in MIR
+            // ownership, so falling back to Unit can turn a move into a copy.
+            // FORGE-RUST-GAP: FRG-016.
+            "db_open" | "db_open_memory" | "db_connect_postgres" => {
+                Ty::Result(Box::new(Ty::Database), Box::new(Ty::Str))
+            }
+            "db_prepare" => Ty::Result(Box::new(Ty::Statement), Box::new(Ty::Str)),
 
             // Type conversions
             "int" | "Int" => Ty::Int,

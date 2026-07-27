@@ -66,12 +66,11 @@ pub f reasoning_config(ref settings: ForgeSettings) -> Json
     )
 
 pub f context_management(ref settings: ForgeSettings) -> Json
-    value := json_object()
-    json_set(
-        value,
-        "compact_threshold",
-        json_from_int(settings.server_compact_threshold)
-    )
+    source := "[{\"type\":\"compaction\",\"compact_threshold\":" +
+        int_to_str(settings.server_compact_threshold) + "}]"
+    m json_parse(source)
+        Ok(value) -> value
+        Err(_) -> json_array()
 
 pub f build_response_request(
     ref settings: ForgeSettings,
@@ -160,7 +159,7 @@ pub f decode_agent_payload(
     output_tokens: Int
 ) -> AgentResult
     m json_parse(payload)
-        Err(error) -> failed_agent_result(
+        Err(error) -> blocked_agent_result(
             "provider returned invalid structured output: " + error
         )
         Ok(value) ->
@@ -196,7 +195,7 @@ pub f decode_provider_response(response: Json) -> AgentResult
     input_tokens := usage_int(ref response, "input_tokens")
     output_tokens := usage_int(ref response, "output_tokens")
     m output_text(response)
-        None -> failed_agent_result(
+        None -> blocked_agent_result(
             "provider response contained no output_text"
         )
         Some(payload) ->
@@ -231,17 +230,17 @@ pub f invoke_agent(
         settings.provider_timeout_ms,
         false
     )
-        Err(error) -> failed_agent_result("provider request failed: " + error)
+        Err(error) -> blocked_agent_result("provider request failed: " + error)
         Ok(response) ->
             status := response.0
             body := response.1
             if status < 200 || status >= 300
-                failed_agent_result(
+                blocked_agent_result(
                     "provider returned HTTP " + int_to_str(status) + ": " + body
                 )
             else
                 m json_parse(body)
-                    Err(error) -> failed_agent_result(
+                    Err(error) -> blocked_agent_result(
                         "provider response was not JSON: " + error
                     )
                     Ok(document) -> decode_provider_response(document)

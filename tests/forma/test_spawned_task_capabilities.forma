@@ -1,0 +1,13 @@
+# FORGE-RUST-GAP: FRG-017
+
+f inspect_directory() -> Int!Str
+    m dir_list(".")
+        Err(error) -> Err(error)
+        Ok(_) -> Ok(42)
+
+f main() -> Int
+    tasks := [sp inspect_directory()]
+    results := await_all(tasks)
+    m results[0]
+        Err(_) -> 1
+        Ok(value) -> if value == 42 then 0 else 2

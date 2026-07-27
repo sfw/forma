@@ -715,6 +715,48 @@ f main() -> Int
     }
 
     #[test]
+    fn returned_database_result_is_moved_without_cleanup() {
+        // FORGE-RUST-GAP: FRG-016
+        let source = r#"
+f open_database() -> Database!Str
+    db_open_memory()
+
+f main() -> Int
+    0
+"#;
+        let mut session = CompilerSession::new();
+        let compilation = session
+            .compile_source("returned_database.forma", source)
+            .unwrap();
+        let function = &compilation.program.functions["open_database"];
+        assert_eq!(
+            function.return_ty,
+            crate::types::Ty::Result(
+                Box::new(crate::types::Ty::Database),
+                Box::new(crate::types::Ty::Str),
+            )
+        );
+        assert!(matches!(
+            function.locals.first().map(|local| &local.ty),
+            Some(crate::types::Ty::Result(ok, _))
+                if matches!(ok.as_ref(), crate::types::Ty::Database)
+        ));
+        assert!(matches!(
+            function.blocks[1].terminator,
+            Some(crate::mir::Terminator::Return(Some(
+                crate::mir::Operand::Move(_)
+            )))
+        ));
+        assert!(
+            !function
+                .blocks
+                .iter()
+                .flat_map(|block| &block.stmts)
+                .any(|statement| matches!(statement.kind, crate::mir::StatementKind::Drop(_)))
+        );
+    }
+
+    #[test]
     fn long_keyword_aliases_compile() {
         let source = r#"
 function main() -> Int

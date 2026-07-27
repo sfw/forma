@@ -527,6 +527,12 @@ impl CapabilityConfig {
                 interp.grant_capability("unsafe");
             }
         }
+        // CLI grants are the explicit authority boundary for the whole Forma
+        // program, including work it deliberately spawns. The interpreter API
+        // still defaults child authority to empty for embedders that need a
+        // narrower task policy.
+        // FORGE-RUST-GAP: FRG-017.
+        interp.set_task_capabilities(["read", "write", "network", "exec", "env", "unsafe"]);
     }
 }
 

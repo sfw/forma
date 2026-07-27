@@ -559,7 +559,7 @@ pub f apply_live_node_result(
         )
         take_transition_state(failed)
 
-pub f invoke_isolated_session(
+pub f invoke_isolated_session_inner(
     settings_source: Str,
     run_id: Str,
     node_id: Str,
@@ -567,11 +567,11 @@ pub f invoke_isolated_session(
     prompt: Str
 ) -> AgentResult
     m load_settings(settings_source)
-        Err(error) -> failed_agent_result(error)
+        Err(error) -> blocked_agent_result(error)
         Ok(settings) ->
             m env_get(settings.api_key_env)
                 None ->
-                    failed_agent_result(
+                    blocked_agent_result(
                         "missing API key environment variable: " +
                             settings.api_key_env
                     )
@@ -586,7 +586,7 @@ pub f invoke_isolated_session(
                             Some(url) -> db_connect_postgres(url)
                     else db_open(settings.database_path)
                     m connection
-                        Err(error) -> failed_agent_result(error)
+                        Err(error) -> blocked_agent_result(error)
                         Ok(db) ->
                             result := invoke_session(
                                 ref settings,
@@ -599,6 +599,23 @@ pub f invoke_isolated_session(
                             )
                             db_close(db)
                             result
+
+pub f invoke_isolated_session(
+    settings_source: Str,
+    run_id: Str,
+    node_id: Str,
+    role: Str,
+    prompt: Str
+) -> AgentResult!Str
+    Ok(
+        invoke_isolated_session_inner(
+            settings_source,
+            run_id,
+            node_id,
+            role,
+            prompt
+        )
+    )
 
 @pre(settings.max_agent_turns > 0)
 @pre(graph.nodes.len() > 0, "live workflow requires a graph node")
@@ -705,9 +722,15 @@ pub f continue_live_workflow(
                     results = remaining_results
                     (remaining_ids, next_id) := vec_pop(node_ids)
                     node_ids = remaining_ids
-                    result := m next_result
+                    task_result := m next_result
                         Some(value) -> value
-                        None -> failed_agent_result("parallel task returned no result")
+                        None -> Err("parallel task returned no result")
+                    result := m task_result
+                        Ok(value) -> value
+                        Err(error) ->
+                            blocked_agent_result(
+                                "spawned agent task failed: " + error
+                            )
                     node_id := m next_id
                         Some(value) -> value
                         None -> ""
@@ -795,6 +818,7 @@ pub f run_live_workflow(
                 Some(error) ->
                     Err("could not persist initial workflow state: " + error)
                 None ->
+                    print("Run created: " + run_id)
                     Ok(
                         continue_live_workflow(
                             ref settings,

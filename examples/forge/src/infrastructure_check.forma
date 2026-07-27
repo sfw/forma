@@ -38,7 +38,14 @@ f run_checks() -> Int
                         "test prompt"
                     )
                     rendered := json_stringify(request)
-                    if str_contains(rendered, "json_schema") && str_contains(rendered, "compact_threshold")
+                    context := m json_get(request, "context_management")
+                        Some(value) -> value
+                        None -> json_object()
+                    compact := m json_array_get(context, 0)
+                        Some(value) -> value
+                        None -> json_object()
+                    context_valid := json_is_array(context) && json_array_len(context) == 1 && string_or(ref compact, "type", "") == "compaction" && int_or(ref compact, "compact_threshold", 0) == settings.server_compact_threshold
+                    if str_contains(rendered, "json_schema") && context_valid
                         passed = passed + 1
                     if settings.max_parallel_nodes == 3 && settings.provider_timeout_ms == 120000 && settings.max_total_tokens == 500000
                         passed = passed + 1

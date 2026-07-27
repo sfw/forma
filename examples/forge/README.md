@@ -79,6 +79,11 @@ Resume a preserved run after intervention or process restart:
   resume examples/forge/forge.settings.toml <run-id>
 ```
 
+Run IDs are UUIDs, not numeric sequence numbers. Forge prints
+`Run created: <uuid>` immediately after the initial state is durably stored;
+retain that value for `resume`. If no run has yet been created, start one with
+the `run` command and a quoted goal before attempting `resume`.
+
 Resume refuses a run when its complete safety-relevant settings or exact
 workflow-graph contents have changed. Completed, failed, and cancelled runs
 cannot be resumed.
@@ -216,9 +221,10 @@ The history database (SQLite locally, PostgreSQL remotely) contains:
 
 Recall combines the latest durable summary with recent messages. When
 uncompacted history crosses `local_trigger_chars`, a dedicated compactor role
-creates a new summary. Requests also set the provider's
-`context_management.compact_threshold`. Local summaries remain the durable
-source of truth; Forge does not require provider-side conversation storage.
+creates a new summary. Requests also enable provider compaction with a
+`context_management` array containing a `compaction` entry and its
+`compact_threshold`. Local summaries remain the durable source of truth; Forge
+does not require provider-side conversation storage.
 Token accounting includes both agent messages and compaction calls. The
 configured token and workflow deadlines are cooperative hard stops between
 bounded effects; an already in-flight provider response can finish before the

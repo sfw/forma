@@ -902,6 +902,49 @@ fn forma_test(name: &str) -> PathBuf {
 }
 
 #[test]
+fn test_cli_preserves_returned_database_resource() {
+    // FORGE-RUST-GAP: FRG-016
+    let output = Command::new(forma_bin())
+        .args(["run", "--allow-write"])
+        .arg(forma_test("test_returned_database_resource.forma"))
+        .output()
+        .expect("failed to execute forma");
+    assert!(
+        output.status.success(),
+        "returned Database handle should remain valid after Result matching: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn test_cli_grants_explicit_capabilities_to_spawned_tasks() {
+    // FORGE-RUST-GAP: FRG-017
+    let allowed = Command::new(forma_bin())
+        .args(["run", "--allow-read"])
+        .arg(forma_test("test_spawned_task_capabilities.forma"))
+        .output()
+        .expect("failed to execute forma");
+    assert!(
+        allowed.status.success(),
+        "spawned task should inherit the explicitly granted read capability: {}",
+        String::from_utf8_lossy(&allowed.stderr)
+    );
+
+    let denied = Command::new(forma_bin())
+        .arg("run")
+        .arg(forma_test("test_spawned_task_capabilities.forma"))
+        .output()
+        .expect("failed to execute forma");
+    assert!(!denied.status.success());
+    let stderr = String::from_utf8_lossy(&denied.stderr);
+    assert!(stderr.contains("capability 'read' required"), "{stderr}");
+    assert!(
+        !stderr.contains("field projection on non-struct"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn test_cli_run_with_optimization() {
     // test_optimization.forma should pass with optimization enabled (default)
     let output = Command::new(forma_bin())

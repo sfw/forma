@@ -143,7 +143,15 @@ f execute_live(settings_path: Str, goal: Str, resume_run_id: Str) -> Int
                                                                     str(graph_source)
                                                                 )
                                                                     Err(error) ->
-                                                                        print("Resume failed: " + error)
+                                                                        if error == "run not found"
+                                                                            print(
+                                                                                "Resume failed: run not found. Run IDs are UUIDs printed when a live run is created."
+                                                                            )
+                                                                        else
+                                                                            print(
+                                                                                "Resume failed: " +
+                                                                                    error
+                                                                            )
                                                                         db_close(db)
                                                                         1
                                                                     Ok(state) ->
@@ -178,6 +186,12 @@ f finish_live_run(ref db: Database, ref state: WorkflowState) -> Int
     print("Run: " + run_identifier(ref state))
     print("Final state: " + status)
     print("Audit events: " + int_to_str(state.events.len()))
+    if state.events.len() > 0
+        last := state.events.len() - 1
+        print(
+            "Last event: " + state.events[last].kind + ": " +
+                state.events[last].detail
+        )
     db_close(db)
     if status == "completed" then 0 else 2
 

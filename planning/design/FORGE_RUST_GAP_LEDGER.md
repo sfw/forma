@@ -47,6 +47,60 @@ None.
 
 ## Resolved entries
 
+### FRG-017 — Spawned workflows preserve explicit authority and typed failures
+
+- **Status:** Resolved
+- **Discovered:** 2026-07-27
+- **Area:** Runtime
+- **Forge need:** Run graph-ready agents concurrently with the capabilities
+  explicitly granted to the Forge process, and turn a child failure into a
+  durable failed-agent result.
+- **Why Forma was insufficient:** The CLI granted capabilities only to the root
+  interpreter while spawned interpreters defaulted to empty authority. The
+  runtime represents an uncaught spawned-task error as `Result::Err`, but
+  Forge's task signature promised a bare `AgentResult`, causing a secondary
+  field-projection failure.
+- **Rust used:** CLI execution now selects its already-granted capability set
+  as the explicit child-task subset. The interpreter embedding API retains its
+  deny-by-default task policy.
+- **Current workaround:** None. Forge declares isolated sessions as
+  `AgentResult!Str` and converts task errors into ordinary failed-agent results.
+- **Forma improvement:** Capability inheritance remains explicit at the host
+  boundary, while concurrent application code has a type-correct failure path.
+- **Removal criterion:** Met when a spawned file operation succeeds only with
+  the corresponding CLI grant, remains denied without it, and neither case
+  produces a type-confused field projection.
+- **Regression evidence:** `tests/forma/test_spawned_task_capabilities.forma`,
+  the packaged CLI capability regression, and Forge corpus/infrastructure
+  checks.
+- **Priority:** Release blocking
+
+### FRG-016 — Affine database handles survive Result returns and pattern binding
+
+- **Status:** Resolved
+- **Discovered:** 2026-07-27
+- **Area:** Language
+- **Forge need:** Open SQLite or PostgreSQL history through a reusable Forma
+  function and use the returned connection after matching `Database!Str`.
+- **Why Forma was insufficient:** MIR lowering treated public database resource
+  annotations and database-opening builtin results as nominal or `Unit` values.
+  Pattern binding then copied the handle out of `Result::Ok`, and cleanup of the
+  matched result closed the same runtime connection before the binding used it.
+- **Rust used:** The MIR lowerer now preserves the `Database`, `Statement`, and
+  `Row` resource identities, assigns resource-producing database builtins their
+  affine result types, and lowers affine `Result`/`Option` bindings as ownership
+  transfers.
+- **Current workaround:** None.
+- **Forma improvement:** Affine database resources can cross user-function and
+  pattern-match boundaries without premature destruction.
+- **Removal criterion:** Met when a Forma function can return
+  `Database!Str`, the caller can match `Ok(db)`, execute SQL, and close `db`.
+- **Regression evidence:** `tests/forma/test_returned_database_resource.forma`,
+  `compiler::tests::returned_database_result_is_moved_without_cleanup`, the
+  packaged CLI regression, and Forge resume validation through database
+  initialization.
+- **Priority:** Release blocking
+
 ### FRG-015 — Folder-based custom tools remained ordinary Forma programs
 
 - **Status:** Resolved
