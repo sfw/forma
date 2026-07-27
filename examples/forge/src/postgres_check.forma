@@ -1,0 +1,64 @@
+# Opt-in live PostgreSQL integration check. Use a dedicated test database.
+
+us model
+us memory
+
+f main() -> Int
+    m env_get("FORMA_TEST_POSTGRES_URL")
+        None ->
+            print("SKIP: FORMA_TEST_POSTGRES_URL is not configured")
+            0
+        Some(url) ->
+            m db_connect_postgres(url)
+                Err(error) ->
+                    print("PostgreSQL connection failed: " + error)
+                    1
+                Ok(db) ->
+                    m initialize_memory(ref db, true)
+                        Some(error) ->
+                            print("PostgreSQL schema failed: " + error)
+                            db_close(db)
+                            1
+                        None ->
+                            run_id := "postgres-check-" + uuid_v4()
+                            m create_run(
+                                ref db,
+                                str(run_id),
+                                "verify Forge PostgreSQL persistence",
+                                sha256("postgres-integration-check")
+                            )
+                                Some(error) ->
+                                    print("PostgreSQL run insert failed: " + error)
+                                    db_close(db)
+                                    1
+                                None ->
+                                    event := audit_event(
+                                        0,
+                                        0,
+                                        "",
+                                        "run_started",
+                                        "PostgreSQL integration check"
+                                    )
+                                    m persist_event(
+                                        ref db,
+                                        str(run_id),
+                                        ref event
+                                    )
+                                        Some(error) ->
+                                            print("PostgreSQL event insert failed: " + error)
+                                            db_close(db)
+                                            1
+                                        None ->
+                                            m load_events(ref db, ref run_id)
+                                                Err(error) ->
+                                                    print("PostgreSQL event query failed: " + error)
+                                                    db_close(db)
+                                                    1
+                                                Ok(events) ->
+                                                    db_close(db)
+                                                    if events.len() == 1
+                                                        print("PostgreSQL integration valid")
+                                                        0
+                                                    else
+                                                        print("PostgreSQL event round-trip mismatch")
+                                                        1

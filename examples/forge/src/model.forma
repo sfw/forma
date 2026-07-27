@@ -1,0 +1,395 @@
+# Forge domain model.
+#
+# Runtime state is deliberately separate from the immutable process graph. The
+# graph can therefore be validated, explained, serialized, and verified without
+# performing hosted effects.
+
+pub s ProcessNode
+    id: Str
+    role: Str
+    required_capability: Str
+    max_attempts: Int
+    required: Bool
+    self_correcting: Bool
+    repair_attempts_per_strategy: Int
+    repair_strategy_changes: Int
+
+pub s ProcessEdge
+    source: Str
+    target: Str
+    condition: Str
+
+pub s WorkflowGraph
+    id: Str
+    authority: [Str]
+    nodes: [ProcessNode]
+    edges: [ProcessEdge]
+
+@inv(node_id.len() > 0, "runtime node id must not be empty")
+@inv(attempt >= 0, "runtime attempt must be non-negative")
+@inv(
+    status == "pending" || status == "running" || status == "completed" ||
+        status == "failed" || status == "cancelled" || status == "skipped",
+    "runtime status must be recognized"
+)
+pub s NodeRuntime
+    node_id: Str
+    status: Str
+    attempt: Int
+    artifact: Str
+    error: Str
+
+@inv(sequence >= 0, "audit sequence must be non-negative")
+@inv(logical_time >= 0, "logical time must be non-negative")
+@inv(kind.len() > 0, "audit event kind must not be empty")
+pub s AuditEvent
+    sequence: Int
+    logical_time: Int
+    node_id: Str
+    kind: Str
+    detail: Str
+
+@inv(attempts_per_strategy > 0, "repair attempts must be positive")
+@inv(strategy_changes >= 0, "strategy changes must be non-negative")
+pub s RepairPolicy
+    attempts_per_strategy: Int
+    strategy_changes: Int
+    renew_budget_on_progress: Bool
+    pause_on_stagnation: Bool
+    allow_human_escalation: Bool
+
+@inv(failure_count >= 0, "failure count must be non-negative")
+@inv(severity_score >= 0, "severity score must be non-negative")
+@inv(disposition.len() > 0, "verification disposition must not be empty")
+pub s VerificationResult
+    disposition: Str
+    failure_count: Int
+    severity_score: Int
+    failure_fingerprint: Str
+    evidence_artifact: Str
+
+@inv(revision >= 0, "repair revision must be non-negative")
+@inv(strategy >= 0, "repair strategy must be non-negative")
+@inv(attempts_in_strategy >= 0, "repair attempts must be non-negative")
+@inv(strategy_changes_used >= 0, "used strategy changes must be non-negative")
+@inv(status == "inactive" => revision == 0)
+@inv(status != "inactive" => revision > 0)
+@inv(status == "inactive" || node_id.len() > 0)
+pub s RepairSession
+    status: Str
+    node_id: Str
+    revision: Int
+    artifact: Str
+    strategy: Int
+    attempts_in_strategy: Int
+    strategy_changes_used: Int
+    last_failure_count: Int
+    last_severity_score: Int
+    last_failure_fingerprint: Str
+    evidence_artifact: Str
+
+@inv(run_id.len() > 0, "workflow run id must not be empty")
+@inv(nodes.len() > 0, "workflow state must contain node runtimes")
+@inv(next_sequence == events.len(), "event sequence must remain contiguous")
+@inv(logical_time >= 0, "workflow logical time must be non-negative")
+@inv(
+    status == "running" || status == "completed" || status == "failed" ||
+        status == "awaiting_intervention" || status == "cancelled",
+    "workflow status must be recognized"
+)
+pub s WorkflowState
+    run_id: Str
+    status: Str
+    nodes: [NodeRuntime]
+    events: [AuditEvent]
+    next_sequence: Int
+    logical_time: Int
+    repair: RepairSession
+
+@inv(accepted => error.len() == 0, "accepted transitions cannot contain errors")
+@inv(!accepted => error.len() > 0, "rejected transitions require an error")
+pub s Transition
+    state: WorkflowState
+    effects: [Str]
+    accepted: Bool
+    error: Str
+
+pub s ForgeSettings
+    version: Int
+    workspace_root: Str
+    graph_path: Str
+    max_workspace_files: Int
+    max_file_chars: Int
+    max_workspace_context_chars: Int
+    provider_kind: Str
+    provider_base_url: Str
+    api_key_env: Str
+    default_model: Str
+    reasoning_effort: Str
+    max_output_tokens: Int
+    provider_timeout_ms: Int
+    store_provider_responses: Bool
+    server_compact_threshold: Int
+    database_path: Str
+    database_url_env: Str
+    recall_messages: Int
+    compact_after_chars: Int
+    keep_recent_messages: Int
+    max_agent_turns: Int
+    max_repair_turns: Int
+    max_parallel_nodes: Int
+    max_total_tokens: Int
+    workflow_timeout_ms: Int
+    command_timeout_ms: Int
+    max_command_output_chars: Int
+    allowed_commands: [Str]
+    forma_executable: Str
+    tool_plugins_path: Str
+    tool_plugins: [ToolPlugin]
+    system_prompt: Str
+    compaction_prompt: Str
+    agent_overrides: Json
+
+@inv(name.len() > 0, "tool plugin name must not be empty")
+@inv(entrypoint.len() > 0, "tool plugin entrypoint must not be empty")
+@inv(description.len() > 0, "tool plugin description must not be empty")
+@inv(source_digest.len() == 64, "tool plugin source digest must be SHA-256")
+pub s ToolPlugin
+    name: Str
+    entrypoint: Str
+    description: Str
+    capabilities: [Str]
+    environment: [Str]
+    source_digest: Str
+    input_description: Str
+    payload_description: Str
+
+pub s AgentResult
+    outcome: Str
+    artifact: Str
+    summary: Str
+    memory: Str
+    verification_disposition: Str
+    failure_count: Int
+    severity_score: Int
+    failure_fingerprint: Str
+    evidence: Str
+    tool_name: Str
+    tool_input: Str
+    tool_payload: Str
+    response_id: Str
+    input_tokens: Int
+    output_tokens: Int
+    error: Str
+
+@post(result.id == old(id))
+@post(result.role == old(role))
+@post(result.required_capability == old(capability))
+@post(result.max_attempts == max_attempts)
+@post(!result.self_correcting)
+pub f process_node(
+    id: Str,
+    role: Str,
+    capability: Str,
+    max_attempts: Int,
+    required: Bool
+) -> ProcessNode
+    ProcessNode {
+        id: id,
+        role: role,
+        required_capability: capability,
+        max_attempts: max_attempts,
+        required: required,
+        self_correcting: false,
+        repair_attempts_per_strategy: 0,
+        repair_strategy_changes: 0
+    }
+
+@post(result.id == old(id))
+@post(result.role == old(role))
+@post(result.required_capability == old(capability))
+@post(result.max_attempts == max_attempts)
+@post(result.self_correcting)
+@post(result.repair_attempts_per_strategy == repair_attempts_per_strategy)
+@post(result.repair_strategy_changes == repair_strategy_changes)
+pub f repairing_process_node(
+    id: Str,
+    role: Str,
+    capability: Str,
+    max_attempts: Int,
+    required: Bool,
+    repair_attempts_per_strategy: Int,
+    repair_strategy_changes: Int
+) -> ProcessNode
+    ProcessNode {
+        id: id,
+        role: role,
+        required_capability: capability,
+        max_attempts: max_attempts,
+        required: required,
+        self_correcting: true,
+        repair_attempts_per_strategy: repair_attempts_per_strategy,
+        repair_strategy_changes: repair_strategy_changes
+    }
+
+@post(result.source == old(source))
+@post(result.target == old(target))
+@post(result.condition == old(condition))
+pub f process_edge(source: Str, target: Str, condition: Str) -> ProcessEdge
+    ProcessEdge { source: source, target: target, condition: condition }
+
+@post(result.node_id == old(node_id))
+@post(result.status == "pending")
+@post(result.attempt == 0)
+pub f node_runtime(node_id: Str) -> NodeRuntime
+    NodeRuntime {
+        node_id: node_id,
+        status: "pending",
+        attempt: 0,
+        artifact: "",
+        error: ""
+    }
+
+@post(result.sequence == sequence)
+@post(result.logical_time == logical_time)
+@post(result.node_id == old(node_id))
+@post(result.kind == old(kind))
+pub f audit_event(
+    sequence: Int,
+    logical_time: Int,
+    node_id: Str,
+    kind: Str,
+    detail: Str
+) -> AuditEvent
+    AuditEvent {
+        sequence: sequence,
+        logical_time: logical_time,
+        node_id: node_id,
+        kind: kind,
+        detail: detail
+    }
+
+@pre(attempts_per_strategy > 0, "repair attempts must be positive")
+@pre(strategy_changes >= 0, "strategy changes must be non-negative")
+@post(result.renew_budget_on_progress)
+@post(result.pause_on_stagnation)
+pub f repair_policy(
+    attempts_per_strategy: Int,
+    strategy_changes: Int
+) -> RepairPolicy
+    RepairPolicy {
+        attempts_per_strategy: attempts_per_strategy,
+        strategy_changes: strategy_changes,
+        renew_budget_on_progress: true,
+        pause_on_stagnation: true,
+        allow_human_escalation: true
+    }
+
+@post(result.disposition == old(disposition))
+@post(result.failure_count == failure_count)
+@post(result.severity_score == severity_score)
+@post(result.failure_fingerprint == old(fingerprint))
+pub f verification_result(
+    disposition: Str,
+    failure_count: Int,
+    severity_score: Int,
+    fingerprint: Str,
+    evidence_artifact: Str
+) -> VerificationResult
+    VerificationResult {
+        disposition: disposition,
+        failure_count: failure_count,
+        severity_score: severity_score,
+        failure_fingerprint: fingerprint,
+        evidence_artifact: evidence_artifact
+    }
+
+@post(result.status == "inactive")
+@post(result.revision == 0)
+@post(result.strategy == 0)
+@post(result.attempts_in_strategy == 0)
+pub f inactive_repair_session() -> RepairSession
+    RepairSession {
+        status: "inactive",
+        node_id: "",
+        revision: 0,
+        artifact: "",
+        strategy: 0,
+        attempts_in_strategy: 0,
+        strategy_changes_used: 0,
+        last_failure_count: -1,
+        last_severity_score: -1,
+        last_failure_fingerprint: "",
+        evidence_artifact: ""
+    }
+
+@post(result.accepted)
+@post(result.effects.len() == 0)
+@post(result.error.len() == 0)
+pub f empty_transition(state: WorkflowState) -> Transition
+    Transition {
+        state: state,
+        effects: [],
+        accepted: true,
+        error: ""
+    }
+
+@pre(error.len() > 0, "rejected transitions require an explanation")
+@post(!result.accepted)
+@post(result.effects.len() == 0)
+@post(result.error == old(error))
+pub f rejected_transition(state: WorkflowState, error: Str) -> Transition
+    Transition {
+        state: state,
+        effects: [],
+        accepted: false,
+        error: error
+    }
+
+@pre(error.len() > 0, "failed agent results require an explanation")
+@post(result.outcome == "error")
+@post(result.error == old(error))
+@post(result.input_tokens == 0)
+@post(result.output_tokens == 0)
+pub f failed_agent_result(error: Str) -> AgentResult
+    AgentResult {
+        outcome: "error",
+        artifact: "",
+        summary: "",
+        memory: "",
+        verification_disposition: "",
+        failure_count: 0,
+        severity_score: 0,
+        failure_fingerprint: "",
+        evidence: "",
+        tool_name: "",
+        tool_input: "",
+        tool_payload: "",
+        response_id: "",
+        input_tokens: 0,
+        output_tokens: 0,
+        error: error
+    }
+
+@pre(error.len() > 0, "blocked agent results require an explanation")
+@post(result.outcome == "blocked")
+@post(result.error == old(error))
+pub f blocked_agent_result(error: Str) -> AgentResult
+    AgentResult {
+        outcome: "blocked",
+        artifact: "",
+        summary: str(error),
+        memory: "",
+        verification_disposition: "blocked",
+        failure_count: 0,
+        severity_score: 0,
+        failure_fingerprint: "",
+        evidence: str(error),
+        tool_name: "",
+        tool_input: "",
+        tool_payload: "",
+        response_id: "",
+        input_tokens: 0,
+        output_tokens: 0,
+        error: error
+    }

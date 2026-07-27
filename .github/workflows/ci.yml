@@ -22,6 +22,8 @@ jobs:
       - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
       - name: Run tests
         run: cargo test --all
+      - name: Check generated and AI-facing documentation
+        run: bash scripts/check_docs.sh
 
   clippy:
     name: Clippy
@@ -128,11 +130,11 @@ jobs:
   coverage-audit:
     name: Builtin Coverage Audit
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, forma-tests, showcase, forge]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - name: Run coverage audit (enforce 70% threshold)
-        run: bash scripts/builtin_coverage.sh --enforce 70 | tee coverage-report.txt
+      - name: Run registry-driven coverage audit (enforce 100%)
+        run: bash scripts/builtin_coverage.sh --enforce 100 | tee coverage-report.txt
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -166,3 +168,13 @@ jobs:
           echo ""
           echo "Results: $PASS passed, $FAIL failed"
           if [ "$FAIL" -gt 0 ]; then exit 1; fi
+
+  forge:
+    name: Forge Agentic Workflow
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@4be9e76fd7c4901c61fb841f559994984270fce7 # stable
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
+      - name: Run Forge offline infrastructure checks
+        run: cargo test --test forge_example --test forge_postgres

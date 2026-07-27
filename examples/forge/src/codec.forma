@@ -1,0 +1,102 @@
+# JSON workflow decoding.
+#
+# External definitions and typed builders both normalize to WorkflowGraph and
+# pass through graph.validate_graph before execution.
+
+us model
+us graph
+
+pub f string_or(ref value: Json, key: Str, fallback: Str) -> Str
+    m json_get_str(value, key)
+        Some(result) -> result
+        None -> fallback
+
+pub f int_or(ref value: Json, key: Str, fallback: Int) -> Int
+    m json_get_int(value, key)
+        Some(result) -> result
+        None -> fallback
+
+pub f bool_or(ref value: Json, key: Str, fallback: Bool) -> Bool
+    m json_get_bool(value, key)
+        Some(result) -> result
+        None -> fallback
+
+pub f array_or_empty(ref value: Json, key: Str) -> [Json]
+    m json_get_array(value, key)
+        Some(result) -> result
+        None -> []
+
+pub f json_string(value: Json) -> Str
+    json_to_value(value)
+
+@post(result.len() == values.len())
+pub f decode_authority(ref values: [Json]) -> [Str]
+    authority := []
+    i := 0
+    wh i < vec_len(values)
+        authority = vec_push(authority, json_string(values[i]))
+        i = i + 1
+    authority
+
+pub f decode_node(ref value: Json) -> ProcessNode
+    self_correcting := bool_or(ref value, "self_correcting", false)
+    if self_correcting
+        repairing_process_node(
+            string_or(ref value, "id", ""),
+            string_or(ref value, "role", ""),
+            string_or(ref value, "required_capability", "none"),
+            int_or(ref value, "max_attempts", 1),
+            bool_or(ref value, "required", true),
+            int_or(ref value, "repair_attempts_per_strategy", 1),
+            int_or(ref value, "repair_strategy_changes", 0)
+        )
+    else
+        process_node(
+            string_or(ref value, "id", ""),
+            string_or(ref value, "role", ""),
+            string_or(ref value, "required_capability", "none"),
+            int_or(ref value, "max_attempts", 1),
+            bool_or(ref value, "required", true)
+        )
+
+@post(result.len() == values.len())
+pub f decode_nodes(ref values: [Json]) -> [ProcessNode]
+    nodes := []
+    i := 0
+    wh i < vec_len(values)
+        nodes = vec_push(nodes, decode_node(ref values[i]))
+        i = i + 1
+    nodes
+
+pub f decode_edge(ref value: Json) -> ProcessEdge
+    process_edge(
+        string_or(ref value, "source", ""),
+        string_or(ref value, "target", ""),
+        string_or(ref value, "condition", "")
+    )
+
+@post(result.len() == values.len())
+pub f decode_edges(ref values: [Json]) -> [ProcessEdge]
+    edges := []
+    i := 0
+    wh i < vec_len(values)
+        edges = vec_push(edges, decode_edge(ref values[i]))
+        i = i + 1
+    edges
+
+pub f workflow_graph_from_json(source: Str) -> WorkflowGraph!Str
+    m json_parse(source)
+        Err(error) -> Err(error)
+        Ok(root) ->
+            authority_json := array_or_empty(ref root, "authority")
+            nodes_json := array_or_empty(ref root, "nodes")
+            edges_json := array_or_empty(ref root, "edges")
+            candidate := WorkflowGraph {
+                id: string_or(ref root, "id", ""),
+                authority: decode_authority(ref authority_json),
+                nodes: decode_nodes(ref nodes_json),
+                edges: decode_edges(ref edges_json)
+            }
+            m validate_graph(ref candidate)
+                Some(error) -> Err(error)
+                None -> Ok(candidate)

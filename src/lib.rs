@@ -25,23 +25,39 @@
 //! - [`errors`]: Error types and diagnostics
 
 pub mod borrow;
+pub mod builtins;
 #[cfg(feature = "llvm")]
 pub mod codegen;
+pub mod compiler;
 pub mod errors;
 pub mod ffi;
 pub mod fmt;
+pub mod grammar;
 pub mod lexer;
 pub mod lsp;
 pub mod mir;
 pub mod module;
+pub mod package;
 pub mod parser;
+pub mod semantic;
+pub mod support;
+pub mod syntax;
 pub mod types;
+pub mod verify;
 
 pub use borrow::{BorrowChecker, BorrowError, BorrowErrorKind};
+pub use compiler::{
+    Compilation, CompilePhase, CompiledModule, CompilerDiagnostic, CompilerSession, Source,
+    SourceId, SourceMap,
+};
 pub use errors::{CompileError, Result};
 pub use fmt::Formatter;
-pub use lexer::{Scanner, Span, Token, TokenKind};
+pub use lexer::{KEYWORDS, Keyword, KeywordSpec, Scanner, Span, Token, TokenKind};
 pub use mir::{Interpreter, Lowerer, Program, Value};
-pub use module::{ModuleError, ModuleLoader};
+pub use module::{ModuleError, ModuleId, ModuleLoader};
 pub use parser::{Parser, SourceFile};
+pub use semantic::{Definition, DefinitionId, Reference, SemanticIndex, SymbolKind};
+pub use syntax::{
+    LosslessFormatter, LosslessSyntax, SyntaxElement, SyntaxKind, SyntaxNode, SyntaxNodeKind,
+};
 pub use types::{Ty, TypeChecker, TypeError};

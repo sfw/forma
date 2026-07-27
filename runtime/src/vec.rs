@@ -18,7 +18,11 @@ impl FormaVec {
     }
 
     fn grow(&mut self) {
-        let new_cap = if self.capacity == 0 { 4 } else { self.capacity * 2 };
+        let new_cap = if self.capacity == 0 {
+            4
+        } else {
+            self.capacity * 2
+        };
         let new_layout = Self::layout_for(self.elem_size, new_cap);
         let new_data = if self.capacity == 0 {
             unsafe { alloc::alloc(new_layout) }

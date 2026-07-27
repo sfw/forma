@@ -1,378 +1,233 @@
 ---
 name: forma
 description: >
-  FORMA programming language reference. Use when writing FORMA (.forma) code
-  or answering questions about FORMA syntax, builtins, contracts, or CLI usage.
+  Forma 0.2 language guide for writing, checking, running, explaining, and
+  verifying .forma programs with correct ownership, capabilities, profiles,
+  syntax, builtins, and CLI usage.
 ---
 
-# FORMA Language Skill
+# Forma 0.2 Language Skill
 
-FORMA is an indentation-based, AI-optimized systems programming language. It uses
-short keywords, design-by-contract, capability-based sandboxing, and a rich stdlib
-of 316+ builtins.
+Use this skill when writing or reviewing Forma programs. Forma is an evolving
+agent-oriented language prototype; never guess a builtin or turn bounded evidence
+into a stronger claim.
 
-## Core Syntax
+## Sources of truth
 
-- Indentation-based blocks (like Python), no braces needed
-- Comments: `# single line`
-- Variables: `x := value` (mutable by default), `x: Type = value` (annotated)
-- Last expression is implicit return value
-- Generics use `[T]` not `<T>`
-- F-strings: `f"hello {name}, {x + 1}"`
+Use these in order when details conflict:
 
-## Keywords (Short Forms)
+1. Compiler output from the current checkout
+2. Generated `docs/grammar.ebnf`, `docs/grammar.json`, and `docs/builtins.json`
+3. `planning/design/FORMA_0_2_SEMANTICS.md` and `docs/profiles.md`
+4. `docs/ai-reference.md` and `docs/reference.md`
+5. Runnable examples
 
-| Short | Meaning     | Short | Meaning    |
-|-------|-------------|-------|------------|
-| `f`   | function    | `m`   | match      |
-| `s`   | struct      | `wh`  | while      |
-| `e`   | enum        | `lp`  | loop       |
-| `t`   | trait        | `br`  | break      |
-| `i`   | impl        | `ct`  | continue   |
-| `us`  | use/import  | `ret` | return     |
-| `md`  | module      | `as`  | async      |
-| `pub` | public      | `aw`  | await      |
-| `mut` | mutable     | `sp`  | spawn      |
-| `ref` | reference   | `un`  | unsafe     |
+Files under `planning/research`, `planning/reviews`, and `planning/sprints` are
+historical, not normative.
 
-Literals: `true`/`T`, `false`/`F`, `none`/`N`, `Some`, `Ok`/`ok`, `Err`/`err`
+## Required workflow
 
-## Types
+1. Start from the closest checked example or the AI reference.
+2. Use the generated builtin registry for exact signatures and capabilities.
+3. Write the smallest program that satisfies the request.
+4. Run `forma check --error-format json` and repair compiler-reported failures.
+5. Run `forma fmt`.
+6. Run with only the required capability flags.
+7. If contracts matter, run `explain` and the strongest supported verification
+   level, preserving its exact status and bounds.
 
-Primitives: `Int`, `Float`, `Bool`, `Char`, `Str`, `()`, `!`
-Sized ints: `i8` `i16` `i32` `i64` `i128` `u8` `u16` `u32` `u64` `u128` `isize` `usize`
-Collections: `[T]` list, `[T; N]` fixed, `{K: V}` map, `{T}` set, `(A, B)` tuple
-Special: `T?` Option, `T!E` Result, `&T` shared ref, `&mut T` mutable ref
-Async: `Task[T]`, `Future[T]`, `Sender[T]`, `Receiver[T]`, `Mutex[T]`
+From this repository, substitute `cargo run --` for `forma` when a built binary is
+not available.
 
-## Operators
-
-```
-Arithmetic:   + - * / %
-Comparison:   == != < <= > >=
-Logical:      && || !
-Bitwise:      & | ^ << >>
-Assignment:   := (bind)  = += -= *= /= %= (reassign/compound)
-Range:        .. (exclusive)  ..= (inclusive)
-Special:      ? (propagate Result error)
-              ?? (unwrap Option with default)
-              as (type cast)
-              -> (return type)  => (match arm)
-              :: (path)  . (field/method)
-              @ (contract attribute)
-```
-
-## Functions and Closures
+## Core syntax
 
 ```forma
-f name(a: Int, b: Int) -> Int
-    a + b
+# immutable binding
+limit = 10
 
-f single_expr(a: Int, b: Int) -> Int = a + b
+# mutable binding and update
+count := 0
+count := count + 1
 
-as f async_fn() -> Str!Str                   # async function
-    aw some_future()?
+# annotated bindings
+title: Str = "Forma"
+buffer: [Int] := vec_new()
 
-f with_ref(ref data: [Int]) -> Int           # shared ref param
-f with_mut(ref mut data: [Int]) -> Unit      # mutable ref param
+# function; final expression is returned
+f add(left: Int, right: Int) -> Int
+    left + right
 
-# Closures (typed parameters required)
-doubled := map([1, 2, 3], |x: Int| x * 2)
-transform := |x: Int| -> Int x * 2 + 1
+# single-expression function
+f square(value: Int) -> Int = value * value
 ```
 
-## Struct, Enum, Trait, Impl
+Blocks are indentation-based. Comments start with `#`. Generics use square
+brackets. Canonical short keywords include `f`, `s`, `e`, `t`, `i`, `m`, `wh`,
+`lp`, `br`, `ct`, `ret`, `as`, `aw`, `sp`, `us`, and `md`. Use the generated
+keyword catalog for accepted long aliases.
+
+`=` creates an immutable binding. `:=` creates or updates a mutable binding.
+Mutability syntax does not decide ownership transfer.
+
+## Affine ownership
+
+Ordinary non-`Copy` values may move or be dropped but cannot be used after a move
+or duplicated implicitly.
 
 ```forma
-s Point
-    x: Float
-    y: Float
+f consume(items: Vec[Item]) -> Unit
+    # owned parameter; non-Copy argument moves
 
-s Pair(Int, Int)                             # tuple struct
-s Unit                                       # unit struct
+f inspect(ref items: Vec[Item]) -> Int
+    items.len()
 
-e Color = Red | Green | Blue
-e Option[T] = Some(T) | None
+f update(ref mut items: Vec[Item]) -> Unit
+    # exclusive loan
+```
 
-t Printable
-    f to_string(&self) -> Str
+- Assignment, owned calls, returns, and by-value destructuring may move.
+- Use `clone(value)` only when explicit duplication is intended.
+- `mv value` may force or document a move; it is not required for ordinary
+  transfer.
+- `ref` is a shared loan; `ref mut` is exclusive.
+- References cannot be stored in ordinary aggregates, captured by escaping
+  closures, or sent to tasks.
+- Return a reference only when derived from a reference parameter.
+- Compiler-known ownership traits are `Copy`, `Clone`, `Drop`, `Send`, and `Sync`.
+
+## Common forms
+
+```forma
+s Point { x: Int, y: Int }
+e Direction = North | South | East | West
+
+t Named
+    f name(&self) -> Str
 
 i Point
-    f distance(&self) -> Float
-        sqrt(self.x * self.x + self.y * self.y)
+    f translated(&self, dx: Int, dy: Int) -> Point
+        Point { x: self.x + dx, y: self.y + dy }
 
-i Printable for Point
-    f to_string(&self) -> Str
-        f"{self.x}, {self.y}"
+f describe(value: Bool?) -> Str
+    m value
+        Some(true) -> "yes"
+        Some(false) -> "no"
+        None -> "unknown"
 ```
 
-## Control Flow
+Public function parameters and return values require annotations. Locals are
+inferred. Dispatch is static. Matching finite algebraic domains must be exhaustive;
+guards do not establish exhaustiveness.
+
+## Errors and contracts
 
 ```forma
-if cond then expr else expr                  # inline expression form
-if cond
-    block
-else if cond
-    block
-else
-    block
-
-m value                                      # match
-    Pattern -> expr
-    Variant(x) -> expr
-    Point { x, y } -> x + y                 # struct destructure
-    _ if guard -> expr                       # guard
-    _ -> default
-
-wh condition                                 # while
-    body
-
-for x in collection                          # for-in
-    body
-
-lp                                           # infinite loop
-    if done then br
-
-'outer: for x in xs                          # labeled loop
-    for y in ys
-        if x == y then br 'outer
-```
-
-## Error Handling
-
-```forma
-# Propagate with ? (Result only)
 f load(path: Str) -> Str!Str
-    content := file_read(path)?
+    content = file_read(path)?
     Ok(content)
 
-# Default with ?? (Option only)
-name := env_get("USER") ?? "unknown"
-val := str_to_int("abc") ?? 0
-
-# Unwrap with ! (panics on error)
-db := db_open("app.db")!
-
-# Match on Result/Option
-m result
-    Ok(v) -> use(v)
-    Err(e) -> handle(e)
-
-m str_to_int(s)
-    Some(n) if n > 0 -> Ok(n)
-    Some(_) -> Err("not positive")
-    None -> Err("not a number")
-```
-
-## Contracts (Design by Contract)
-
-```forma
-@pre(n >= 0)
-@post(result > 0, "must be positive")
+@pre(n >= 0, "n must be non-negative")
+@post(result >= 1)
 f factorial(n: Int) -> Int
     if n <= 1 then 1 else n * factorial(n - 1)
 
-@post(old(balance) + delta == result)
-f deposit(balance: Int, delta: Int) -> Int
-    balance + delta
-
-@pre(values.len() > 0)
-@post(forall i in 0..result.len()-1: result[i] <= result[i+1])
-@post(permutation(values, result))
-f sort(values: [Int]) -> [Int]
-    sort_ints(values)
+@inv(balance >= 0, "balance cannot be negative")
+s Account
+    balance: Int
 ```
 
-Named patterns: `@nonempty(x)`, `@sorted(x)`, `@unique(x)`, `@permutation(a,b)`,
-`@nonnegative(x)`, `@positive(x)`, `@bounded(x,lo,hi)`, `@unchanged(x)`, `@pure`
+- `?` propagates a `Result` error.
+- `??` supplies an `Option` default.
+- `!` unwraps and panics on failure.
+- Contracts support `@pre`, `@post`, `@inv`, `result`, `old(...)`, quantifiers,
+  and named patterns. `@inv` applies to named structs; fields are in scope, but
+  `result` and `old(...)` are not. Invariants are checked after construction,
+  at function entry/return, and when `ref mut` returns. Consult
+  `docs/ai-reference.md` for the pattern catalog.
 
-## Functional Operations
+## Effects and capabilities
 
-```forma
-doubled := map([1, 2, 3], |x: Int| x * 2)           # [2, 4, 6]
-evens := filter([1, 2, 3, 4], |x: Int| x % 2 == 0)  # [2, 4]
-total := reduce([1, 2, 3], 0, |acc: Int, x: Int| acc + x)  # 6
-any([1, 2, 3], |x: Int| x > 2)                       # true
-all([1, 2, 3], |x: Int| x > 0)                       # true
-vec_sort([3, 1, 2])                                   # [1, 2, 3]
-
-# Option chaining
-map_opt(Some(5), |x: Int| x * 2)                     # Some(10)
-and_then(Some(5), |x: Int| if x > 0 then Some(x * 10) else None)  # Some(50)
-flatten(Some(Some(42)))                               # Some(42)
-```
-
-## Async
-
-```forma
-as f work() -> Int
-    result := aw some_future()
-    result
-
-task := sp work()
-value := aw task
-results := aw await_all(tasks)
-```
-
-## Modules & Imports
-
-```forma
-us module.path
-us module.{A, B}
-us std.io                    # stdlib module
-
-md name
-    pub f helper() -> Int = 0
-```
-
-## Reference Parameters
-
-```forma
-f sum(ref arr: [Int]) -> Int         # read-only reference
-    total := 0
-    for x in arr
-        total := total + x
-    total
-
-f sort(ref mut arr: [Int]) -> Unit   # mutable reference
-
-# Calling with ref
-total := sum(ref data)
-sort(ref mut data)
-```
-
-## Main Function
-
-```forma
-f main()
-    # program logic here
-    print("hello")
-
-f main() -> Int                      # explicit exit code
-    if ok then 0 else 1
-```
-
-## CLI Commands
+Effects describe possible authority. Capabilities grant it to one execution.
+Use only the flags required by `docs/builtins.json`:
 
 ```bash
-forma run <file>                        # run program
-forma run <file> --allow-all            # all capabilities
-forma run <file> --allow-read --allow-network  # specific capabilities
-forma run <file> --no-check-contracts   # disable contract checking
-forma check <file>                      # type check only
-forma check <file> --error-format json  # JSON diagnostic output
-forma explain <file> --format json      # contract explanations
-forma verify <path> --report            # verify contracts with examples
-forma build <file>                      # build native binary (LLVM)
-forma fmt <file>                        # format source code
-forma new <name>                        # create new project
-forma init                              # init project in current dir
-forma repl                              # interactive REPL
+forma run app.forma --allow-read
+forma run app.forma --allow-write
+forma run app.forma --allow-network
+forma run app.forma --allow-exec
+forma run app.forma --allow-env
+forma run app.forma --allow-unsafe
 ```
 
-Capability flags: `--allow-read`, `--allow-write`, `--allow-network`, `--allow-exec`,
-`--allow-env`, `--allow-unsafe`, `--allow-all`
+Never use `--allow-all` for untrusted code. Treat `--allow-exec` as shell access.
+Capability gating is not complete OS isolation.
 
-**Security:** Prefer least-privilege flags over `--allow-all`. The `--allow-exec`
-flag permits shell command execution and should be treated as full shell access.
-Do not use `--allow-all` on untrusted code.
-
-## Key Builtins (Summary)
-
-**I/O:** `print(v)` `eprintln(v)` `str(v)` `debug(v)`
-**Math:** `abs(n)` `sqrt(x)` `pow(b,e)` `sin(x)` `cos(x)` `log(x)` `floor(x)` `ceil(x)` `round(x)`
-**String:** `str_len(s)` `str_contains(s,sub)` `str_split(s,d)` `str_trim(s)` `str_slice(s,i,j)` `str_replace(s,old,new)` `str_to_int(s)`
-**Collection:** `len(c)` `vec_push(v,x)` `vec_pop(v)` `vec_get(v,i)` `map_get(m,k)` `map_insert(m,k,v)` `map_keys(m)`
-**Functional:** `map(arr,fn)` `filter(arr,fn)` `reduce(arr,init,fn)` `any(arr,fn)` `all(arr,fn)`
-**Option/Result:** `unwrap(v)` `unwrap_or(v,d)` `is_some(v)` `is_none(v)` `is_ok(v)` `is_err(v)` `map_opt(opt,fn)`
-**File:** `file_read(p)` `file_write(p,c)` `file_exists(p)` `file_append(p,c)` `dir_list(p)` `dir_create(p)`
-**JSON:** `json_parse(s)` `json_stringify(v)` `json_get(o,k)` `json_object()` `json_set(o,k,v)`
-**HTTP:** `http_get(url)` `http_post(url,body)` `http_serve(port,handler)` `http_response(code,body)`
-**DB:** `db_open(path)` `db_execute(db,sql)` `db_query(db,sql)` `db_close(db)`
-**Async:** `channel_new()` `channel_send(s,v)` `channel_recv(r)` `mutex_new(v)` `sleep_async(s)` `await_all(tasks)`
-**Random:** `random()` `random_int(min,max)` `shuffle(list)`
-**Time:** `time_now()` `time_sleep(s)` `time_format(ts,fmt)`
-**Regex:** `regex_match(pat,s)` `regex_find_all(pat,s)` `regex_replace(pat,s,r)`
-**Path:** `path_join(a,b)` `path_parent(p)` `path_filename(p)` `path_extension(p)`
-**Process:** `exec(cmd)` `args()` `cwd()` `exit(code)`
-
-316+ builtins total across I/O, math, string, collection, file, JSON, HTTP, TCP, UDP,
-TLS, DNS, database, async, random, time, regex, compression, hashing, FFI, and more.
-Run `forma complete <file> --position 1:1` for a full list.
-
-## Stdlib Modules
+## Structured concurrency
 
 ```forma
-us std.core    # clamp, gcd, lcm
-us std.io      # file_read_lines, file_write_lines, puts
-us std.string  # str_join, str_replace_first, str_index_of
-us std.vec     # int_vec_index_of, int_vec_sum, int_vec_max
-us std.iter    # range, enumerate
-us std.map     # map_get_or, map_update
+as f compute(value: Int) -> Int
+    value * value
+
+as f main()
+    task = sp compute(12)
+    result = aw task
+    print(result)
 ```
 
-## Common Patterns
+Task captures move, references cannot cross task boundaries, and task handles are
+affine. Await, cancel, return, or explicitly detach each handle. Channels and
+mutexes are Hosted handles; sending moves the value.
 
-### File I/O
-```forma
-f main()
-    # Read a file (returns Result — use ? or !)
-    content := file_read("input.txt")!
-    lines := str_split(content, "\n")
-    for line in lines
-        print(line)
+## Profiles
 
-    # Write a file
-    file_write("output.txt", "hello world")!
+- Core: portable ownership-aware subset.
+- Hosted: managed interpreter facilities including dynamic collections and I/O.
+- Native: selected runtime-backed native facilities.
+- Experimental: weaker compatibility guarantees, including formal verification
+  and whole-program LLVM parity.
 
-    # Append to a file
-    file_append("log.txt", f"entry: {time_now()}\n")!
+Profile requirements propagate through calls. Do not claim Native or formal
+support without checking the compiler report.
 
-    # Check existence
-    if file_exists("config.json")
-        cfg := json_parse(file_read("config.json")!)
-        print(json_get_str(cfg, "name"))
+## Verification language
+
+```bash
+forma explain rules.forma --format human
+forma verify rules.forma --level test --examples 200 --seed 42 --report
+forma verify rules.forma --level exhaustive --max-domain 4096 --report
+forma verify rules.forma --level formal --report
 ```
 
-### HTTP Server
-```forma
-f handler(req: HttpRequest) -> HttpResponse
-    m req.path
-        "/" -> http_response(200, "OK")
-        "/json" -> http_json_response(200, json_object())
-        _ -> http_response(404, "Not Found")
+Report exact results: `UNCONTRACTED`, `TESTED`, `COUNTEREXAMPLE`, `EXHAUSTIVE`,
+`PROVED`, `UNKNOWN`, or `SKIPPED`. Generated testing never produces `PROVED`.
+Include seeds, bounds, unsupported effects, and unknown obligations in summaries.
 
-f main()
-    http_serve(8080, handler)!
+## Tooling
+
+```bash
+forma check program.forma --error-format json
+forma fmt program.forma
+forma run program.forma
+forma grammar --format ebnf
+forma grammar --format json
+forma typeof program.forma --position "5:10"
+forma complete program.forma --position "5:10"
+forma lex program.forma
+forma parse program.forma
+forma repl
+forma lsp
+forma new demo
+forma init
+forma build program.forma
 ```
 
-### Database
-```forma
-f main()
-    db := db_open("app.db")!
-    db_execute(db, "CREATE TABLE t (id INTEGER, name TEXT)")!
-    rows := db_query(db, "SELECT * FROM t")!
-    for row in rows
-        print(row_get_str(row, 1))
-    db_close(db)
-```
+Native build support requires the optional LLVM feature and is profile-bounded.
 
-### Struct with Methods
-```forma
-s Point
-    x: Float
-    y: Float
+## Output requirements
 
-i Point
-    f distance(&self) -> Float
-        sqrt(self.x * self.x + self.y * self.y)
-
-    f translate(&self, dx: Float, dy: Float) -> Point
-        Point { x: self.x + dx, y: self.y + dy }
-
-f main()
-    p := Point { x: 3.0, y: 4.0 }
-    print(f"distance: {p.distance()}")
-    p2 := p.translate(1.0, 2.0)
-    print(f"moved to: {p2.x}, {p2.y}")
-```
+- Return runnable Forma rather than pseudocode when code is requested.
+- Include exact commands to check, format, and run it.
+- Name every required capability and why it is needed.
+- State the expected profile.
+- Never invent builtin signatures; consult generated metadata.
+- Never call generated tests or unsupported obligations proof.

@@ -1,0 +1,124 @@
+version = 1
+workspace_root = "."
+graph_path = "examples/forge/fixtures/project-review.json"
+
+[workspace]
+max_files = 80
+max_file_chars = 12000
+max_context_chars = 180000
+
+[provider]
+kind = "openai"
+base_url = "https://api.openai.com/v1"
+# Store the environment-variable name, never the credential itself.
+api_key_env = "OPENAI_API_KEY"
+default_model = "gpt-5.6"
+reasoning_effort = "medium"
+max_output_tokens = 6000
+timeout_ms = 120000
+store = false
+
+[memory]
+# Forge uses local SQLite for durable history and recall.
+database_path = "examples/forge/.forge/history.db"
+# For a remote deployment, set this to the name of an environment variable
+# containing a PostgreSQL URL. When nonempty, it takes precedence over SQLite.
+database_url_env = ""
+recall_messages = 14
+
+[compaction]
+server_threshold_tokens = 32000
+local_trigger_chars = 48000
+keep_recent_messages = 10
+
+[limits]
+max_agent_turns = 32
+max_repair_turns = 8
+max_parallel_nodes = 3
+max_total_tokens = 500000
+workflow_timeout_ms = 14400000
+
+[tools]
+# Each child folder contains tool.toml plus its custom tool.forma implementation.
+plugins_path = "examples/forge/tools"
+# Forge starts plugins with this interpreter and grants only their manifest
+# capabilities. Use an absolute path in deployments.
+forma_executable = "target/debug/forma"
+# Commands are direct executable invocations: no shell parsing or inherited
+# secret-bearing environment. run_command uses tool_input as the executable and
+# tool_payload as a JSON array of arguments.
+allowed_commands = ["cargo", "git", "rg"]
+command_timeout_ms = 120000
+max_command_output_chars = 100000
+
+[prompts]
+system = """
+You are one role in Forge, an agentic engineering workflow. Work from evidence.
+Use only configured tools. Never claim a file was changed or a command passed
+unless the corresponding tool result proves it. Prefer iterative correction to
+hard failure. Return concise durable summaries and memories. A tool call must
+set outcome=tool_call and fill tool_name/tool_input/tool_payload. For
+run_command, tool_input is the executable and tool_payload is a JSON array of
+arguments; shell expressions are not accepted. A final response must set
+tool_name, tool_input, and tool_payload to empty strings.
+"""
+compaction = """
+Compress the run history into durable operational memory for later agents.
+Preserve the goal, decisions, constraints, evidence, failures, repair attempts,
+changed files, commands and results, unresolved risks, and exact identifiers.
+"""
+
+[agents."run coordinator"]
+model = "gpt-5.6"
+instructions = "Clarify the objective, define completion evidence, and establish an execution contract."
+tools = []
+
+[agents."repository analyst"]
+model = "gpt-5.6"
+instructions = "Inventory the real repository and identify the files and subsystems relevant to the goal."
+tools = ["list_directory", "read_file"]
+
+[agents."architecture reviewer"]
+model = "gpt-5.6"
+instructions = "Analyze architecture, invariants, public contracts, and likely integration risks using repository evidence."
+tools = ["list_directory", "read_file"]
+
+[agents."test reviewer"]
+model = "gpt-5.6"
+instructions = "Assess test coverage and run focused read-only checks. Report exact commands and outcomes."
+tools = ["list_directory", "read_file", "run_command"]
+
+[agents."planning synthesizer"]
+model = "gpt-5.6"
+instructions = "Synthesize prior findings into an ordered, testable implementation plan with explicit acceptance evidence."
+tools = ["read_file"]
+
+[agents."implementation agent"]
+model = "gpt-5.6"
+instructions = "Implement the approved plan in small coherent changes. Inspect before editing and verify after editing."
+tools = ["list_directory", "read_file", "write_file", "run_command"]
+
+[agents."validation agent"]
+model = "gpt-5.6"
+instructions = "Independently validate behavior. Return outcome=findings and a stable fingerprint when defects remain; return completed/passed only with evidence."
+tools = ["list_directory", "read_file", "run_command"]
+
+[agents."repair agent"]
+model = "gpt-5.6"
+instructions = "Diagnose validation evidence, make an iterative fix, and preserve a new immutable revision summary."
+tools = ["read_file", "write_file", "run_command"]
+
+[agents."publication agent"]
+model = "gpt-5.6"
+instructions = "Prepare publication guidance but do not publish or contact external systems."
+tools = ["read_file"]
+
+[agents."release decision agent"]
+model = "gpt-5.6"
+instructions = "Make an evidence-based release recommendation, explicitly listing residual risks and rollback criteria."
+tools = ["read_file"]
+
+[agents."memory compactor"]
+model = "gpt-5.6"
+instructions = "Produce a faithful compact summary in the summary field. Do not use tools."
+tools = []

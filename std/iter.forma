@@ -6,25 +6,25 @@
 # ============================================================
 
 # Range represents a sequence from start to end (exclusive)
-s Range
+pub s Range
     start: Int
     end: Int
     current: Int
 
 # Create a range [start, end)
-f range(start: Int, end: Int) -> Range
+pub f range(start: Int, end: Int) -> Range
     Range { start: start, end: end, current: start }
 
 # Create a range [0, n)
-f range_to(n: Int) -> Range
+pub f range_to(n: Int) -> Range
     range(0, n)
 
 # Check if range has more elements
-f range_has_next(r: Range) -> Bool
+pub f range_has_next(r: Range) -> Bool
     r.current < r.end
 
 # Get next value and advance range
-f range_next(r: Range) -> (Range, Int?)
+pub f range_next(r: Range) -> (Range, Int?)
     if r.current >= r.end
         (r, None)
     else
@@ -33,15 +33,15 @@ f range_next(r: Range) -> (Range, Int?)
         (new_range, Some(val))
 
 # Get remaining count
-f range_remaining(r: Range) -> Int
+pub f range_remaining(r: Range) -> Int
     if r.current >= r.end then 0
     else r.end - r.current
 
 # Collect range to array
-f range_to_array(r: Range) -> [Int]
+pub f range_to_array(r: Range) -> [Int]
     range_collect_loop(r, [])
 
-f range_collect_loop(r: Range, acc: [Int]) -> [Int]
+pub f range_collect_loop(r: Range, acc: [Int]) -> [Int]
     if r.current >= r.end then acc
     else
         new_acc := vec_push(acc, r.current)
@@ -53,40 +53,40 @@ f range_collect_loop(r: Range, acc: [Int]) -> [Int]
 # ============================================================
 
 # Sum values in range
-f range_sum(start: Int, end: Int) -> Int
+pub f range_sum(start: Int, end: Int) -> Int
     range_sum_loop(start, end, 0)
 
-f range_sum_loop(current: Int, end: Int, acc: Int) -> Int
+pub f range_sum_loop(current: Int, end: Int, acc: Int) -> Int
     if current >= end then acc
     else range_sum_loop(current + 1, end, acc + current)
 
 # Product of values in range
-f range_product(start: Int, end: Int) -> Int
+pub f range_product(start: Int, end: Int) -> Int
     if start >= end then 1
     else range_product_loop(start, end, 1)
 
-f range_product_loop(current: Int, end: Int, acc: Int) -> Int
+pub f range_product_loop(current: Int, end: Int, acc: Int) -> Int
     if current >= end then acc
     else range_product_loop(current + 1, end, acc * current)
 
 # Count values in range matching predicate (equals target)
-f range_count_eq(start: Int, end: Int, target: Int) -> Int
+pub f range_count_eq(start: Int, end: Int, target: Int) -> Int
     range_count_loop(start, end, target, 0)
 
-f range_count_loop(current: Int, end: Int, target: Int, count: Int) -> Int
+pub f range_count_loop(current: Int, end: Int, target: Int, count: Int) -> Int
     if current >= end then count
     else
         new_count := if current == target then count + 1 else count
         range_count_loop(current + 1, end, target, new_count)
 
 # Check if any value in range equals target
-f range_any_eq(start: Int, end: Int, target: Int) -> Bool
+pub f range_any_eq(start: Int, end: Int, target: Int) -> Bool
     if start >= end then false
     else if start == target then true
     else range_any_eq(start + 1, end, target)
 
 # Check if all values in range are positive
-f range_all_positive(start: Int, end: Int) -> Bool
+pub f range_all_positive(start: Int, end: Int) -> Bool
     if start >= end then true
     else if start <= 0 then false
     else range_all_positive(start + 1, end)
@@ -95,14 +95,14 @@ f range_all_positive(start: Int, end: Int) -> Bool
 # Step Range
 # ============================================================
 
-s StepRange
+pub s StepRange
     start: Int
     end: Int
     step: Int
     current: Int
 
 # Create a range with custom step (step=0 returns empty range)
-f range_step(start: Int, end: Int, step: Int) -> StepRange
+pub f range_step(start: Int, end: Int, step: Int) -> StepRange
     if step == 0 then
         # Empty range: current >= end so step_has_next returns false
         StepRange { start: 0, end: 0, step: 1, current: 1 }
@@ -110,13 +110,13 @@ f range_step(start: Int, end: Int, step: Int) -> StepRange
         StepRange { start: start, end: end, step: step, current: start }
 
 # Check if step range has next
-f step_has_next(r: StepRange) -> Bool
+pub f step_has_next(r: StepRange) -> Bool
     if r.step > 0 then r.current < r.end
     else if r.step < 0 then r.current > r.end
     else false
 
 # Get next from step range
-f step_next(r: StepRange) -> (StepRange, Int?)
+pub f step_next(r: StepRange) -> (StepRange, Int?)
     has_next := step_has_next(r)
     if !has_next
         (r, None)
@@ -126,10 +126,10 @@ f step_next(r: StepRange) -> (StepRange, Int?)
         (new_range, Some(val))
 
 # Collect step range to array
-f step_to_array(r: StepRange) -> [Int]
+pub f step_to_array(r: StepRange) -> [Int]
     step_collect_loop(r, [])
 
-f step_collect_loop(r: StepRange, acc: [Int]) -> [Int]
+pub f step_collect_loop(r: StepRange, acc: [Int]) -> [Int]
     if !step_has_next(r) then acc
     else
         new_acc := vec_push(acc, r.current)
@@ -141,10 +141,10 @@ f step_collect_loop(r: StepRange, acc: [Int]) -> [Int]
 # ============================================================
 
 # Iterate over array with index (returns sum of f(idx, elem) for Int arrays)
-f array_fold_indexed(arr: [Int], initial: Int) -> Int
+pub f array_fold_indexed(arr: [Int], initial: Int) -> Int
     fold_indexed_loop(arr, 0, initial)
 
-f fold_indexed_loop(arr: [Int], idx: Int, acc: Int) -> Int
+pub f fold_indexed_loop(arr: [Int], idx: Int, acc: Int) -> Int
     if idx >= vec_len(arr) then acc
     else
         m vec_get(arr, idx)
@@ -152,22 +152,22 @@ f fold_indexed_loop(arr: [Int], idx: Int, acc: Int) -> Int
             None -> acc
 
 # Create array by repeating value
-f array_repeat(value: Int, count: Int) -> [Int]
+pub f array_repeat(value: Int, count: Int) -> [Int]
     repeat_loop([], value, count)
 
-f repeat_loop(acc: [Int], value: Int, remaining: Int) -> [Int]
+pub f repeat_loop(acc: [Int], value: Int, remaining: Int) -> [Int]
     if remaining <= 0 then acc
     else repeat_loop(vec_push(acc, value), value, remaining - 1)
 
 # Create array from range
-f array_from_range(start: Int, end: Int) -> [Int]
+pub f array_from_range(start: Int, end: Int) -> [Int]
     range_to_array(range(start, end))
 
 # Zip two arrays into array of sums (pairwise addition)
-f array_zip_add(a: [Int], b: [Int]) -> [Int]
+pub f array_zip_add(a: [Int], b: [Int]) -> [Int]
     zip_add_loop(a, b, 0, [])
 
-f zip_add_loop(a: [Int], b: [Int], idx: Int, acc: [Int]) -> [Int]
+pub f zip_add_loop(a: [Int], b: [Int], idx: Int, acc: [Int]) -> [Int]
     if idx >= vec_len(a) || idx >= vec_len(b) then acc
     else
         m vec_get(a, idx)
@@ -182,15 +182,15 @@ f zip_add_loop(a: [Int], b: [Int], idx: Int, acc: [Int]) -> [Int]
 # ============================================================
 
 # Enumerated element with index and value
-s EnumeratedInt
+pub s EnumeratedInt
     index: Int
     value: Int
 
 # Enumerate an integer array - returns array of EnumeratedInt
-f array_enumerate(arr: [Int]) -> [EnumeratedInt]
+pub f array_enumerate(arr: [Int]) -> [EnumeratedInt]
     enumerate_helper(arr, 0, [])
 
-f enumerate_helper(arr: [Int], idx: Int, acc: [EnumeratedInt]) -> [EnumeratedInt]
+pub f enumerate_helper(arr: [Int], idx: Int, acc: [EnumeratedInt]) -> [EnumeratedInt]
     if idx >= vec_len(arr)
         acc
     else
@@ -207,10 +207,10 @@ f enumerate_helper(arr: [Int], idx: Int, acc: [EnumeratedInt]) -> [EnumeratedInt
 # DEPRECATED: Use array_enumerate instead
 # Kept for backwards compatibility only
 # Encode (idx, x) as idx * 1000000 + x (assumes values < 1000000)
-f array_enumerate_encoded(arr: [Int]) -> [Int]
+pub f array_enumerate_encoded(arr: [Int]) -> [Int]
     enumerate_loop_encoded(arr, 0, [])
 
-f enumerate_loop_encoded(arr: [Int], idx: Int, acc: [Int]) -> [Int]
+pub f enumerate_loop_encoded(arr: [Int], idx: Int, acc: [Int]) -> [Int]
     if idx >= vec_len(arr)
         acc
     else
@@ -221,9 +221,9 @@ f enumerate_loop_encoded(arr: [Int], idx: Int, acc: [Int]) -> [Int]
             None -> acc
 
 # DEPRECATED: Use elem.index instead
-f decode_index(encoded: Int) -> Int
+pub f decode_index(encoded: Int) -> Int
     encoded / 1000000
 
 # DEPRECATED: Use elem.value instead
-f decode_value(encoded: Int) -> Int
+pub f decode_value(encoded: Int) -> Int
     encoded % 1000000

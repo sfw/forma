@@ -9,11 +9,10 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
-use crate::borrow::BorrowChecker;
-use crate::fmt::Formatter;
+use crate::compiler::CompilerSession;
 use crate::lexer::{Scanner, Span};
 use crate::parser::{ItemKind, Parser};
-use crate::types::TypeChecker;
+use crate::semantic::SemanticIndex;
 
 /// Document state for tracking open files
 #[derive(Debug, Clone)]
@@ -72,7 +71,7 @@ impl FormaLanguageServer {
                         if let Some(info) = get_builtin_info(name) {
                             info
                         } else {
-                            get_symbol_type_info(content, name)
+                            get_symbol_type_info(content, name, token.span.start)
                                 .unwrap_or_else(|| format!("identifier: {}", name))
                         }
                     }
@@ -138,7 +137,7 @@ impl LanguageServer for FormaLanguageServer {
             },
             server_info: Some(ServerInfo {
                 name: "forma-lsp".to_string(),
-                version: Some("0.1.0".to_string()),
+                version: Some(env!("CARGO_PKG_VERSION").to_string()),
             }),
         })
     }
@@ -270,35 +269,19 @@ impl LanguageServer for FormaLanguageServer {
             let line = position.line as usize + 1;
             let col = position.character as usize + 1;
 
-            // Find identifier at cursor
-            let identifier_name = tokens
-                .iter()
-                .find(|token| {
-                    let token_end = token.span.column + (token.span.end - token.span.start);
-                    token.span.line == line && token.span.column <= col && col <= token_end
-                })
-                .and_then(|token| {
-                    if let crate::lexer::TokenKind::Ident(name) = &token.kind {
-                        Some(name.clone())
-                    } else {
-                        None
-                    }
-                });
-
-            if let Some(name) = identifier_name {
-                let parser = crate::parser::Parser::new(&tokens);
-                if let Ok(ast) = parser.parse() {
-                    let mut type_checker = crate::types::TypeChecker::new();
-                    if type_checker.check(&ast).is_ok()
-                        && let Some((def_span, _)) = type_checker.get_definition_location(&name)
-                    {
-                        let location = Location {
-                            uri: uri.clone(),
-                            range: span_to_range(def_span),
-                        };
-                        return Ok(Some(GotoDefinitionResponse::Scalar(location)));
-                    }
-                }
+            let offset = tokens.iter().find_map(|token| {
+                let token_end = token.span.column + (token.span.end - token.span.start);
+                (token.span.line == line && token.span.column <= col && col <= token_end)
+                    .then_some(token.span.start)
+            });
+            let semantic_index = SemanticIndex::from_tokens(&tokens);
+            if let Some(definition) = offset.and_then(|offset| semantic_index.definition_at(offset))
+            {
+                let location = Location {
+                    uri: uri.clone(),
+                    range: span_to_range(definition.span),
+                };
+                return Ok(Some(GotoDefinitionResponse::Scalar(location)));
             }
         }
 
@@ -323,9 +306,9 @@ impl LanguageServer for FormaLanguageServer {
 
             let parser = Parser::new(&tokens);
             match parser.parse() {
-                Ok(ast) => {
-                    let mut formatter = Formatter::new();
-                    let formatted = formatter.format(&ast);
+                Ok(_) => {
+                    let syntax = crate::syntax::LosslessSyntax::parse(content.clone());
+                    let formatted = crate::syntax::LosslessFormatter::format(&syntax);
 
                     let line_count = content.lines().count() as u32;
                     let last_line_len = content.lines().last().map_or(0, |l| l.len()) as u32;
@@ -402,35 +385,25 @@ impl LanguageServer for FormaLanguageServer {
             let line = position.line as usize + 1;
             let col = position.character as usize + 1;
 
-            let target_name = tokens.iter().find_map(|token| {
+            let target_offset = tokens.iter().find_map(|token| {
                 let token_end = token.span.column + (token.span.end - token.span.start);
                 if token.span.line == line && token.span.column <= col && col <= token_end {
-                    if let crate::lexer::TokenKind::Ident(name) = &token.kind {
-                        Some(name.clone())
-                    } else {
-                        None
-                    }
+                    Some(token.span.start)
                 } else {
                     None
                 }
             });
 
-            if let Some(name) = target_name {
-                let locations: Vec<Location> = tokens
-                    .iter()
-                    .filter_map(|token| {
-                        if let crate::lexer::TokenKind::Ident(n) = &token.kind {
-                            if n == &name {
-                                Some(Location {
-                                    uri: uri.clone(),
-                                    range: span_to_range(token.span),
-                                })
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
+            let semantic_index = SemanticIndex::from_tokens(&tokens);
+            if let Some(definition) =
+                target_offset.and_then(|offset| semantic_index.definition_at(offset))
+            {
+                let locations: Vec<Location> = semantic_index
+                    .references_to(definition.id, params.context.include_declaration)
+                    .into_iter()
+                    .map(|span| Location {
+                        uri: uri.clone(),
+                        range: span_to_range(span),
                     })
                     .collect();
 
@@ -489,11 +462,15 @@ fn get_builtin_info(name: &str) -> Option<String> {
         "map_get" => Some("map_get(m: Map, key: Str) -> V?\nGet a value from a map".to_string()),
         "map_insert" => Some("map_insert(m: Map, key: Str, value: V) -> Map\nInsert a key-value pair".to_string()),
         "json_parse" => Some("json_parse(s: Str) -> Result[Json, Str]\nParse a JSON string".to_string()),
+        "toml_parse" => Some("toml_parse(s: Str) -> Result[Json, Str]\nParse TOML configuration".to_string()),
+        "toml_stringify" => Some("toml_stringify(json: Json) -> Result[Str, Str]\nSerialize JSON-compatible data as TOML".to_string()),
         "json_stringify" => Some("json_stringify(json: Json) -> Str\nConvert JSON to string".to_string()),
         "file_read" => Some("file_read(path: Str) -> Result[Str, Str]\nRead a file to string".to_string()),
         "file_write" => Some("file_write(path: Str, content: Str) -> Result[(), Str]\nWrite string to file".to_string()),
         "http_get" => Some("http_get(url: Str) -> Result[(Int, Str, Map), Str]\nMake HTTP GET request".to_string()),
         "http_post" => Some("http_post(url: Str, body: Str) -> Result[(Int, Str, Map), Str]\nMake HTTP POST request".to_string()),
+        "http_request" => Some("http_request(method: Str, url: Str, body: Str, headers: Map[Str], timeout_ms: Int, follow_redirects: Bool) -> Result[(Int, Str, Map), Str]\nMake a general authenticated HTTP request".to_string()),
+        "db_connect_postgres" => Some("db_connect_postgres(url: Str) -> Result[Database, Str]\nConnect to remote PostgreSQL".to_string()),
         "tcp_connect" => Some("tcp_connect(host: Str, port: Int) -> Result[TcpStream, Str]\nConnect to TCP server".to_string()),
         "tcp_listen" => Some("tcp_listen(host: Str, port: Int) -> Result[TcpListener, Str]\nCreate TCP listener".to_string()),
         "alloc" => Some("alloc(size: Int) -> *Void\nAllocate memory".to_string()),
@@ -518,79 +495,46 @@ fn get_builtin_info(name: &str) -> Option<String> {
         "file_read_bytes" => Some("file_read_bytes(path: Str) -> Result[[Int], Str]\nRead file as byte array".to_string()),
         "file_write_bytes" => Some("file_write_bytes(path: Str, bytes: [Int]) -> Result[(), Str]\nWrite byte array to file".to_string()),
         "random_shuffle" => Some("random_shuffle(arr: [T]) -> [T]\nShuffle array randomly".to_string()),
-        _ => None,
+        _ => crate::builtins::metadata()
+            .into_iter()
+            .find(|builtin| builtin.name == name)
+            .map(|metadata| {
+            let effects = metadata
+                .effects
+                .iter()
+                .map(|effect| format!("{effect:?}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "{}: {}\n{}\nEffects: {}\nCapability: {}",
+                metadata.name,
+                metadata.signature,
+                metadata.documentation,
+                if effects.is_empty() { "none" } else { &effects },
+                metadata.capability
+                    .map_or("none", |capability| capability.as_str())
+            )
+        }),
     }
 }
 
 /// Get diagnostics for source content (extracted for testability).
 pub fn analyze_diagnostics(content: &str) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
-
-    let scanner = Scanner::new(content);
-    let (tokens, lex_errors) = scanner.scan_all();
-
-    for error in lex_errors {
-        diagnostics.push(Diagnostic {
-            range: span_to_range(error.span),
-            severity: Some(DiagnosticSeverity::ERROR),
-            code: Some(NumberOrString::String("LEX".to_string())),
-            source: Some("forma".to_string()),
-            message: error.message,
-            ..Default::default()
-        });
-    }
-
-    if !diagnostics.is_empty() {
-        return diagnostics;
-    }
-
-    let parser = Parser::new(&tokens);
-    let ast = match parser.parse() {
-        Ok(ast) => ast,
-        Err(errors) => {
-            for e in errors {
-                diagnostics.push(Diagnostic {
-                    range: span_to_range(e.span()),
-                    severity: Some(DiagnosticSeverity::ERROR),
-                    code: Some(NumberOrString::String("PARSE".to_string())),
-                    source: Some("forma".to_string()),
-                    message: format!("{}", e),
-                    ..Default::default()
-                });
-            }
-            return diagnostics;
-        }
-    };
-
-    let mut type_checker = TypeChecker::new();
-    if let Err(errors) = type_checker.check(&ast) {
-        for error in errors {
-            diagnostics.push(Diagnostic {
-                range: span_to_range(error.span),
+    let mut session = CompilerSession::new();
+    match session.compile_source("<lsp>", content) {
+        Ok(_) => Vec::new(),
+        Err(diagnostics) => diagnostics
+            .into_iter()
+            .map(|diagnostic| Diagnostic {
+                range: span_to_range(diagnostic.span),
                 severity: Some(DiagnosticSeverity::ERROR),
-                code: Some(NumberOrString::String("TYPE".to_string())),
+                code: Some(NumberOrString::String(diagnostic.phase.code().to_string())),
                 source: Some("forma".to_string()),
-                message: format!("{}", error),
+                message: diagnostic.message,
                 ..Default::default()
-            });
-        }
+            })
+            .collect(),
     }
-
-    let mut borrow_checker = BorrowChecker::new();
-    if let Err(errors) = borrow_checker.check(&ast) {
-        for error in errors {
-            diagnostics.push(Diagnostic {
-                range: span_to_range(error.span),
-                severity: Some(DiagnosticSeverity::ERROR),
-                code: Some(NumberOrString::String("BORROW".to_string())),
-                source: Some("forma".to_string()),
-                message: format!("{}", error),
-                ..Default::default()
-            });
-        }
-    }
-
-    diagnostics
 }
 
 /// Get completions for position in source content (extracted for testability).
@@ -647,17 +591,14 @@ pub fn analyze_completions(content: &str, position: Position) -> Vec<CompletionI
             completion_item("filter", CompletionItemKind::METHOD, "Filter elements"),
         ]);
     } else {
+        completions.extend(crate::lexer::KEYWORDS.iter().map(|keyword| {
+            completion_item(
+                keyword.canonical,
+                CompletionItemKind::KEYWORD,
+                &format!("{:?} keyword", keyword.keyword),
+            )
+        }));
         completions.extend(vec![
-            completion_item("f", CompletionItemKind::KEYWORD, "Define function"),
-            completion_item("s", CompletionItemKind::KEYWORD, "Define struct"),
-            completion_item("e", CompletionItemKind::KEYWORD, "Define enum"),
-            completion_item("t", CompletionItemKind::KEYWORD, "Define trait"),
-            completion_item("impl", CompletionItemKind::KEYWORD, "Implement trait"),
-            completion_item("if", CompletionItemKind::KEYWORD, "If expression"),
-            completion_item("m", CompletionItemKind::KEYWORD, "Match expression"),
-            completion_item("wh", CompletionItemKind::KEYWORD, "While loop"),
-            completion_item("for", CompletionItemKind::KEYWORD, "For loop"),
-            completion_item("ret", CompletionItemKind::KEYWORD, "Return statement"),
             completion_item("print", CompletionItemKind::FUNCTION, "Print to stdout"),
             completion_item(
                 "println",
@@ -665,6 +606,18 @@ pub fn analyze_completions(content: &str, position: Position) -> Vec<CompletionI
                 "Print with newline",
             ),
         ]);
+        let semantics = SemanticIndex::from_tokens(&tokens);
+        completions.extend(semantics.definitions().iter().map(|definition| {
+            let kind = match definition.kind {
+                crate::semantic::SymbolKind::Function => CompletionItemKind::FUNCTION,
+                crate::semantic::SymbolKind::Type => CompletionItemKind::CLASS,
+                crate::semantic::SymbolKind::Module => CompletionItemKind::MODULE,
+                crate::semantic::SymbolKind::Parameter | crate::semantic::SymbolKind::Local => {
+                    CompletionItemKind::VARIABLE
+                }
+            };
+            completion_item(&definition.name, kind, &format!("{:?}", definition.kind))
+        }));
     }
 
     completions.extend(vec![
@@ -765,6 +718,19 @@ pub fn analyze_completions(content: &str, position: Position) -> Vec<CompletionI
             "Shuffle array randomly",
         ),
     ]);
+
+    for builtin in crate::builtins::all() {
+        if !completions.iter().any(|item| item.label == builtin.name) {
+            completions.push(completion_item(
+                builtin.name,
+                CompletionItemKind::FUNCTION,
+                builtin.documentation,
+            ));
+        }
+    }
+
+    completions.sort_by(|left, right| left.label.cmp(&right.label));
+    completions.dedup_by(|left, right| left.label == right.label);
 
     completions
 }
@@ -874,38 +840,27 @@ fn get_signature_help(content: &str, position: Position) -> Option<SignatureHelp
 }
 
 /// Try to get type information for a user-defined symbol from the type checker.
-fn get_symbol_type_info(content: &str, name: &str) -> Option<String> {
-    let scanner = Scanner::new(content);
-    let (tokens, lex_errors) = scanner.scan_all();
-    if !lex_errors.is_empty() {
-        return None;
-    }
-
-    let parser = Parser::new(&tokens);
-    let ast = match parser.parse() {
-        Ok(ast) => ast,
-        Err(_) => return None,
+fn get_symbol_type_info(content: &str, name: &str, offset: usize) -> Option<String> {
+    let mut session = CompilerSession::new();
+    let compilation = session.compile_source("<lsp>", content).ok()?;
+    let definition = compilation.semantics.definition_at(offset);
+    let kind_label = match definition.map(|definition| definition.kind) {
+        Some(crate::semantic::SymbolKind::Function) => "function",
+        Some(crate::semantic::SymbolKind::Type) => "type",
+        Some(crate::semantic::SymbolKind::Module) => "module",
+        Some(crate::semantic::SymbolKind::Parameter) => "parameter",
+        Some(crate::semantic::SymbolKind::Local) => "variable",
+        None => "symbol",
     };
-
-    let mut type_checker = TypeChecker::new();
-    let _ = type_checker.check(&ast);
-
-    let scheme = type_checker.env().get(name)?;
-    let kind_label = if let Some((_span, def_kind)) = type_checker.get_definition_location(name) {
-        match def_kind {
-            crate::types::checker::DefinitionKind::Function => "function",
-            crate::types::checker::DefinitionKind::Struct => "struct",
-            crate::types::checker::DefinitionKind::Enum => "enum",
-            crate::types::checker::DefinitionKind::Trait => "trait",
-            crate::types::checker::DefinitionKind::TypeAlias => "type alias",
-            crate::types::checker::DefinitionKind::Variable => "variable",
-            crate::types::checker::DefinitionKind::Parameter => "parameter",
-            crate::types::checker::DefinitionKind::EnumVariant => "variant",
-        }
-    } else {
-        "symbol"
-    };
-    Some(format!("{} {}: {}", kind_label, name, scheme))
+    let ty = compilation.type_at_offset(offset).cloned().or_else(|| {
+        compilation.program.functions.get(name).map(|function| {
+            crate::types::Ty::Fn(
+                function.params.iter().map(|(_, ty)| ty.clone()).collect(),
+                Box::new(function.return_ty.clone()),
+            )
+        })
+    })?;
+    Some(format!("{} {}: {}", kind_label, name, ty))
 }
 
 /// Run the LSP server
@@ -956,6 +911,21 @@ mod tests {
             labels.contains(&"vec_new"),
             "should contain 'vec_new' builtin"
         );
+    }
+
+    #[test]
+    fn completions_include_semantically_indexed_user_symbols() {
+        let source = "f helper() -> Int = 1\nf main() -> Int\n    local = helper()\n    ";
+        let completions = analyze_completions(
+            source,
+            Position {
+                line: 3,
+                character: 4,
+            },
+        );
+        let labels: Vec<_> = completions.iter().map(|item| item.label.as_str()).collect();
+        assert!(labels.contains(&"helper"));
+        assert!(labels.contains(&"local"));
     }
 
     #[test]

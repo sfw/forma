@@ -7,7 +7,9 @@ use forma::errors::ErrorContext;
 use forma::lexer::Span;
 use forma::mir::{Interpreter, Lowerer, Value};
 use forma::module::ModuleLoader;
-use forma::{BorrowChecker, Parser as FormaParser, Scanner, TypeChecker};
+use forma::{
+    BorrowChecker, Compilation, CompilerSession, Parser as FormaParser, Scanner, TypeChecker,
+};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use serde::Serialize;
@@ -59,6 +61,17 @@ enum VerifyFormat {
     Json,
 }
 
+#[derive(Clone, Copy, Debug, Default, ValueEnum, PartialEq, Eq)]
+enum VerifyLevel {
+    /// Reproducible generated contract tests.
+    #[default]
+    Test,
+    /// Enumerate every value of supported finite parameter domains.
+    Exhaustive,
+    /// Attempt formal proof; unsupported obligations report UNKNOWN.
+    Formal,
+}
+
 /// A structured error for JSON output
 #[derive(Serialize)]
 struct JsonError {
@@ -85,8 +98,8 @@ struct JsonOutput {
 
 #[derive(Parser)]
 #[command(name = "forma")]
-#[command(version = "0.1.0")]
-#[command(about = "FORMA v2 compiler - AI-optimized systems programming language")]
+#[command(version)]
+#[command(about = "FORMA compiler - an agent-oriented programming language prototype")]
 struct Cli {
     /// Error output format
     #[arg(long, value_enum, default_value = "human", global = true)]
@@ -230,6 +243,14 @@ enum Commands {
         /// Output format (ebnf, json)
         #[arg(long, value_enum, default_value = "ebnf")]
         format: GrammarFormat,
+
+        /// Regenerate checked-in grammar artifacts in docs/
+        #[arg(long, conflicts_with = "check")]
+        write: bool,
+
+        /// Fail if checked-in grammar artifacts differ from generated output
+        #[arg(long)]
+        check: bool,
     },
 
     /// Create a new FORMA project
@@ -304,6 +325,14 @@ enum Commands {
         #[arg(long, default_value_t = 20)]
         examples: usize,
 
+        /// Verification confidence level
+        #[arg(long, value_enum, default_value = "test")]
+        level: VerifyLevel,
+
+        /// Maximum Cartesian finite domain size
+        #[arg(long, default_value_t = 4096)]
+        max_domain: usize,
+
         /// RNG seed for deterministic example generation
         #[arg(long, default_value_t = 42)]
         seed: u64,
@@ -334,7 +363,7 @@ fn main() {
             no_optimize,
         } => build(
             &file,
-            output.as_ref(),
+            output.as_deref(),
             opt_level,
             !no_optimize,
             error_format,
@@ -362,7 +391,7 @@ fn main() {
                 allow_unsafe,
                 allow_all,
             };
-            run(
+            run_shared(
                 &file,
                 &args,
                 dump_mir,
@@ -374,7 +403,7 @@ fn main() {
         }
         Commands::Lex { file } => lex(&file, error_format),
         Commands::Parse { file } => parse(&file, error_format),
-        Commands::Check { file, partial } => check(&file, partial, error_format),
+        Commands::Check { file, partial } => check_shared(&file, partial, error_format),
         Commands::Complete { file, position } => complete(&file, &position, error_format),
         Commands::Typeof { file, position } => typeof_at(&file, &position, error_format),
         Commands::Build {
@@ -384,12 +413,16 @@ fn main() {
             no_optimize,
         } => build(
             &file,
-            output.as_ref(),
+            output.as_deref(),
             opt_level,
             !no_optimize,
             error_format,
         ),
-        Commands::Grammar { format } => grammar(format),
+        Commands::Grammar {
+            format,
+            write,
+            check,
+        } => grammar(format, write, check),
         Commands::New { name } => new_project(&name),
         Commands::Init => init_project(),
         Commands::Repl => repl(),
@@ -416,6 +449,8 @@ fn main() {
             report,
             format,
             examples,
+            level,
+            max_domain,
             seed,
             max_steps,
             timeout,
@@ -426,6 +461,8 @@ fn main() {
                 report,
                 format,
                 examples,
+                level,
+                max_domain,
                 seed,
                 max_steps,
                 timeout_ms: timeout,
@@ -526,11 +563,14 @@ fn output_json_errors(errors: Vec<JsonError>, items_count: Option<usize>) {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
-enum VerificationStatus {
-    Pass,
-    Skip,
-    Warn,
-    Fail,
+enum ContractTestStatus {
+    Tested,
+    Exhaustive,
+    Proved,
+    Counterexample,
+    Unknown,
+    Skipped,
+    Untested,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -567,20 +607,41 @@ struct ExplainFunction {
 }
 
 #[derive(Clone, Debug, Serialize)]
+struct ExplainStruct {
+    name: String,
+    invariants: Vec<ExplainContract>,
+    checked_at: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
 struct ExplainOutput {
+    structs: Vec<ExplainStruct>,
     functions: Vec<ExplainFunction>,
 }
 
 #[derive(Clone, Debug, Serialize)]
 struct VerifyFunctionReport {
     name: String,
-    status: VerificationStatus,
+    status: ContractTestStatus,
     contract_count: usize,
     examples_run: usize,
     examples_passed: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
+    seed: Option<u64>,
+    tested_domain: String,
+    limitations: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     skip_reason: Option<String>,
     issues: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct VerifyInvariantReport {
+    type_name: String,
+    invariant_count: usize,
+    enforcement: String,
+    formal_status: ContractTestStatus,
+    limitations: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -588,6 +649,7 @@ struct VerifyFileReport {
     path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     file_error: Option<String>,
+    invariants: Vec<VerifyInvariantReport>,
     functions: Vec<VerifyFunctionReport>,
 }
 
@@ -595,7 +657,12 @@ struct VerifyFileReport {
 struct VerifySummary {
     total_functions: usize,
     functions_with_contracts: usize,
-    verified: usize,
+    structs_with_invariants: usize,
+    invariant_clauses: usize,
+    tested: usize,
+    exhaustive: usize,
+    proved: usize,
+    unknown: usize,
     skipped: usize,
     warnings: usize,
     failures: usize,
@@ -621,13 +688,76 @@ struct VerifyConfig {
     report: bool,
     format: VerifyFormat,
     examples: usize,
+    level: VerifyLevel,
+    max_domain: usize,
     seed: u64,
     max_steps: usize,
     timeout_ms: u64,
     allow_side_effects: bool,
 }
 
-fn compile_program_for_analysis(
+fn compile_program_for_analysis_shared(
+    file: &Path,
+    error_format: ErrorFormat,
+    emit_errors: bool,
+) -> Result<forma::mir::Program, String> {
+    compile_file_shared(file, error_format, emit_errors).map(|compilation| compilation.program)
+}
+
+fn compile_file_shared(
+    file: &Path,
+    error_format: ErrorFormat,
+    emit_errors: bool,
+) -> Result<Compilation, String> {
+    let mut session = CompilerSession::new();
+    match session.compile_file(file) {
+        Ok(compilation) => Ok(compilation),
+        Err(diagnostics) => {
+            if emit_errors {
+                render_compiler_diagnostics(&session, &diagnostics, error_format);
+            }
+            Err(format!("{} compiler error(s)", diagnostics.len()))
+        }
+    }
+}
+
+fn render_compiler_diagnostics(
+    session: &CompilerSession,
+    diagnostics: &[forma::CompilerDiagnostic],
+    error_format: ErrorFormat,
+) {
+    let mut json_errors = Vec::new();
+    for diagnostic in diagnostics {
+        let filename = session
+            .sources()
+            .name(diagnostic.source_id)
+            .unwrap_or("<unknown>");
+        let source = session.sources().source(diagnostic.source_id).unwrap_or("");
+        match error_format {
+            ErrorFormat::Human => {
+                let context = ErrorContext::new(filename, source);
+                if let Some(help) = &diagnostic.help {
+                    context.error_with_help(diagnostic.span, &diagnostic.message, help);
+                } else {
+                    context.error(diagnostic.span, &diagnostic.message);
+                }
+            }
+            ErrorFormat::Json => json_errors.push(span_to_json_error(
+                filename,
+                diagnostic.span,
+                diagnostic.phase.code(),
+                &diagnostic.message,
+                diagnostic.help.as_deref(),
+            )),
+        }
+    }
+    if matches!(error_format, ErrorFormat::Json) {
+        output_json_errors(json_errors, None);
+    }
+}
+
+#[allow(dead_code)]
+fn compile_program_for_analysis_legacy(
     file: &PathBuf,
     error_format: ErrorFormat,
     emit_errors: bool,
@@ -1249,6 +1379,121 @@ fn generate_inputs_for_function(
     Ok(all)
 }
 
+fn finite_inputs_for_function(
+    func: &forma::mir::Function,
+    max_domain: usize,
+) -> Result<Vec<Vec<Value>>, String> {
+    if func
+        .param_pass_modes
+        .iter()
+        .any(|mode| *mode != forma::mir::mir::PassMode::Owned)
+    {
+        return Err("reference parameters are outside the finite verifier".to_string());
+    }
+    let mut inputs = vec![Vec::new()];
+    for (_, ty) in &func.params {
+        let values = finite_values_for_type(ty, max_domain)?;
+        if inputs.len().saturating_mul(values.len()) > max_domain {
+            return Err(format!(
+                "finite domain exceeds configured limit of {max_domain} tuples"
+            ));
+        }
+        let mut product = Vec::with_capacity(inputs.len() * values.len());
+        for prefix in &inputs {
+            for value in &values {
+                let mut tuple = prefix.clone();
+                tuple.push(value.clone());
+                product.push(tuple);
+            }
+        }
+        inputs = product;
+    }
+    Ok(inputs)
+}
+
+fn finite_values_for_type(ty: &forma::types::Ty, cap: usize) -> Result<Vec<Value>, String> {
+    use forma::types::Ty;
+    match ty {
+        Ty::Bool => Ok(vec![Value::Bool(false), Value::Bool(true)]),
+        Ty::Unit => Ok(vec![Value::Unit]),
+        Ty::Option(inner) => {
+            let values = finite_values_for_type(inner, cap)?;
+            if values.len() + 1 > cap {
+                return Err(format!("finite `{ty}` domain exceeds limit {cap}"));
+            }
+            let mut out = vec![Value::Enum {
+                type_name: "Option".to_string(),
+                variant: "None".to_string(),
+                fields: vec![],
+            }];
+            out.extend(values.into_iter().map(|value| Value::Enum {
+                type_name: "Option".to_string(),
+                variant: "Some".to_string(),
+                fields: vec![value],
+            }));
+            Ok(out)
+        }
+        Ty::Result(ok, err) => {
+            let ok_values = finite_values_for_type(ok, cap)?;
+            let err_values = finite_values_for_type(err, cap)?;
+            if ok_values.len() + err_values.len() > cap {
+                return Err(format!("finite `{ty}` domain exceeds limit {cap}"));
+            }
+            Ok(ok_values
+                .into_iter()
+                .map(|value| Value::Enum {
+                    type_name: "Result".to_string(),
+                    variant: "Ok".to_string(),
+                    fields: vec![value],
+                })
+                .chain(err_values.into_iter().map(|value| Value::Enum {
+                    type_name: "Result".to_string(),
+                    variant: "Err".to_string(),
+                    fields: vec![value],
+                }))
+                .collect())
+        }
+        Ty::Tuple(items) => finite_aggregate_values(items, cap, false),
+        Ty::Array(item, len) => finite_aggregate_values(&vec![*item.clone(); *len], cap, true),
+        _ => Err(format!(
+            "type `{ty}` does not have a compiler-known finite domain"
+        )),
+    }
+}
+
+fn finite_aggregate_values(
+    items: &[forma::types::Ty],
+    cap: usize,
+    array: bool,
+) -> Result<Vec<Value>, String> {
+    let mut product: Vec<Vec<Value>> = vec![Vec::new()];
+    for item in items {
+        let values = finite_values_for_type(item, cap)?;
+        if product.len().saturating_mul(values.len()) > cap {
+            return Err(format!("aggregate finite domain exceeds limit {cap}"));
+        }
+        let mut next = Vec::with_capacity(product.len() * values.len());
+        for prefix in &product {
+            for value in &values {
+                let mut fields = prefix.clone();
+                fields.push(value.clone());
+                next.push(fields);
+            }
+        }
+        product = next;
+    }
+    Ok(product
+        .into_iter()
+        .map(|values| {
+            if array {
+                Value::Array(values)
+            } else {
+                Value::Tuple(values)
+            }
+        })
+        .collect())
+}
+
 fn satisfy_simple_preconditions(func: &forma::mir::Function, args: &mut [Value]) {
     let mut apply_to_arg = |idx: usize, rule: &str| {
         if idx >= args.len() {
@@ -1390,7 +1635,7 @@ fn run_function_with_safety(
 }
 
 fn explain(
-    file: &PathBuf,
+    file: &Path,
     function: Option<&str>,
     format: ExplainFormat,
     examples: Option<usize>,
@@ -1398,7 +1643,7 @@ fn explain(
     max_examples: Option<usize>,
     error_format: ErrorFormat,
 ) -> Result<(), String> {
-    let program = compile_program_for_analysis(file, error_format, true)?;
+    let program = compile_program_for_analysis_shared(file, error_format, true)?;
     let mut functions: Vec<_> = program.functions.iter().collect();
     functions.sort_by(|a, b| a.0.cmp(b.0));
 
@@ -1521,12 +1766,46 @@ fn explain(
         return Err(format!("function '{}' not found", target));
     }
 
+    let mut output_structs = program
+        .struct_invariants
+        .iter()
+        .map(|(name, invariants)| ExplainStruct {
+            name: name.clone(),
+            invariants: invariants
+                .iter()
+                .map(|invariant| ExplainContract {
+                    expression: invariant.expr_string.clone(),
+                    english: explain_contract_text(&invariant.expr_string),
+                    pattern_name: Some("inv".to_string()),
+                    message: invariant.message.clone(),
+                })
+                .collect(),
+            checked_at: vec![
+                "construction".to_string(),
+                "function entry".to_string(),
+                "function return".to_string(),
+                "mutable borrow return".to_string(),
+            ],
+        })
+        .collect::<Vec<_>>();
+    output_structs.sort_by(|a, b| a.name.cmp(&b.name));
+
     let output = ExplainOutput {
+        structs: output_structs,
         functions: output_functions,
     };
     match format {
         ExplainFormat::Json => print_json(&output),
         ExplainFormat::Markdown => {
+            for structure in &output.structs {
+                println!("### `s {}`", structure.name);
+                println!();
+                println!("Maintains:");
+                for invariant in &structure.invariants {
+                    println!("- [@inv] {}", invariant.english);
+                }
+                println!();
+            }
             for function in &output.functions {
                 println!("### `{}`", function.signature);
                 if function.preconditions.is_empty() && function.postconditions.is_empty() {
@@ -1561,6 +1840,18 @@ fn explain(
             }
         }
         ExplainFormat::Human => {
+            for structure in &output.structs {
+                println!("\u{250c}\u{2500} s {}", structure.name);
+                println!("\u{2502}  Maintains:");
+                for invariant in &structure.invariants {
+                    println!("\u{2502}    - [@inv] {}", invariant.english);
+                }
+                println!(
+                    "\u{2514}\u{2500} Checked at: {}",
+                    structure.checked_at.join(", ")
+                );
+                println!();
+            }
             for function in &output.functions {
                 let has_contracts =
                     !function.preconditions.is_empty() || !function.postconditions.is_empty();
@@ -1684,12 +1975,13 @@ fn verify(path: &Path, config: VerifyConfig, error_format: ErrorFormat) -> Resul
 
     for file in files {
         let display = file.to_string_lossy().to_string();
-        let program = match compile_program_for_analysis(&file, error_format, false) {
+        let program = match compile_program_for_analysis_shared(&file, error_format, false) {
             Ok(p) => p,
             Err(e) => {
                 report_files.push(VerifyFileReport {
                     path: display,
                     file_error: Some(e),
+                    invariants: vec![],
                     functions: vec![],
                 });
                 had_failures = true;
@@ -1697,7 +1989,30 @@ fn verify(path: &Path, config: VerifyConfig, error_format: ErrorFormat) -> Resul
             }
         };
 
+        let mut invariant_reports = program
+            .struct_invariants
+            .iter()
+            .map(|(type_name, invariants)| VerifyInvariantReport {
+                type_name: type_name.clone(),
+                invariant_count: invariants.len(),
+                enforcement: "runtime: construction, function entry/return, ref mut return"
+                    .to_string(),
+                formal_status: ContractTestStatus::Unknown,
+                limitations: vec![
+                    "struct invariant preservation is outside the current SMT subset".to_string(),
+                    "runtime enforcement is not a formal proof".to_string(),
+                ],
+            })
+            .collect::<Vec<_>>();
+        invariant_reports.sort_by(|a, b| a.type_name.cmp(&b.type_name));
+        summary.structs_with_invariants += invariant_reports.len();
+        summary.invariant_clauses += invariant_reports
+            .iter()
+            .map(|report| report.invariant_count)
+            .sum::<usize>();
+
         let mut function_reports = Vec::new();
+        let inferred_effects = forma::builtins::infer_effects(&program);
         let mut funcs: Vec<_> = program.functions.iter().collect();
         funcs.sort_by(|a, b| a.0.cmp(b.0));
 
@@ -1712,10 +2027,13 @@ fn verify(path: &Path, config: VerifyConfig, error_format: ErrorFormat) -> Resul
                 summary.warnings += 1;
                 function_reports.push(VerifyFunctionReport {
                     name: name.clone(),
-                    status: VerificationStatus::Warn,
+                    status: ContractTestStatus::Untested,
                     contract_count,
                     examples_run: 0,
                     examples_passed: 0,
+                    seed: None,
+                    tested_domain: "none".to_string(),
+                    limitations: vec!["contract testing is not a formal proof".to_string()],
                     skip_reason: None,
                     issues: vec!["no contracts defined".to_string()],
                 });
@@ -1723,22 +2041,132 @@ fn verify(path: &Path, config: VerifyConfig, error_format: ErrorFormat) -> Resul
             }
             summary.functions_with_contracts += 1;
 
-            let inputs = match generate_inputs_for_function(
-                func,
-                config.examples,
-                config
-                    .seed
-                    .wrapping_add(name.bytes().map(u64::from).sum::<u64>()),
-            ) {
+            if config.level == VerifyLevel::Formal {
+                let (status, skip_reason, issues, limitations) = if inferred_effects
+                    .get(name)
+                    .is_some_and(|effects| !effects.is_empty())
+                {
+                    summary.unknown += 1;
+                    (
+                        ContractTestStatus::Unknown,
+                        Some("effectful functions are outside the formal pure subset".to_string()),
+                        vec![],
+                        vec!["effects never produce a false proof".to_string()],
+                    )
+                } else {
+                    match forma::verify::build_smt_obligation(func) {
+                        Err(reason) => {
+                            summary.unknown += 1;
+                            (
+                                ContractTestStatus::Unknown,
+                                Some(reason),
+                                vec![],
+                                vec![
+                                    "unsupported obligations are never reported as PROVED"
+                                        .to_string(),
+                                ],
+                            )
+                        }
+                        Ok(obligation) => {
+                            let solver = std::env::var("FORMA_SMT_SOLVER")
+                                .unwrap_or_else(|_| "z3".to_string());
+                            match forma::verify::run_solver(&obligation, &solver) {
+                                forma::verify::FormalResult::Proved => {
+                                    summary.proved += 1;
+                                    (
+                                        ContractTestStatus::Proved,
+                                        None,
+                                        vec![],
+                                        vec![format!(
+                                            "proved from a {}-byte SMT-LIB obligation",
+                                            obligation.script.len()
+                                        )],
+                                    )
+                                }
+                                forma::verify::FormalResult::Counterexample(model) => {
+                                    summary.failures += 1;
+                                    had_failures = true;
+                                    let model = model
+                                        .into_iter()
+                                        .map(|(name, value)| format!("{name} = {value}"))
+                                        .collect::<Vec<_>>()
+                                        .join(", ");
+                                    (
+                                        ContractTestStatus::Counterexample,
+                                        None,
+                                        vec![format!("solver counterexample: {model}")],
+                                        vec![
+                                            "counterexample values are solver-reproducible"
+                                                .to_string(),
+                                        ],
+                                    )
+                                }
+                                forma::verify::FormalResult::Unknown(reason) => {
+                                    summary.unknown += 1;
+                                    (
+                                        ContractTestStatus::Unknown,
+                                        Some(reason),
+                                        vec![],
+                                        vec![format!(
+                                            "generated {} bytes of SMT-LIB for the pure subset",
+                                            obligation.script.len()
+                                        )],
+                                    )
+                                }
+                            }
+                        }
+                    }
+                };
+                function_reports.push(VerifyFunctionReport {
+                    name: name.clone(),
+                    status,
+                    contract_count,
+                    examples_run: 0,
+                    examples_passed: 0,
+                    seed: None,
+                    tested_domain: "SMT-LIB pure subset".to_string(),
+                    limitations,
+                    skip_reason,
+                    issues,
+                });
+                continue;
+            }
+
+            let function_seed = config
+                .seed
+                .wrapping_add(name.bytes().map(u64::from).sum::<u64>());
+            let inputs = match config.level {
+                VerifyLevel::Test => {
+                    generate_inputs_for_function(func, config.examples, function_seed)
+                }
+                VerifyLevel::Exhaustive => finite_inputs_for_function(func, config.max_domain),
+                VerifyLevel::Formal => unreachable!(),
+            };
+            let inputs = match inputs {
                 Ok(inputs) => inputs,
                 Err(e) => {
-                    summary.skipped += 1;
+                    if config.level == VerifyLevel::Exhaustive {
+                        summary.unknown += 1;
+                    } else {
+                        summary.skipped += 1;
+                    }
                     function_reports.push(VerifyFunctionReport {
                         name: name.clone(),
-                        status: VerificationStatus::Skip,
+                        status: if config.level == VerifyLevel::Exhaustive {
+                            ContractTestStatus::Unknown
+                        } else {
+                            ContractTestStatus::Skipped
+                        },
                         contract_count,
                         examples_run: 0,
                         examples_passed: 0,
+                        seed: (config.level == VerifyLevel::Test).then_some(function_seed),
+                        tested_domain: "unsupported".to_string(),
+                        limitations: vec![if config.level == VerifyLevel::Exhaustive {
+                            "parameter domain is not finite or exceeds --max-domain".to_string()
+                        } else {
+                            "contract testing is not a formal proof".to_string()
+                        }],
                         skip_reason: Some(e),
                         issues: vec![],
                     });
@@ -1753,6 +2181,9 @@ fn verify(path: &Path, config: VerifyConfig, error_format: ErrorFormat) -> Resul
             for args in &inputs {
                 match run_function_with_safety(&program, name, args, &safety) {
                     Ok(_) => passed += 1,
+                    Err(e)
+                        if config.level == VerifyLevel::Exhaustive
+                            && e.contains("Contract violation (precondition)") => {}
                     Err(e) if is_capability_error(&e) => {
                         skip_reason = Some(e);
                         break;
@@ -1766,14 +2197,19 @@ fn verify(path: &Path, config: VerifyConfig, error_format: ErrorFormat) -> Resul
 
             let status = if skip_reason.is_some() {
                 summary.skipped += 1;
-                VerificationStatus::Skip
+                ContractTestStatus::Skipped
             } else if issues.is_empty() {
-                summary.verified += 1;
-                VerificationStatus::Pass
+                if config.level == VerifyLevel::Exhaustive {
+                    summary.exhaustive += 1;
+                    ContractTestStatus::Exhaustive
+                } else {
+                    summary.tested += 1;
+                    ContractTestStatus::Tested
+                }
             } else {
                 summary.failures += 1;
                 had_failures = true;
-                VerificationStatus::Fail
+                ContractTestStatus::Counterexample
             };
 
             function_reports.push(VerifyFunctionReport {
@@ -1782,6 +2218,23 @@ fn verify(path: &Path, config: VerifyConfig, error_format: ErrorFormat) -> Resul
                 contract_count,
                 examples_run: inputs.len(),
                 examples_passed: passed,
+                seed: (config.level == VerifyLevel::Test).then_some(function_seed),
+                tested_domain: if config.level == VerifyLevel::Exhaustive {
+                    format!(
+                        "all {} value tuple(s) in the finite parameter domain",
+                        inputs.len()
+                    )
+                } else {
+                    format!("{} generated input(s)", inputs.len())
+                },
+                limitations: if config.level == VerifyLevel::Exhaustive {
+                    vec!["EXHAUSTIVE applies only to the reported finite domain".to_string()]
+                } else {
+                    vec![
+                        "generated contract tests sample only the reported inputs".to_string(),
+                        "TESTED is not a formal proof".to_string(),
+                    ]
+                },
                 skip_reason,
                 issues,
             });
@@ -1790,6 +2243,7 @@ fn verify(path: &Path, config: VerifyConfig, error_format: ErrorFormat) -> Resul
         report_files.push(VerifyFileReport {
             path: display,
             file_error: None,
+            invariants: invariant_reports,
             functions: function_reports,
         });
     }
@@ -1811,12 +2265,21 @@ fn verify(path: &Path, config: VerifyConfig, error_format: ErrorFormat) -> Resul
                     println!();
                     continue;
                 }
+                for invariant in &file.invariants {
+                    println!(
+                        "  ? INVARIANT {:<21} clauses:{} ({})",
+                        invariant.type_name, invariant.invariant_count, invariant.enforcement
+                    );
+                }
                 for function in &file.functions {
                     let badge = match function.status {
-                        VerificationStatus::Pass => "✓ PASS",
-                        VerificationStatus::Skip => "⊘ SKIP",
-                        VerificationStatus::Warn => "⚠ WARN",
-                        VerificationStatus::Fail => "✗ FAIL",
+                        ContractTestStatus::Tested => "✓ TESTED",
+                        ContractTestStatus::Exhaustive => "✓ EXHAUSTIVE",
+                        ContractTestStatus::Proved => "✓ PROVED",
+                        ContractTestStatus::Counterexample => "✗ COUNTEREXAMPLE",
+                        ContractTestStatus::Unknown => "? UNKNOWN",
+                        ContractTestStatus::Skipped => "⊘ SKIPPED",
+                        ContractTestStatus::Untested => "⚠ UNTESTED",
                     };
                     println!(
                         "  {} {:<24} contracts:{} examples:{}/{}",
@@ -1841,7 +2304,15 @@ fn verify(path: &Path, config: VerifyConfig, error_format: ErrorFormat) -> Resul
                 "  With contracts: {}",
                 output.summary.functions_with_contracts
             );
-            println!("  Verified: {}", output.summary.verified);
+            println!(
+                "  Structs with invariants: {}",
+                output.summary.structs_with_invariants
+            );
+            println!("  Invariant clauses: {}", output.summary.invariant_clauses);
+            println!("  Tested: {}", output.summary.tested);
+            println!("  Exhaustive: {}", output.summary.exhaustive);
+            println!("  Proved: {}", output.summary.proved);
+            println!("  Unknown: {}", output.summary.unknown);
             println!("  Skipped: {}", output.summary.skipped);
             println!("  Warnings: {}", output.summary.warnings);
             println!("  Failures: {}", output.summary.failures);
@@ -1858,7 +2329,121 @@ fn verify(path: &Path, config: VerifyConfig, error_format: ErrorFormat) -> Resul
     Ok(())
 }
 
-fn run(
+fn run_shared(
+    file: &Path,
+    program_args: &[String],
+    dump_mir: bool,
+    check_contracts: bool,
+    do_optimize: bool,
+    caps: &CapabilityConfig,
+    error_format: ErrorFormat,
+) -> Result<(), String> {
+    let compilation = compile_file_shared(file, error_format, true)?;
+    execute_program(
+        compilation.program,
+        file.to_string_lossy().into_owned(),
+        ExecutionOptions {
+            program_args,
+            dump_mir,
+            check_contracts,
+            optimize: do_optimize,
+            capabilities: caps,
+            error_format,
+        },
+    )
+}
+
+struct ExecutionOptions<'a> {
+    program_args: &'a [String],
+    dump_mir: bool,
+    check_contracts: bool,
+    optimize: bool,
+    capabilities: &'a CapabilityConfig,
+    error_format: ErrorFormat,
+}
+
+fn execute_program(
+    mut program: forma::mir::Program,
+    filename: String,
+    options: ExecutionOptions<'_>,
+) -> Result<(), String> {
+    if options.optimize {
+        forma::mir::optimize::optimize(&mut program);
+    }
+
+    if options.dump_mir {
+        eprintln!("=== MIR ===");
+        eprintln!("{}", program);
+        eprintln!("=== END MIR ===\n");
+    }
+
+    let mut json_errors = Vec::new();
+    if !program.functions.contains_key("main") {
+        if matches!(options.error_format, ErrorFormat::Json) {
+            json_errors.push(JsonError {
+                file: filename.clone(),
+                line: 1,
+                column: 1,
+                end_line: 1,
+                end_column: 1,
+                severity: "error".to_string(),
+                code: "MAIN".to_string(),
+                message: "no 'main' function found".to_string(),
+                help: Some("add a main function: f main()".to_string()),
+            });
+            output_json_errors(json_errors, None);
+        }
+        return Err("error: no 'main' function found".to_string());
+    }
+
+    let mut interp = Interpreter::new(program)
+        .map_err(|error| format!("Failed to create interpreter: {error}"))?;
+    options.capabilities.apply(&mut interp);
+    interp.set_check_contracts(options.check_contracts);
+    interp.set_env("ARGC", &options.program_args.len().to_string());
+    interp.set_env("ARGV", &options.program_args.join(" "));
+    for (index, arg) in options.program_args.iter().enumerate() {
+        interp.set_env(&format!("ARGV_{index}"), arg);
+    }
+
+    match interp.run("main", &[]) {
+        Ok(result) => {
+            let exit_code = match result {
+                Value::Int(value) => value as i32,
+                _ => 0,
+            };
+            if exit_code != 0 {
+                process::exit(exit_code);
+            }
+            Ok(())
+        }
+        Err(error) => {
+            if let Some(code) = error.requested_exit_code() {
+                process::exit(code);
+            }
+            if matches!(options.error_format, ErrorFormat::Json) {
+                output_json_errors(
+                    vec![JsonError {
+                        file: filename,
+                        line: 1,
+                        column: 1,
+                        end_line: 1,
+                        end_column: 1,
+                        severity: "error".to_string(),
+                        code: "RUNTIME".to_string(),
+                        message: error.to_string(),
+                        help: None,
+                    }],
+                    None,
+                );
+            }
+            Err(format!("error[RUNTIME]: {error}"))
+        }
+    }
+}
+
+#[allow(dead_code)]
+fn run_legacy(
     file: &PathBuf,
     program_args: &[String],
     dump_mir: bool,
@@ -2088,6 +2673,9 @@ fn run(
             Ok(())
         }
         Err(e) => {
+            if let Some(code) = e.requested_exit_code() {
+                process::exit(code);
+            }
             match error_format {
                 ErrorFormat::Human => {}
                 ErrorFormat::Json => {
@@ -2278,7 +2866,61 @@ fn print_item(item: &forma::parser::Item, indent: usize) {
     }
 }
 
-fn check(file: &PathBuf, partial: bool, error_format: ErrorFormat) -> Result<(), String> {
+fn check_shared(file: &Path, partial: bool, error_format: ErrorFormat) -> Result<(), String> {
+    let mut session = CompilerSession::new();
+    match session.compile_file(file) {
+        Ok(compilation) => {
+            let item_count = compilation.ast.items.len();
+            match error_format {
+                ErrorFormat::Human => println!("No errors found ({} items)", item_count),
+                ErrorFormat::Json if partial => print_json(&serde_json::json!({
+                    "valid": true,
+                    "errors": [],
+                    "holes": [],
+                    "items": item_count,
+                })),
+                ErrorFormat::Json => output_json_errors(vec![], Some(item_count)),
+            }
+            Ok(())
+        }
+        Err(diagnostics) => {
+            if matches!(error_format, ErrorFormat::Human) {
+                render_compiler_diagnostics(&session, &diagnostics, error_format);
+            } else {
+                let json_errors: Vec<JsonError> = diagnostics
+                    .iter()
+                    .map(|diagnostic| {
+                        let filename = session
+                            .sources()
+                            .name(diagnostic.source_id)
+                            .unwrap_or("<unknown>");
+                        span_to_json_error(
+                            filename,
+                            diagnostic.span,
+                            diagnostic.phase.code(),
+                            &diagnostic.message,
+                            diagnostic.help.as_deref(),
+                        )
+                    })
+                    .collect();
+                if partial {
+                    print_json(&serde_json::json!({
+                        "valid": false,
+                        "errors": json_errors,
+                        "holes": [],
+                        "items": 0,
+                    }));
+                } else {
+                    output_json_errors(json_errors, None);
+                }
+            }
+            Err(format!("{} error(s) found", diagnostics.len()))
+        }
+    }
+}
+
+#[allow(dead_code)]
+fn check_legacy(file: &PathBuf, partial: bool, error_format: ErrorFormat) -> Result<(), String> {
     let source = read_file(file)?;
     let filename = file.to_string_lossy().to_string();
     let ctx = ErrorContext::new(&filename, &source);
@@ -2613,77 +3255,59 @@ fn infer_expected_type(
 fn typeof_at(file: &PathBuf, position: &str, error_format: ErrorFormat) -> Result<(), String> {
     let (line, col) = parse_position(position)?;
     let source = read_file(file)?;
-    let filename = file.to_string_lossy().to_string();
-    let ctx = ErrorContext::new(&filename, &source);
 
-    // Lex
     let scanner = Scanner::new(&source);
     let (tokens, lex_errors) = scanner.scan_all();
-
     if !lex_errors.is_empty() {
         return Err("Lexer errors".into());
     }
-
-    // Parse
-    let parser = FormaParser::new(&tokens);
-    let ast = match parser.parse() {
-        Ok(ast) => ast,
-        Err(errors) => {
-            for error in &errors {
-                ctx.error(error.span(), &format!("{}", error));
-            }
-            return Err(format!("{} parse error(s)", errors.len()));
-        }
-    };
-
-    // Type check to get type information
-    let mut type_checker = TypeChecker::new();
-    let _ = type_checker.check(&ast); // We want partial info even if errors
-
-    // Find what's at the position
-    let mut result_type: Option<String> = None;
-    let mut context = "unknown";
-
-    // Search through tokens to find the one at position
-    for token in &tokens {
-        if token.span.line == line
+    let compilation = compile_file_shared(file, error_format, true)?;
+    let token = tokens.iter().find(|token| {
+        token.span.line == line
             && token.span.column <= col
             && col < token.span.column + token.span.end.saturating_sub(token.span.start)
+    });
+    let offset = token.map(|token| token.span.start + col.saturating_sub(token.span.column));
+    let result_type = offset
+        .and_then(|offset| compilation.type_at_offset(offset))
+        .map(ToString::to_string)
+        .or_else(|| {
+            let name = match token.map(|token| &token.kind) {
+                Some(forma::lexer::TokenKind::Ident(name)) => name,
+                _ => return None,
+            };
+            compilation.program.functions.get(name).map(|function| {
+                forma::types::Ty::Fn(
+                    function.params.iter().map(|(_, ty)| ty.clone()).collect(),
+                    Box::new(function.return_ty.clone()),
+                )
+                .to_string()
+            })
+        });
+    let context = match offset.and_then(|offset| compilation.semantics.definition_at(offset)) {
+        Some(definition) => match definition.kind {
+            forma::semantic::SymbolKind::Function => "function",
+            forma::semantic::SymbolKind::Type => "type",
+            forma::semantic::SymbolKind::Module => "module",
+            forma::semantic::SymbolKind::Parameter => "parameter",
+            forma::semantic::SymbolKind::Local => "variable",
+        },
+        None if matches!(
+            token.map(|token| &token.kind),
+            Some(
+                forma::lexer::TokenKind::Int(_)
+                    | forma::lexer::TokenKind::Float(_)
+                    | forma::lexer::TokenKind::String(_)
+                    | forma::lexer::TokenKind::Char(_)
+                    | forma::lexer::TokenKind::True
+                    | forma::lexer::TokenKind::False
+            )
+        ) =>
         {
-            // Found token at position - infer its type from context
-            match &token.kind {
-                forma::lexer::TokenKind::Ident(_) => {
-                    // Look up identifier in type environment
-                    result_type = Some("(identifier - run type checker for actual type)".into());
-                    context = "identifier";
-                }
-                forma::lexer::TokenKind::Int(_) => {
-                    result_type = Some("Int".into());
-                    context = "literal";
-                }
-                forma::lexer::TokenKind::Float(_) => {
-                    result_type = Some("Float".into());
-                    context = "literal";
-                }
-                forma::lexer::TokenKind::String(_) => {
-                    result_type = Some("Str".into());
-                    context = "literal";
-                }
-                forma::lexer::TokenKind::Char(_) => {
-                    result_type = Some("Char".into());
-                    context = "literal";
-                }
-                forma::lexer::TokenKind::True | forma::lexer::TokenKind::False => {
-                    result_type = Some("Bool".into());
-                    context = "literal";
-                }
-                _ => {
-                    context = "keyword/operator";
-                }
-            }
-            break;
+            "literal"
         }
-    }
+        None => "unknown",
+    };
 
     match error_format {
         ErrorFormat::Human => {
@@ -2709,10 +3333,7 @@ fn typeof_at(file: &PathBuf, position: &str, error_format: ErrorFormat) -> Resul
 
 /// Find the FORMA runtime library directory containing libforma_runtime.a.
 /// Searches in order:
-/// 1. Next to the forma binary: <exe_dir>/../runtime/target/release/
-/// 2. Next to the forma binary: <exe_dir>/runtime/target/release/
-/// 3. Current working directory: ./runtime/target/release/
-/// 4. FORMA_RUNTIME_LIB environment variable
+/// Includes the shared Cargo workspace target directory used by Forma 0.2.
 #[cfg(feature = "llvm")]
 fn find_runtime_lib() -> Option<PathBuf> {
     let lib_name = "libforma_runtime.a";
@@ -2727,6 +3348,11 @@ fn find_runtime_lib() -> Option<PathBuf> {
         if p.exists() && p.ends_with(lib_name) {
             return p.parent().map(|p| p.to_path_buf());
         }
+    }
+
+    let workspace_target = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/release");
+    if workspace_target.join(lib_name).exists() {
+        return Some(workspace_target);
     }
 
     // Get the executable path
@@ -2754,10 +3380,150 @@ fn find_runtime_lib() -> Option<PathBuf> {
     None
 }
 
+#[cfg(feature = "llvm")]
+fn ensure_runtime_lib() -> Result<PathBuf, String> {
+    if let Some(path) = find_runtime_lib() {
+        return Ok(path);
+    }
+    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let status = std::process::Command::new("cargo")
+        .args(["build", "-p", "forma_runtime", "--release", "--locked"])
+        .current_dir(&workspace)
+        .status()
+        .map_err(|error| format!("failed to build bundled Forma runtime: {error}"))?;
+    if !status.success() {
+        return Err("failed to build bundled Forma runtime".to_string());
+    }
+    find_runtime_lib().ok_or_else(|| {
+        "bundled runtime build succeeded but libforma_runtime.a was not produced".to_string()
+    })
+}
+
 /// Build native executable using LLVM
 #[allow(unused_variables)] // output_path and program are used only when LLVM feature is enabled
 #[allow(unreachable_code)] // Ok(()) is reachable only when LLVM feature is enabled
 fn build(
+    file: &Path,
+    output: Option<&Path>,
+    opt_level: u8,
+    do_optimize: bool,
+    error_format: ErrorFormat,
+) -> Result<(), String> {
+    let mut compilation = compile_file_shared(file, error_format, true)?;
+    if let Some(entry) = compilation.program.entry.as_ref()
+        && let Some(support) = compilation.backend_support.get(entry)
+        && support.native == forma::builtins::Support::Unsupported
+    {
+        return Err(format!(
+            "native backend does not support `{entry}`: {}",
+            support.reasons.join("; ")
+        ));
+    }
+    if do_optimize {
+        forma::mir::optimize::optimize(&mut compilation.program);
+    }
+    emit_native(compilation.program, file, output, opt_level, error_format)
+}
+
+fn emit_native(
+    program: forma::mir::Program,
+    file: &Path,
+    output: Option<&Path>,
+    opt_level: u8,
+    error_format: ErrorFormat,
+) -> Result<(), String> {
+    let output_path = output
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| file.with_extension(""));
+    let filename = file.to_string_lossy().into_owned();
+
+    #[cfg(feature = "llvm")]
+    {
+        use forma::codegen::LLVMCodegen;
+        use inkwell::context::Context;
+
+        let mut json_errors = Vec::new();
+        let context = Context::create();
+        let mut codegen = LLVMCodegen::new(&context, &filename);
+        codegen.set_opt_level(opt_level);
+
+        if std::env::var("FORMA_DEBUG").is_ok() {
+            eprintln!("{program}");
+        }
+
+        if let Err(error) = codegen.compile(&program) {
+            match error_format {
+                ErrorFormat::Human => eprintln!("error[CODEGEN]: {error}"),
+                ErrorFormat::Json => {
+                    json_errors.push(JsonError {
+                        file: filename.clone(),
+                        line: 1,
+                        column: 1,
+                        end_line: 1,
+                        end_column: 1,
+                        severity: "error".to_string(),
+                        code: "CODEGEN".to_string(),
+                        message: error.to_string(),
+                        help: None,
+                    });
+                    output_json_errors(json_errors, None);
+                }
+            }
+            return Err(format!("Codegen error: {error}"));
+        }
+
+        let object_path = output_path.with_extension("o");
+        codegen
+            .write_object_file(&object_path)
+            .map_err(|error| format!("Failed to write object file: {error}"))?;
+
+        let runtime_lib_path = ensure_runtime_lib()?;
+        let status = std::process::Command::new("cc")
+            .arg(&object_path)
+            .arg("-L")
+            .arg(&runtime_lib_path)
+            .arg("-lforma_runtime")
+            .arg("-o")
+            .arg(&output_path)
+            .status()
+            .map_err(|error| format!("Failed to run linker: {error}"))?;
+        if !status.success() {
+            return Err("Linking failed".into());
+        }
+        let _ = std::fs::remove_file(&object_path);
+
+        match error_format {
+            ErrorFormat::Human => {
+                println!("Compiled {} -> {}", file.display(), output_path.display())
+            }
+            ErrorFormat::Json => print_json(&serde_json::json!({
+                "status": "success",
+                "input": file.to_string_lossy(),
+                "output": output_path.to_string_lossy(),
+                "opt_level": opt_level,
+            })),
+        }
+        Ok(())
+    }
+
+    #[cfg(not(feature = "llvm"))]
+    {
+        let _ = (program, file, output_path, opt_level, filename);
+        match error_format {
+            ErrorFormat::Human => {
+                eprintln!("LLVM support not enabled. Rebuild with --features llvm")
+            }
+            ErrorFormat::Json => print_json(&serde_json::json!({
+                "status": "not_available",
+                "message": "LLVM support not enabled. Rebuild with --features llvm",
+            })),
+        }
+        Err("LLVM not available".into())
+    }
+}
+
+#[allow(dead_code, unreachable_code, unused_variables)]
+fn build_legacy(
     file: &PathBuf,
     output: Option<&PathBuf>,
     opt_level: u8,
@@ -2874,6 +3640,29 @@ fn build(
         return Err("Type errors".into());
     }
 
+    // Transitional FORMA 0.2 safety gate. Native builds must run the same
+    // source-level reference checks as `check` and `run` while ownership
+    // enforcement migrates to typed MIR.
+    let mut borrow_checker = BorrowChecker::new();
+    if let Err(errors) = borrow_checker.check(&ast) {
+        for error in &errors {
+            match error_format {
+                ErrorFormat::Human => ctx.error(error.span, &format!("{}", error)),
+                ErrorFormat::Json => json_errors.push(span_to_json_error(
+                    &filename,
+                    error.span,
+                    "BORROW",
+                    &format!("{}", error),
+                    None,
+                )),
+            }
+        }
+        if matches!(error_format, ErrorFormat::Json) {
+            output_json_errors(json_errors, None);
+        }
+        return Err("Borrow errors".into());
+    }
+
     // Determine output path
     let output_path = output.cloned().unwrap_or_else(|| file.with_extension(""));
 
@@ -2960,8 +3749,7 @@ fn build(
         }
 
         // Find the runtime library
-        let runtime_lib_path = find_runtime_lib()
-            .ok_or_else(|| "Cannot find libforma_runtime.a - build the runtime first: cd runtime && cargo build --release".to_string())?;
+        let runtime_lib_path = ensure_runtime_lib()?;
 
         // Link to executable with the FORMA runtime
         let status = std::process::Command::new("cc")
@@ -3058,6 +3846,7 @@ authors = []
 
     fs::write(project_path.join("forma.toml"), toml_content)
         .map_err(|e| format!("Failed to create forma.toml: {}", e))?;
+    forma::package::PackageManifest::load(&project_path.join("forma.toml"))?.write_lockfile()?;
 
     // Create src directory
     fs::create_dir(project_path.join("src"))
@@ -3114,6 +3903,7 @@ authors = []
 
     fs::write(&toml_path, toml_content)
         .map_err(|e| format!("Failed to create forma.toml: {}", e))?;
+    forma::package::PackageManifest::load(&toml_path)?.write_lockfile()?;
 
     // Create src directory if it doesn't exist
     let src_path = PathBuf::from("src");
@@ -3136,587 +3926,88 @@ f main() -> Int
     Ok(())
 }
 
-fn grammar(format: GrammarFormat) -> Result<(), String> {
+fn grammar(format: GrammarFormat, write: bool, check: bool) -> Result<(), String> {
+    if write || check {
+        return update_grammar_artifacts(write);
+    }
     match format {
-        GrammarFormat::Ebnf => print_grammar_ebnf(),
-        GrammarFormat::Json => print_grammar_json(),
+        GrammarFormat::Ebnf => print_grammar_ebnf_model(),
+        GrammarFormat::Json => print_grammar_json_model(),
     }
     Ok(())
 }
 
-fn print_grammar_ebnf() {
-    println!(
-        r#"(* FORMA Programming Language Grammar - EBNF *)
-(* Version 0.1.0 *)
-
-(* ============================================ *)
-(* Top Level *)
-(* ============================================ *)
-
-Program = {{ Item }} ;
-
-Item = Function
-     | Struct
-     | Enum
-     | Trait
-     | Impl
-     | TypeAlias
-     | Use
-     | Module
-     | Const
-     ;
-
-(* ============================================ *)
-(* Items *)
-(* ============================================ *)
-
-Function = {{ Attribute }} [ "async" ] "f" Identifier [ GenericParams ] "(" [ ParamList ] ")" [ "->" Type ] FunctionBody ;
-
-FunctionBody = "=" Expression
-             | Block
-             ;
-
-ParamList = Param {{ "," Param }} [ "," ] ;
-
-Param = [ PassMode ] [ "mut" ] Identifier ":" Type ;
-
-PassMode = "ref" [ "mut" ] ;
-
-Struct = "s" Identifier [ GenericParams ] [ "=" StructBody ] ;
-
-StructBody = "{{" [ FieldList ] "}}"          (* named fields *)
-           | "(" [ TypeList ] ")"             (* tuple struct *)
-           ;                                  (* unit struct if omitted *)
-
-FieldList = Field {{ "," Field }} [ "," ] ;
-
-Field = Identifier ":" Type ;
-
-Enum = "e" Identifier [ GenericParams ] "=" Variant {{ "|" Variant }} ;
-
-Variant = Identifier [ VariantData ] ;
-
-VariantData = "(" [ TypeList ] ")"            (* tuple variant *)
-            | "{{" [ FieldList ] "}}"         (* struct variant *)
-            ;
-
-Trait = "t" Identifier [ GenericParams ] [ ":" TypeBounds ] "{{" {{ TraitItem }} "}}" ;
-
-TraitItem = Function
-          | TypeAlias
-          ;
-
-Impl = "impl" [ GenericParams ] [ Type "for" ] Type [ WhereClause ] "{{" {{ ImplItem }} "}}" ;
-
-ImplItem = Function ;
-
-TypeAlias = "type" Identifier [ GenericParams ] "=" Type ;
-
-Use = "use" UsePath ;
-
-UsePath = Identifier {{ "::" Identifier }} [ UseTree ] ;
-
-UseTree = "::" "*"                            (* glob import *)
-        | "::" "{{" UseList "}}"              (* specific imports *)
-        | "as" Identifier                     (* rename *)
-        ;
-
-UseList = UsePath {{ "," UsePath }} [ "," ] ;
-
-Module = "mod" Identifier [ "{{" {{ Item }} "}}" ] ;
-
-Const = "const" Identifier ":" Type "=" Expression ;
-
-(* ============================================ *)
-(* Contracts / Attributes *)
-(* ============================================ *)
-
-Attribute = "@" Identifier [ "(" AttrArgList ")" ] ;
-
-AttrArgList = Expression [ "," String ] ;
-
-(* @pre(condition) or @pre(condition, "message") *)
-(* @post(condition) or @post(condition, "message") *)
-(* @post(old(x) + delta == result) — old() captures entry state *)
-(* Named patterns: @sorted(arr) @nonempty(x) @permutation(a,b) etc. *)
-
-(* ============================================ *)
-(* Types *)
-(* ============================================ *)
-
-Type = TypePath
-     | ArrayType
-     | TupleType
-     | FunctionType
-     | ReferenceType
-     | PointerType
-     | ErrorType
-     | OptionType
-     | NeverType
-     ;
-
-PointerType = "*" Type ;                      (* Raw pointer to T *)
-
-OptionType = Type "?" ;                       (* Option[T] sugar *)
-
-TypePath = [ "::" ] Identifier {{ "::" Identifier }} [ GenericArgs ] ;
-
-ArrayType = "[" Type [ ";" Expression ] "]" ;
-
-TupleType = "(" [ Type {{ "," Type }} [ "," ] ] ")" ;
-
-FunctionType = "fn" "(" [ TypeList ] ")" [ "->" Type ] ;
-
-ReferenceType = "&" [ "mut" ] Type ;
-
-ErrorType = Type "!" Type ;                   (* Result type sugar *)
-
-NeverType = "!" ;
-
-GenericParams = "[" GenericParam {{ "," GenericParam }} [ "," ] "]" ;
-
-GenericParam = Identifier [ ":" TypeBounds ] ;
-
-GenericArgs = "[" Type {{ "," Type }} [ "," ] "]" ;
-
-TypeBounds = Type {{ "+" Type }} ;
-
-TypeList = Type {{ "," Type }} [ "," ] ;
-
-WhereClause = "where" WherePredicate {{ "," WherePredicate }} ;
-
-WherePredicate = Type ":" TypeBounds ;
-
-(* ============================================ *)
-(* Expressions *)
-(* ============================================ *)
-
-Expression = AssignExpr ;
-
-AssignExpr = OrExpr [ AssignOp AssignExpr ] ;
-
-AssignOp = "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&&=" | "||=" ;
-
-OrExpr = AndExpr {{ "||" AndExpr }} ;
-
-AndExpr = CompareExpr {{ "&&" CompareExpr }} ;
-
-CompareExpr = BitwiseOrExpr [ CompareOp BitwiseOrExpr ] ;
-
-CompareOp = "==" | "!=" | "<" | "<=" | ">" | ">=" ;
-
-BitwiseOrExpr = BitwiseXorExpr {{ "|" BitwiseXorExpr }} ;
-
-BitwiseXorExpr = BitwiseAndExpr {{ "^" BitwiseAndExpr }} ;
-
-BitwiseAndExpr = ShiftExpr {{ "&" ShiftExpr }} ;
-
-ShiftExpr = AddExpr {{ ( "<<" | ">>" ) AddExpr }} ;
-
-AddExpr = MulExpr {{ ( "+" | "-" ) MulExpr }} ;
-
-MulExpr = UnaryExpr {{ ( "*" | "/" | "%" ) UnaryExpr }} ;
-
-UnaryExpr = ( "-" | "!" | "&" [ "mut" ] | "*" ) UnaryExpr
-          | PostfixExpr
-          ;
-
-PostfixExpr = PrimaryExpr {{ Postfix }} ;
-
-Postfix = "(" [ ArgList ] ")"                 (* function call *)
-        | "[" Expression "]"                  (* index *)
-        | "." Identifier [ GenericArgs ]      (* field/method access *)
-        | "." Integer                         (* tuple index *)
-        | "?"                                 (* try operator - Result *)
-        | "??"                                (* unwrap or default - Option *)
-        | "as" Type                           (* type cast *)
-        ;
-
-ArgList = Argument {{ "," Argument }} [ "," ] ;
-
-Argument = [ "ref" [ "mut" ] ] Expression ;
-
-PrimaryExpr = Literal
-            | Identifier [ GenericArgs ]
-            | "(" Expression ")"              (* parenthesized *)
-            | "(" [ Expression {{ "," Expression }} [ "," ] ] ")"  (* tuple *)
-            | "[" [ Expression {{ "," Expression }} [ "," ] ] "]"  (* array *)
-            | "[" Expression ";" Expression "]"                    (* array repeat *)
-            | MapLiteral
-            | SetLiteral
-            | Block
-            | IfExpr
-            | MatchExpr
-            | WhileExpr
-            | ForExpr
-            | LoopExpr
-            | ReturnExpr
-            | BreakExpr
-            | ContinueExpr
-            | ClosureExpr
-            | StructExpr
-            | AwaitExpr
-            | SpawnExpr
-            ;
-
-Block = INDENT {{ Statement }} [ Expression ] DEDENT
-      | "{{" {{ Statement }} [ Expression ] "}}"
-      ;
-
-(* ============================================ *)
-(* Control Flow *)
-(* ============================================ *)
-
-IfExpr = "if" Expression "then" Expression [ "else" Expression ]   (* inline *)
-       | "if" Expression Block [ "else" ( IfExpr | Block ) ]      (* block *)
-       ;
-
-MatchExpr = "m" Expression INDENT {{ MatchArm }} DEDENT ;
-
-MatchArm = Pattern {{ "|" Pattern }} [ "if" Expression ] "=>" Expression ;
-
-WhileExpr = [ Label ] "wh" Expression Block
-          | [ Label ] "wh" "let" Pattern "=" Expression Block
-          ;
-
-ForExpr = [ Label ] "for" Pattern "in" Expression Block ;
-
-LoopExpr = [ Label ] "loop" Block ;
-
-Label = "'" Identifier ":" ;                  (* e.g. 'outer: *)
-
-ReturnExpr = "ret" [ Expression ] ;
-
-BreakExpr = "break" [ "'" Identifier ] [ Expression ] ;
-
-ContinueExpr = "continue" [ "'" Identifier ] ;
-
-AwaitExpr = "await" Expression ;
-
-SpawnExpr = "spawn" Expression ;
-
-ClosureExpr = "|" [ ParamList ] "|" [ "->" Type ] Expression ;
-
-StructExpr = TypePath "{{" [ FieldInit {{ "," FieldInit }} [ "," ] ] "}}" ;
-
-FieldInit = Identifier [ ":" Expression ] ;
-
-MapLiteral = "{{" MapEntry {{ "," MapEntry }} [ "," ] "}}" ;
-
-MapEntry = Expression ":" Expression ;
-
-SetLiteral = "{{" Expression {{ "," Expression }} [ "," ] "}}" ;
-
-(* ============================================ *)
-(* Statements *)
-(* ============================================ *)
-
-Statement = LetStatement
-          | ExprStatement
-          ;
-
-LetStatement = Identifier [ ":" Type ] ":=" Expression ;
-
-ExprStatement = Expression [ ";" ] ;
-
-(* ============================================ *)
-(* Patterns *)
-(* ============================================ *)
-
-Pattern = LiteralPattern
-        | IdentifierPattern
-        | WildcardPattern
-        | TuplePattern
-        | StructPattern
-        | EnumPattern
-        | RangePattern
-        | ReferencePattern
-        | OrPattern
-        ;
-
-LiteralPattern = Integer | Float | String | Char | "true" | "false" ;
-
-IdentifierPattern = [ "mut" ] Identifier ;
-
-WildcardPattern = "_" ;
-
-TuplePattern = "(" [ Pattern {{ "," Pattern }} [ "," ] ] ")" ;
-
-StructPattern = TypePath "{{" [ FieldPattern {{ "," FieldPattern }} [ "," ] ] "}}" ;
-
-FieldPattern = Identifier [ ":" Pattern ] ;
-
-EnumPattern = TypePath [ "(" [ Pattern {{ "," Pattern }} [ "," ] ] ")" ] ;
-
-RangePattern = Pattern ".." [ "=" ] Pattern ;
-
-ReferencePattern = "&" [ "mut" ] Pattern ;
-
-OrPattern = Pattern {{ "|" Pattern }} ;
-
-(* ============================================ *)
-(* Lexical Elements *)
-(* ============================================ *)
-
-Identifier = IdentifierStart {{ IdentifierContinue }} ;
-
-IdentifierStart = "a".."z" | "A".."Z" | "_" ;
-
-IdentifierContinue = IdentifierStart | "0".."9" ;
-
-Literal = Integer | Float | String | FString | Char | "true" | "false" ;
-
-Integer = DecimalInteger | HexInteger | BinaryInteger | OctalInteger ;
-
-DecimalInteger = Digit {{ Digit | "_" }} ;
-
-HexInteger = "0x" HexDigit {{ HexDigit | "_" }} ;
-
-BinaryInteger = "0b" ( "0" | "1" ) {{ "0" | "1" | "_" }} ;
-
-OctalInteger = "0o" OctalDigit {{ OctalDigit | "_" }} ;
-
-Float = Digit {{ Digit }} "." Digit {{ Digit }} [ Exponent ] ;
-
-Exponent = ( "e" | "E" ) [ "+" | "-" ] Digit {{ Digit }} ;
-
-String = '"' {{ StringChar | EscapeSequence }} '"' ;
-
-FString = 'f"' {{ StringChar | EscapeSequence | "{{" Expression "}}" }} '"' ;
-
-Char = "'" ( CharChar | EscapeSequence ) "'" ;
-
-StringChar = ? any character except '"', '\', or newline ? ;
-
-CharChar = ? any character except "'", '\', or newline ? ;
-
-EscapeSequence = '\' ( 'n' | 'r' | 't' | '\' | '"' | "'" | '0' | 'x' HexDigit HexDigit ) ;
-
-Digit = "0".."9" ;
-
-HexDigit = Digit | "a".."f" | "A".."F" ;
-
-OctalDigit = "0".."7" ;
-
-(* ============================================ *)
-(* Comments and Whitespace *)
-(* ============================================ *)
-
-LineComment = "//" {{ ? any character except newline ? }} ;
-
-BlockComment = "/*" {{ ? any character ? }} "*/" ;
-
-INDENT = ? increase in indentation level ? ;
-
-DEDENT = ? decrease in indentation level ? ;
-
-(* ============================================ *)
-(* Built-in Types *)
-(* ============================================ *)
-
-(* Primitive types: Int, Float, Bool, Char, Str, () *)
-(* Integer types: i8, i16, i32, i64, u8, u16, u32, u64 *)
-(* Generic types: Option[T], Result[T, E], Vec[T], Map[K, V] *)
-(* Array types: [T], [T; N] *)
-(* Tuple types: (T1, T2, ...) *)
-(* Function types: fn(Args) -> Ret *)
-(* Reference types: &T, &mut T *)
-
-(* Async types: Task[T], Future[T] *)
-(* Channel types: Sender[T], Receiver[T] *)
-(* Sync types: Mutex[T], MutexGuard[T] *)
-
-(* Network types: TcpStream, TcpListener, UdpSocket, TlsStream *)
-(* Database types: Database, Statement, Row *)
-(* HTTP types: HttpRequest, HttpResponse *)
-
-(* C FFI types: CInt, CUInt, CLong, CULong, CFloat, CDouble, CSize *)
-(* Pointer types: *T (raw pointer), *Void (void pointer) *)
-
-(* JSON type: Json *)
-
-(* Shorthand Keywords *)
-(* These are aliases for common keywords to reduce token count *)
-shorthand_keyword = 'f' (* function *)
-                  | 's' (* struct *)
-                  | 'e' (* enum *)
-                  | 't' (* trait *)
-                  | 'i' (* impl *)
-                  | 'm' (* match *)
-                  | 'us' (* use *)
-                  | 'wh' (* while *)
-                  | 'lp' (* loop *)
-                  | 'br' (* break *)
-                  | 'ct' (* continue *)
-                  | 'ret' (* return *)
-                  | 'as' (* async *)
-                  | 'sp' (* spawn *)
-                  | 'aw' (* await *) ;
-
-(* Indentation Rules *)
-(* FORMA uses significant whitespace like Python *)
-(* Blocks are delimited by INDENT and DEDENT tokens *)
-(* INDENT is generated when indentation increases *)
-(* DEDENT is generated when indentation decreases *)
-(* Tab characters are not allowed - use spaces only *)
-indentation = INDENT statement* DEDENT ;
-
-(* Contextual Keywords *)
-(* Single-letter keywords can be used as identifiers when unambiguous *)
-(* The parser uses lookahead to determine if f/s/e/t/i/m is a keyword or identifier *)
-(* Example: 'f' followed by identifier and '(' is function definition *)
-(* Example: 'f' followed by ':' is identifier in struct field *)
-
-(* Operator Precedence (highest to lowest) *)
-(* 1. Primary: literals, identifiers, parenthesized expressions *)
-(* 2. Postfix: function calls, method calls, field access, indexing *)
-(* 3. Unary: -, !, & *)
-(* 4. Multiplicative: *, /, % *)
-(* 5. Additive: +, - *)
-(* 6. Shift: <<, >> *)
-(* 7. Bitwise AND: & *)
-(* 8. Bitwise XOR: ^ *)
-(* 9. Bitwise OR: | *)
-(* 10. Comparison: ==, !=, <, >, <=, >= *)
-(* 11. Logical AND: && *)
-(* 12. Logical OR: || *)
-(* 13. Range: .., ..= *)
-(* 14. Assignment: =, +=, -=, *=, /=, %= *)
-
-(* End of FORMA Grammar *)
-"#
-    );
-}
-
-fn print_grammar_json() {
-    let grammar = serde_json::json!({
-        "name": "FORMA",
-        "version": "0.1.0",
-        "fileExtensions": [".forma"],
-        "rules": {
-            "Program": {
-                "type": "sequence",
-                "elements": [{"type": "repeat", "element": "Item"}]
-            },
-            "Item": {
-                "type": "choice",
-                "alternatives": ["Function", "Struct", "Enum", "Trait", "Impl", "TypeAlias", "Use", "Module", "Const"]
-            },
-            "Function": {
-                "type": "sequence",
-                "elements": [
-                    {"type": "repeat", "element": {"type": "ref", "rule": "Attribute"}},
-                    {"type": "optional", "element": {"type": "literal", "value": "async"}},
-                    {"type": "literal", "value": "f"},
-                    {"type": "ref", "rule": "Identifier"},
-                    {"type": "optional", "element": {"type": "ref", "rule": "GenericParams"}},
-                    {"type": "literal", "value": "("},
-                    {"type": "optional", "element": {"type": "ref", "rule": "ParamList"}},
-                    {"type": "literal", "value": ")"},
-                    {"type": "optional", "element": {"type": "sequence", "elements": [
-                        {"type": "literal", "value": "->"},
-                        {"type": "ref", "rule": "Type"}
-                    ]}},
-                    {"type": "ref", "rule": "FunctionBody"}
-                ]
-            },
-            "Struct": {
-                "type": "sequence",
-                "elements": [
-                    {"type": "literal", "value": "s"},
-                    {"type": "ref", "rule": "Identifier"},
-                    {"type": "optional", "element": {"type": "ref", "rule": "GenericParams"}},
-                    {"type": "optional", "element": {"type": "sequence", "elements": [
-                        {"type": "literal", "value": "="},
-                        {"type": "ref", "rule": "StructBody"}
-                    ]}}
-                ]
-            },
-            "Enum": {
-                "type": "sequence",
-                "elements": [
-                    {"type": "literal", "value": "e"},
-                    {"type": "ref", "rule": "Identifier"},
-                    {"type": "optional", "element": {"type": "ref", "rule": "GenericParams"}},
-                    {"type": "literal", "value": "="},
-                    {"type": "ref", "rule": "Variant"},
-                    {"type": "repeat", "element": {"type": "sequence", "elements": [
-                        {"type": "literal", "value": "|"},
-                        {"type": "ref", "rule": "Variant"}
-                    ]}}
-                ]
-            },
-            "Trait": {
-                "type": "sequence",
-                "elements": [
-                    {"type": "literal", "value": "t"},
-                    {"type": "ref", "rule": "Identifier"},
-                    {"type": "optional", "element": {"type": "ref", "rule": "GenericParams"}},
-                    {"type": "literal", "value": "{"},
-                    {"type": "repeat", "element": {"type": "ref", "rule": "TraitItem"}},
-                    {"type": "literal", "value": "}"}
-                ]
-            },
-            "Impl": {
-                "type": "sequence",
-                "elements": [
-                    {"type": "literal", "value": "impl"},
-                    {"type": "optional", "element": {"type": "ref", "rule": "GenericParams"}},
-                    {"type": "optional", "element": {"type": "sequence", "elements": [
-                        {"type": "ref", "rule": "Type"},
-                        {"type": "literal", "value": "for"}
-                    ]}},
-                    {"type": "ref", "rule": "Type"},
-                    {"type": "literal", "value": "{"},
-                    {"type": "repeat", "element": {"type": "ref", "rule": "ImplItem"}},
-                    {"type": "literal", "value": "}"}
-                ]
-            },
-            "Attribute": {
-                "type": "sequence",
-                "elements": [
-                    {"type": "literal", "value": "@"},
-                    {"type": "ref", "rule": "Identifier"},
-                    {"type": "optional", "element": {"type": "sequence", "elements": [
-                        {"type": "literal", "value": "("},
-                        {"type": "ref", "rule": "Expression"},
-                        {"type": "optional", "element": {"type": "sequence", "elements": [
-                            {"type": "literal", "value": ","},
-                            {"type": "ref", "rule": "String"}
-                        ]}},
-                        {"type": "literal", "value": ")"}
-                    ]}}
-                ]
-            },
-            "Type": {
-                "type": "choice",
-                "alternatives": ["TypePath", "ArrayType", "TupleType", "FunctionType", "ReferenceType", "PointerType", "ErrorType", "OptionType", "NeverType"]
-            },
-            "Expression": {
-                "type": "choice",
-                "alternatives": ["Literal", "FString", "Identifier", "BinaryExpr", "UnaryExpr", "CallExpr", "IndexExpr", "FieldExpr", "IfExpr", "MatchExpr", "WhileExpr", "ForExpr", "LoopExpr", "Block", "ClosureExpr", "StructExpr", "MapLiteral", "SetLiteral", "ReturnExpr", "BreakExpr", "ContinueExpr", "AwaitExpr", "SpawnExpr"]
-            },
-            "Statement": {
-                "type": "choice",
-                "alternatives": ["LetStatement", "ExprStatement"]
-            },
-            "Pattern": {
-                "type": "choice",
-                "alternatives": ["LiteralPattern", "IdentifierPattern", "WildcardPattern", "TuplePattern", "StructPattern", "EnumPattern"]
-            },
-            "primitiveTypes": ["Int", "Float", "Bool", "Char", "Str", "()"],
-            "keywords": ["f", "s", "e", "t", "impl", "type", "use", "mod", "const", "if", "then", "else", "m", "wh", "for", "in", "loop", "ret", "break", "continue", "let", "mut", "ref", "async", "await", "spawn", "true", "false", "as", "where", "fn", "Self"],
-            "operators": {
-                "arithmetic": ["+", "-", "*", "/", "%"],
-                "comparison": ["==", "!=", "<", "<=", ">", ">="],
-                "logical": ["&&", "||", "!"],
-                "bitwise": ["&", "|", "^", "<<", ">>"],
-                "assignment": ["=", "+=", "-=", "*=", "/=", "%=", "&&=", "||="],
-                "other": ["->", "=>", "::", ":", ".", "..", "..=", "?", "??", ":=", "@"]
+fn update_grammar_artifacts(write: bool) -> Result<(), String> {
+    let executable = std::env::current_exe()
+        .map_err(|error| format!("cannot locate forma executable: {error}"))?;
+    let docs = Path::new(env!("CARGO_MANIFEST_DIR")).join("docs");
+    for (format, filename) in [("ebnf", "grammar.ebnf"), ("json", "grammar.json")] {
+        let output = std::process::Command::new(&executable)
+            .args(["grammar", "--format", format])
+            .output()
+            .map_err(|error| format!("failed to generate {format} grammar: {error}"))?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+        }
+        let path = docs.join(filename);
+        if write {
+            fs::write(&path, &output.stdout)
+                .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+        } else {
+            let checked_in = fs::read(&path)
+                .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+            if checked_in != output.stdout {
+                return Err(format!(
+                    "{} is stale; run `forma grammar --write`",
+                    path.display()
+                ));
             }
         }
-    });
-    print_json(&grammar);
+    }
+    let editor = serde_json::to_vec_pretty(&forma::grammar::editor_metadata())
+        .map_err(|error| format!("failed to serialize editor grammar: {error}"))?;
+    let generated = [
+        ("editor-grammar.json", editor),
+        (
+            "grammar-keywords.md",
+            forma::grammar::keyword_markdown().into_bytes(),
+        ),
+        (
+            "builtins.json",
+            serde_json::to_vec_pretty(&forma::builtins::metadata())
+                .map_err(|error| format!("failed to serialize builtin catalog: {error}"))?,
+        ),
+    ];
+    for (filename, contents) in generated {
+        let path = docs.join(filename);
+        if write {
+            fs::write(&path, contents)
+                .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+        } else {
+            let checked_in = fs::read(&path)
+                .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+            if checked_in != contents {
+                return Err(format!(
+                    "{} is stale; run `forma grammar --write`",
+                    path.display()
+                ));
+            }
+        }
+    }
+    if write {
+        println!("Updated generated language metadata in docs/");
+    } else {
+        println!("Grammar artifacts are current");
+    }
+    Ok(())
+}
+
+fn print_grammar_ebnf_model() {
+    print!("{}", forma::grammar::EBNF);
+}
+
+fn print_grammar_json_model() {
+    print_json(&forma::grammar::model());
 }
 
 /// Check if input is complete (no unmatched delimiters, no continuation indicators)
@@ -3807,7 +4098,7 @@ fn repl() -> Result<(), String> {
     use rustyline::DefaultEditor;
     use rustyline::error::ReadlineError;
 
-    println!("FORMA REPL v0.1.0");
+    println!("FORMA REPL v{}", env!("CARGO_PKG_VERSION"));
     println!("Type :help for commands, :quit to exit");
     println!();
 
@@ -3994,7 +4285,7 @@ fn repl() -> Result<(), String> {
                     }
                 } else {
                     // Evaluate as expression
-                    repl_eval_expr(&input, &session_code);
+                    repl_eval_expr_shared(&input, &session_code);
                 }
             }
             Err(ReadlineError::Interrupted) => {
@@ -4036,7 +4327,40 @@ fn repl_validate_code(code: &str) -> Result<(), String> {
 }
 
 /// Evaluate an expression in the REPL
-fn repl_eval_expr(expr: &str, session_code: &str) {
+fn repl_eval_expr_shared(expr: &str, session_code: &str) {
+    let code = format!(
+        "{}\nf __repl_main__() -> Int\n    __result__ := {}\n    print(__result__)\n    0\n",
+        session_code, expr
+    );
+    let mut session = CompilerSession::new();
+    let mut compilation = match session.compile_source("<repl>", code) {
+        Ok(compilation) => compilation,
+        Err(diagnostics) => {
+            for diagnostic in diagnostics.iter().take(1) {
+                println!(
+                    "{} error: {}",
+                    diagnostic.phase.code().to_ascii_lowercase(),
+                    diagnostic.message
+                );
+            }
+            return;
+        }
+    };
+    forma::mir::optimize::optimize(&mut compilation.program);
+    let mut interpreter = match Interpreter::new(compilation.program) {
+        Ok(interpreter) => interpreter,
+        Err(error) => {
+            println!("Failed to create interpreter: {error}");
+            return;
+        }
+    };
+    if let Err(error) = interpreter.run("__repl_main__", &[]) {
+        println!("Runtime error: {error}");
+    }
+}
+
+#[allow(dead_code)]
+fn repl_eval_expr_legacy(expr: &str, session_code: &str) {
     // Wrap the expression in a main function that prints the result
     // Use print() to output the value since FORMA requires explicit return types
     let code = format!(
@@ -4196,7 +4520,7 @@ fn fmt(file: &PathBuf, write: bool, check: bool, error_format: ErrorFormat) -> R
 
     // Parse
     let parser = FormaParser::new(&tokens);
-    let ast = match parser.parse() {
+    let _ast = match parser.parse() {
         Ok(ast) => ast,
         Err(errors) => {
             match error_format {
@@ -4226,8 +4550,8 @@ fn fmt(file: &PathBuf, write: bool, check: bool, error_format: ErrorFormat) -> R
     };
 
     // Format
-    let mut formatter = forma::Formatter::new();
-    let formatted = formatter.format(&ast);
+    let syntax = forma::LosslessSyntax::parse(&source);
+    let formatted = forma::LosslessFormatter::format(&syntax);
 
     if check {
         // Check mode: compare formatted output with original

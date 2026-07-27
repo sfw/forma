@@ -1,395 +1,993 @@
 {
+  "name": "FORMA",
+  "version": "0.2.0",
   "fileExtensions": [
     ".forma"
   ],
-  "name": "FORMA",
+  "productions": [
+    {
+      "name": "Program",
+      "expression": "{ Item }"
+    },
+    {
+      "name": "Item",
+      "expression": "Function | Struct | Enum | Trait | Impl | TypeAlias | Use | Module | Const"
+    },
+    {
+      "name": "Function",
+      "expression": "{ Attribute } [ \"async\" ] \"f\" Identifier [ GenericParams ] \"(\" [ ParamList ] \")\" [ \"->\" Type ] FunctionBody"
+    },
+    {
+      "name": "FunctionBody",
+      "expression": "\"=\" Expression | Block"
+    },
+    {
+      "name": "ParamList",
+      "expression": "Param { \",\" Param } [ \",\" ]"
+    },
+    {
+      "name": "Param",
+      "expression": "[ PassMode ] [ \"mut\" ] Identifier \":\" Type"
+    },
+    {
+      "name": "PassMode",
+      "expression": "\"ref\" [ \"mut\" ]"
+    },
+    {
+      "name": "Struct",
+      "expression": "\"s\" Identifier [ GenericParams ] [ \"=\" StructBody ]"
+    },
+    {
+      "name": "StructBody",
+      "expression": "\"{\" [ FieldList ] \"}\" | \"(\" [ TypeList ] \")\""
+    },
+    {
+      "name": "FieldList",
+      "expression": "Field { \",\" Field } [ \",\" ]"
+    },
+    {
+      "name": "Field",
+      "expression": "Identifier \":\" Type"
+    },
+    {
+      "name": "Enum",
+      "expression": "\"e\" Identifier [ GenericParams ] \"=\" Variant { \"|\" Variant }"
+    },
+    {
+      "name": "Variant",
+      "expression": "Identifier [ VariantData ]"
+    },
+    {
+      "name": "VariantData",
+      "expression": "\"(\" [ TypeList ] \")\" | \"{\" [ FieldList ] \"}\""
+    },
+    {
+      "name": "Trait",
+      "expression": "\"t\" Identifier [ GenericParams ] [ \":\" TypeBounds ] \"{\" { TraitItem } \"}\""
+    },
+    {
+      "name": "TraitItem",
+      "expression": "Function | TypeAlias"
+    },
+    {
+      "name": "Impl",
+      "expression": "\"impl\" [ GenericParams ] [ Type \"for\" ] Type [ WhereClause ] \"{\" { ImplItem } \"}\""
+    },
+    {
+      "name": "ImplItem",
+      "expression": "Function"
+    },
+    {
+      "name": "TypeAlias",
+      "expression": "\"type\" Identifier [ GenericParams ] \"=\" Type"
+    },
+    {
+      "name": "Use",
+      "expression": "\"use\" UsePath"
+    },
+    {
+      "name": "UsePath",
+      "expression": "Identifier { \"::\" Identifier } [ UseTree ]"
+    },
+    {
+      "name": "UseTree",
+      "expression": "\"::\" \"*\" | \"::\" \"{\" UseList \"}\" | \"as\" Identifier"
+    },
+    {
+      "name": "UseList",
+      "expression": "UsePath { \",\" UsePath } [ \",\" ]"
+    },
+    {
+      "name": "Module",
+      "expression": "\"mod\" Identifier [ \"{\" { Item } \"}\" ]"
+    },
+    {
+      "name": "Const",
+      "expression": "\"const\" Identifier \":\" Type \"=\" Expression"
+    },
+    {
+      "name": "Attribute",
+      "expression": "\"@\" Identifier [ \"(\" AttrArgList \")\" ]"
+    },
+    {
+      "name": "AttrArgList",
+      "expression": "Expression [ \",\" String ]"
+    },
+    {
+      "name": "Type",
+      "expression": "TypePath | ArrayType | TupleType | FunctionType | ReferenceType | PointerType | ErrorType | OptionType | NeverType"
+    },
+    {
+      "name": "PointerType",
+      "expression": "\"*\" Type"
+    },
+    {
+      "name": "OptionType",
+      "expression": "Type \"?\""
+    },
+    {
+      "name": "TypePath",
+      "expression": "[ \"::\" ] Identifier { \"::\" Identifier } [ GenericArgs ]"
+    },
+    {
+      "name": "ArrayType",
+      "expression": "\"[\" Type [ \""
+    },
+    {
+      "name": "TupleType",
+      "expression": "\"(\" [ Type { \",\" Type } [ \",\" ] ] \")\""
+    },
+    {
+      "name": "FunctionType",
+      "expression": "\"fn\" \"(\" [ TypeList ] \")\" [ \"->\" Type ]"
+    },
+    {
+      "name": "ReferenceType",
+      "expression": "\"&\" [ \"mut\" ] Type"
+    },
+    {
+      "name": "ErrorType",
+      "expression": "Type \"!\" Type"
+    },
+    {
+      "name": "NeverType",
+      "expression": "\"!\""
+    },
+    {
+      "name": "GenericParams",
+      "expression": "\"[\" GenericParam { \",\" GenericParam } [ \",\" ] \"]\""
+    },
+    {
+      "name": "GenericParam",
+      "expression": "Identifier [ \":\" TypeBounds ]"
+    },
+    {
+      "name": "GenericArgs",
+      "expression": "\"[\" Type { \",\" Type } [ \",\" ] \"]\""
+    },
+    {
+      "name": "TypeBounds",
+      "expression": "Type { \"+\" Type }"
+    },
+    {
+      "name": "TypeList",
+      "expression": "Type { \",\" Type } [ \",\" ]"
+    },
+    {
+      "name": "WhereClause",
+      "expression": "\"where\" WherePredicate { \",\" WherePredicate }"
+    },
+    {
+      "name": "WherePredicate",
+      "expression": "Type \":\" TypeBounds"
+    },
+    {
+      "name": "Expression",
+      "expression": "AssignExpr"
+    },
+    {
+      "name": "AssignExpr",
+      "expression": "OrExpr [ AssignOp AssignExpr ]"
+    },
+    {
+      "name": "AssignOp",
+      "expression": "\"=\" | \"+=\" | \"-=\" | \"*=\" | \"/=\" | \"%=\" | \"&&=\" | \"||=\""
+    },
+    {
+      "name": "OrExpr",
+      "expression": "AndExpr { \"||\" AndExpr }"
+    },
+    {
+      "name": "AndExpr",
+      "expression": "CompareExpr { \"&&\" CompareExpr }"
+    },
+    {
+      "name": "CompareExpr",
+      "expression": "BitwiseOrExpr [ CompareOp BitwiseOrExpr ]"
+    },
+    {
+      "name": "CompareOp",
+      "expression": "\"==\" | \"!=\" | \"<\" | \"<=\" | \">\" | \">=\""
+    },
+    {
+      "name": "BitwiseOrExpr",
+      "expression": "BitwiseXorExpr { \"|\" BitwiseXorExpr }"
+    },
+    {
+      "name": "BitwiseXorExpr",
+      "expression": "BitwiseAndExpr { \"^\" BitwiseAndExpr }"
+    },
+    {
+      "name": "BitwiseAndExpr",
+      "expression": "ShiftExpr { \"&\" ShiftExpr }"
+    },
+    {
+      "name": "ShiftExpr",
+      "expression": "AddExpr { ( \"<<\" | \">>\" ) AddExpr }"
+    },
+    {
+      "name": "AddExpr",
+      "expression": "MulExpr { ( \"+\" | \"-\" ) MulExpr }"
+    },
+    {
+      "name": "MulExpr",
+      "expression": "UnaryExpr { ( \"*\" | \"/\" | \"%\" ) UnaryExpr }"
+    },
+    {
+      "name": "UnaryExpr",
+      "expression": "( \"-\" | \"!\" | \"&\" [ \"mut\" ] | \"*\" ) UnaryExpr | PostfixExpr"
+    },
+    {
+      "name": "PostfixExpr",
+      "expression": "PrimaryExpr { Postfix }"
+    },
+    {
+      "name": "Postfix",
+      "expression": "\"(\" [ ArgList ] \")\" | \"[\" Expression \"]\" | \".\" Identifier [ GenericArgs ] | \".\" Integer | \"?\" | \"??\" | \"as\" Type"
+    },
+    {
+      "name": "ArgList",
+      "expression": "Argument { \",\" Argument } [ \",\" ]"
+    },
+    {
+      "name": "Argument",
+      "expression": "[ \"ref\" [ \"mut\" ] ] Expression"
+    },
+    {
+      "name": "PrimaryExpr",
+      "expression": "Literal | Identifier [ GenericArgs ] | \"(\" Expression \")\" | \"(\" [ Expression { \",\" Expression } [ \",\" ] ] \")\" | \"[\" [ Expression { \",\" Expression } [ \",\" ] ] \"]\" | \"[\" Expression \""
+    },
+    {
+      "name": "Block",
+      "expression": "INDENT { Statement } [ Expression ] DEDENT | \"{\" { Statement } [ Expression ] \"}\""
+    },
+    {
+      "name": "IfExpr",
+      "expression": "\"if\" Expression \"then\" Expression [ \"else\" Expression ] | \"if\" Expression Block [ \"else\" ( IfExpr | Block ) ]"
+    },
+    {
+      "name": "MatchExpr",
+      "expression": "\"m\" Expression INDENT { MatchArm } DEDENT"
+    },
+    {
+      "name": "MatchArm",
+      "expression": "Pattern { \"|\" Pattern } [ \"if\" Expression ] \"=>\" Expression"
+    },
+    {
+      "name": "WhileExpr",
+      "expression": "[ Label ] \"wh\" Expression Block | [ Label ] \"wh\" \"let\" Pattern \"=\" Expression Block"
+    },
+    {
+      "name": "ForExpr",
+      "expression": "[ Label ] \"for\" Pattern \"in\" Expression Block"
+    },
+    {
+      "name": "LoopExpr",
+      "expression": "[ Label ] \"loop\" Block"
+    },
+    {
+      "name": "Label",
+      "expression": "\"'\" Identifier \":\""
+    },
+    {
+      "name": "ReturnExpr",
+      "expression": "\"ret\" [ Expression ]"
+    },
+    {
+      "name": "BreakExpr",
+      "expression": "\"break\" [ \"'\" Identifier ] [ Expression ]"
+    },
+    {
+      "name": "ContinueExpr",
+      "expression": "\"continue\" [ \"'\" Identifier ]"
+    },
+    {
+      "name": "AwaitExpr",
+      "expression": "\"await\" Expression"
+    },
+    {
+      "name": "SpawnExpr",
+      "expression": "\"spawn\" Expression"
+    },
+    {
+      "name": "ClosureExpr",
+      "expression": "\"|\" [ ParamList ] \"|\" [ \"->\" Type ] Expression"
+    },
+    {
+      "name": "StructExpr",
+      "expression": "TypePath \"{\" [ FieldInit { \",\" FieldInit } [ \",\" ] ] \"}\""
+    },
+    {
+      "name": "FieldInit",
+      "expression": "Identifier [ \":\" Expression ]"
+    },
+    {
+      "name": "MapLiteral",
+      "expression": "\"{\" MapEntry { \",\" MapEntry } [ \",\" ] \"}\""
+    },
+    {
+      "name": "MapEntry",
+      "expression": "Expression \":\" Expression"
+    },
+    {
+      "name": "SetLiteral",
+      "expression": "\"{\" Expression { \",\" Expression } [ \",\" ] \"}\""
+    },
+    {
+      "name": "Statement",
+      "expression": "LetStatement | ExprStatement"
+    },
+    {
+      "name": "LetStatement",
+      "expression": "Identifier [ \":\" Type ] \":=\" Expression"
+    },
+    {
+      "name": "ExprStatement",
+      "expression": "Expression [ \""
+    },
+    {
+      "name": "Pattern",
+      "expression": "LiteralPattern | IdentifierPattern | WildcardPattern | TuplePattern | StructPattern | EnumPattern | RangePattern | ReferencePattern | OrPattern"
+    },
+    {
+      "name": "LiteralPattern",
+      "expression": "Integer | Float | String | Char | \"true\" | \"false\""
+    },
+    {
+      "name": "IdentifierPattern",
+      "expression": "[ \"mut\" ] Identifier"
+    },
+    {
+      "name": "WildcardPattern",
+      "expression": "\"_\""
+    },
+    {
+      "name": "TuplePattern",
+      "expression": "\"(\" [ Pattern { \",\" Pattern } [ \",\" ] ] \")\""
+    },
+    {
+      "name": "StructPattern",
+      "expression": "TypePath \"{\" [ FieldPattern { \",\" FieldPattern } [ \",\" ] ] \"}\""
+    },
+    {
+      "name": "FieldPattern",
+      "expression": "Identifier [ \":\" Pattern ]"
+    },
+    {
+      "name": "EnumPattern",
+      "expression": "TypePath [ \"(\" [ Pattern { \",\" Pattern } [ \",\" ] ] \")\" ]"
+    },
+    {
+      "name": "RangePattern",
+      "expression": "Pattern \"..\" [ \"=\" ] Pattern"
+    },
+    {
+      "name": "ReferencePattern",
+      "expression": "\"&\" [ \"mut\" ] Pattern"
+    },
+    {
+      "name": "OrPattern",
+      "expression": "Pattern { \"|\" Pattern }"
+    },
+    {
+      "name": "Identifier",
+      "expression": "IdentifierStart { IdentifierContinue }"
+    },
+    {
+      "name": "IdentifierStart",
+      "expression": "\"a\"..\"z\" | \"A\"..\"Z\" | \"_\""
+    },
+    {
+      "name": "IdentifierContinue",
+      "expression": "IdentifierStart | \"0\"..\"9\""
+    },
+    {
+      "name": "Literal",
+      "expression": "Integer | Float | String | FString | Char | \"true\" | \"false\""
+    },
+    {
+      "name": "Integer",
+      "expression": "DecimalInteger | HexInteger | BinaryInteger | OctalInteger"
+    },
+    {
+      "name": "DecimalInteger",
+      "expression": "Digit { Digit | \"_\" }"
+    },
+    {
+      "name": "HexInteger",
+      "expression": "\"0x\" HexDigit { HexDigit | \"_\" }"
+    },
+    {
+      "name": "BinaryInteger",
+      "expression": "\"0b\" ( \"0\" | \"1\" ) { \"0\" | \"1\" | \"_\" }"
+    },
+    {
+      "name": "OctalInteger",
+      "expression": "\"0o\" OctalDigit { OctalDigit | \"_\" }"
+    },
+    {
+      "name": "Float",
+      "expression": "Digit { Digit } \".\" Digit { Digit } [ Exponent ]"
+    },
+    {
+      "name": "Exponent",
+      "expression": "( \"e\" | \"E\" ) [ \"+\" | \"-\" ] Digit { Digit }"
+    },
+    {
+      "name": "String",
+      "expression": "'\"' { StringChar | EscapeSequence } '\"'"
+    },
+    {
+      "name": "FString",
+      "expression": "'f\"' { StringChar | EscapeSequence | \"{\" Expression \"}\" } '\"'"
+    },
+    {
+      "name": "Char",
+      "expression": "\"'\" ( CharChar | EscapeSequence ) \"'\""
+    },
+    {
+      "name": "StringChar",
+      "expression": "? any character except '\"', '\\', or newline ?"
+    },
+    {
+      "name": "CharChar",
+      "expression": "? any character except \"'\", '\\', or newline ?"
+    },
+    {
+      "name": "EscapeSequence",
+      "expression": "'\\' ( 'n' | 'r' | 't' | '\\' | '\"' | \"'\" | '0' | 'x' HexDigit HexDigit )"
+    },
+    {
+      "name": "Digit",
+      "expression": "\"0\"..\"9\""
+    },
+    {
+      "name": "HexDigit",
+      "expression": "Digit | \"a\"..\"f\" | \"A\"..\"F\""
+    },
+    {
+      "name": "OctalDigit",
+      "expression": "\"0\"..\"7\""
+    },
+    {
+      "name": "LineComment",
+      "expression": "\"//\" { ? any character except newline ? }"
+    },
+    {
+      "name": "BlockComment",
+      "expression": "\"/*\" { ? any character ? } \"*/\""
+    },
+    {
+      "name": "INDENT",
+      "expression": "? increase in indentation level ?"
+    },
+    {
+      "name": "DEDENT",
+      "expression": "? decrease in indentation level ?"
+    },
+    {
+      "name": "shorthand_keyword",
+      "expression": "'f' | 's' | 'e' | 't' | 'i' | 'm' | 'us' | 'wh' | 'lp' | 'br' | 'ct' | 'ret' | 'as' | 'sp' | 'aw'"
+    },
+    {
+      "name": "indentation",
+      "expression": "INDENT statement* DEDENT"
+    }
+  ],
+  "keywords": [
+    {
+      "name": "Function",
+      "canonical": "f",
+      "aliases": [
+        "function"
+      ],
+      "contextual": true
+    },
+    {
+      "name": "Struct",
+      "canonical": "s",
+      "aliases": [
+        "struct"
+      ],
+      "contextual": true
+    },
+    {
+      "name": "Enum",
+      "canonical": "e",
+      "aliases": [
+        "enum"
+      ],
+      "contextual": true
+    },
+    {
+      "name": "Trait",
+      "canonical": "t",
+      "aliases": [
+        "trait"
+      ],
+      "contextual": true
+    },
+    {
+      "name": "Impl",
+      "canonical": "i",
+      "aliases": [
+        "impl"
+      ],
+      "contextual": true
+    },
+    {
+      "name": "Match",
+      "canonical": "m",
+      "aliases": [
+        "match"
+      ],
+      "contextual": true
+    },
+    {
+      "name": "If",
+      "canonical": "if",
+      "aliases": [],
+      "contextual": false
+    },
+    {
+      "name": "Then",
+      "canonical": "then",
+      "aliases": [],
+      "contextual": false
+    },
+    {
+      "name": "Else",
+      "canonical": "else",
+      "aliases": [],
+      "contextual": false
+    },
+    {
+      "name": "For",
+      "canonical": "for",
+      "aliases": [],
+      "contextual": false
+    },
+    {
+      "name": "In",
+      "canonical": "in",
+      "aliases": [],
+      "contextual": false
+    },
+    {
+      "name": "While",
+      "canonical": "wh",
+      "aliases": [
+        "while"
+      ],
+      "contextual": false
+    },
+    {
+      "name": "Loop",
+      "canonical": "lp",
+      "aliases": [
+        "loop"
+      ],
+      "contextual": false
+    },
+    {
+      "name": "Break",
+      "canonical": "br",
+      "aliases": [
+        "break"
+      ],
+      "contextual": false
+    },
+    {
+      "name": "Continue",
+      "canonical": "ct",
+      "aliases": [
+        "continue"
+      ],
+      "contextual": false
+    },
+    {
+      "name": "Return",
+      "canonical": "ret",
+      "aliases": [
+        "return"
+      ],
+      "contextual": false
+    },
+    {
+      "name": "Async",
+      "canonical": "as",
+      "aliases": [
+        "async"
+      ],
+      "contextual": false
+    },
+    {
+      "name": "Await",
+      "canonical": "aw",
+      "aliases": [
+        "await"
+      ],
+      "contextual": false
+    },
+    {
+      "name": "Spawn",
+      "canonical": "sp",
+      "aliases": [
+        "spawn"
+      ],
+      "contextual": false
+    },
+    {
+      "name": "Use",
+      "canonical": "us",
+      "aliases": [
+        "use"
+      ],
+      "contextual": false
+    },
+    {
+      "name": "Module",
+      "canonical": "md",
+      "aliases": [
+        "module",
+        "mod"
+      ],
+      "contextual": false
+    },
+    {
+      "name": "Public",
+      "canonical": "pub",
+      "aliases": [
+        "public"
+      ],
+      "contextual": false
+    },
+    {
+      "name": "Mutable",
+      "canonical": "mut",
+      "aliases": [],
+      "contextual": false
+    },
+    {
+      "name": "Reference",
+      "canonical": "ref",
+      "aliases": [],
+      "contextual": false
+    },
+    {
+      "name": "Move",
+      "canonical": "mv",
+      "aliases": [
+        "move"
+      ],
+      "contextual": false
+    },
+    {
+      "name": "Unsafe",
+      "canonical": "un",
+      "aliases": [
+        "unsafe"
+      ],
+      "contextual": false
+    },
+    {
+      "name": "Type",
+      "canonical": "type",
+      "aliases": [],
+      "contextual": false
+    },
+    {
+      "name": "Where",
+      "canonical": "where",
+      "aliases": [],
+      "contextual": false
+    },
+    {
+      "name": "Linear",
+      "canonical": "linear",
+      "aliases": [],
+      "contextual": false
+    },
+    {
+      "name": "Affine",
+      "canonical": "affine",
+      "aliases": [],
+      "contextual": false
+    }
+  ],
   "rules": {
-    "Enum": {
-      "elements": [
-        {
-          "type": "literal",
-          "value": "e"
-        },
-        {
-          "rule": "Identifier",
-          "type": "ref"
-        },
-        {
-          "element": {
-            "rule": "GenericParams",
-            "type": "ref"
-          },
-          "type": "optional"
-        },
-        {
-          "type": "literal",
-          "value": "="
-        },
-        {
-          "rule": "Variant",
-          "type": "ref"
-        },
-        {
-          "element": {
-            "elements": [
-              {
-                "type": "literal",
-                "value": "|"
-              },
-              {
-                "rule": "Variant",
-                "type": "ref"
-              }
-            ],
-            "type": "sequence"
-          },
-          "type": "repeat"
-        }
-      ],
-      "type": "sequence"
-    },
-    "Expression": {
-      "alternatives": [
-        "Literal",
-        "Identifier",
-        "BinaryExpr",
-        "UnaryExpr",
-        "CallExpr",
-        "IndexExpr",
-        "FieldExpr",
-        "IfExpr",
-        "MatchExpr",
-        "WhileExpr",
-        "ForExpr",
-        "Block",
-        "ClosureExpr"
-      ],
-      "type": "choice"
-    },
-    "Function": {
-      "elements": [
-        {
-          "element": {
-            "type": "literal",
-            "value": "async"
-          },
-          "type": "optional"
-        },
-        {
-          "type": "literal",
-          "value": "f"
-        },
-        {
-          "rule": "Identifier",
-          "type": "ref"
-        },
-        {
-          "element": {
-            "rule": "GenericParams",
-            "type": "ref"
-          },
-          "type": "optional"
-        },
-        {
-          "type": "literal",
-          "value": "("
-        },
-        {
-          "element": {
-            "rule": "ParamList",
-            "type": "ref"
-          },
-          "type": "optional"
-        },
-        {
-          "type": "literal",
-          "value": ")"
-        },
-        {
-          "element": {
-            "elements": [
-              {
-                "type": "literal",
-                "value": "->"
-              },
-              {
-                "rule": "Type",
-                "type": "ref"
-              }
-            ],
-            "type": "sequence"
-          },
-          "type": "optional"
-        },
-        {
-          "rule": "FunctionBody",
-          "type": "ref"
-        }
-      ],
-      "type": "sequence"
-    },
-    "Impl": {
-      "elements": [
-        {
-          "type": "literal",
-          "value": "impl"
-        },
-        {
-          "element": {
-            "rule": "GenericParams",
-            "type": "ref"
-          },
-          "type": "optional"
-        },
-        {
-          "element": {
-            "elements": [
-              {
-                "rule": "Type",
-                "type": "ref"
-              },
-              {
-                "type": "literal",
-                "value": "for"
-              }
-            ],
-            "type": "sequence"
-          },
-          "type": "optional"
-        },
-        {
-          "rule": "Type",
-          "type": "ref"
-        },
-        {
-          "type": "literal",
-          "value": "{"
-        },
-        {
-          "element": {
-            "rule": "ImplItem",
-            "type": "ref"
-          },
-          "type": "repeat"
-        },
-        {
-          "type": "literal",
-          "value": "}"
-        }
-      ],
-      "type": "sequence"
-    },
-    "Item": {
-      "alternatives": [
-        "Function",
-        "Struct",
-        "Enum",
-        "Trait",
-        "Impl",
-        "TypeAlias",
-        "Use",
-        "Module",
-        "Const"
-      ],
-      "type": "choice"
-    },
-    "Pattern": {
-      "alternatives": [
-        "LiteralPattern",
-        "IdentifierPattern",
-        "WildcardPattern",
-        "TuplePattern",
-        "StructPattern",
-        "EnumPattern"
-      ],
-      "type": "choice"
-    },
-    "Program": {
-      "elements": [
-        {
-          "element": "Item",
-          "type": "repeat"
-        }
-      ],
-      "type": "sequence"
-    },
-    "Statement": {
-      "alternatives": [
-        "LetStatement",
-        "ExprStatement"
-      ],
-      "type": "choice"
-    },
-    "Struct": {
-      "elements": [
-        {
-          "type": "literal",
-          "value": "s"
-        },
-        {
-          "rule": "Identifier",
-          "type": "ref"
-        },
-        {
-          "element": {
-            "rule": "GenericParams",
-            "type": "ref"
-          },
-          "type": "optional"
-        },
-        {
-          "element": {
-            "elements": [
-              {
-                "type": "literal",
-                "value": "="
-              },
-              {
-                "rule": "StructBody",
-                "type": "ref"
-              }
-            ],
-            "type": "sequence"
-          },
-          "type": "optional"
-        }
-      ],
-      "type": "sequence"
-    },
-    "Trait": {
-      "elements": [
-        {
-          "type": "literal",
-          "value": "t"
-        },
-        {
-          "rule": "Identifier",
-          "type": "ref"
-        },
-        {
-          "element": {
-            "rule": "GenericParams",
-            "type": "ref"
-          },
-          "type": "optional"
-        },
-        {
-          "type": "literal",
-          "value": "{"
-        },
-        {
-          "element": {
-            "rule": "TraitItem",
-            "type": "ref"
-          },
-          "type": "repeat"
-        },
-        {
-          "type": "literal",
-          "value": "}"
-        }
-      ],
-      "type": "sequence"
-    },
-    "Type": {
-      "alternatives": [
-        "TypePath",
-        "ArrayType",
-        "TupleType",
-        "FunctionType",
-        "ReferenceType",
-        "NeverType"
-      ],
-      "type": "choice"
-    },
     "keywords": [
-      "f",
-      "s",
-      "e",
-      "t",
-      "impl",
-      "type",
-      "use",
-      "mod",
-      "const",
-      "if",
-      "else",
-      "m",
-      "wh",
-      "for",
-      "loop",
-      "ret",
-      "break",
-      "continue",
-      "let",
-      "mut",
-      "async",
-      "await",
-      "true",
-      "false",
-      "as",
-      "where",
-      "fn",
-      "Self"
-    ],
-    "operators": {
-      "arithmetic": [
-        "+",
-        "-",
-        "*",
-        "/",
-        "%"
-      ],
-      "assignment": [
-        "=",
-        "+=",
-        "-=",
-        "*=",
-        "/=",
-        "%=",
-        "&&=",
-        "||="
-      ],
-      "bitwise": [
-        "&",
-        "|",
-        "^",
-        "<<",
-        ">>"
-      ],
-      "comparison": [
-        "==",
-        "!=",
-        "<",
-        "<=",
-        ">",
-        ">="
-      ],
-      "logical": [
-        "&&",
-        "||",
-        "!"
-      ],
-      "other": [
-        "->",
-        "=>",
-        "::",
-        ":",
-        ".",
-        "..",
-        "..=",
-        "?",
-        ":="
-      ]
-    },
-    "primitiveTypes": [
-      "Int",
-      "Float",
-      "Bool",
-      "Char",
-      "Str",
-      "()"
+      {
+        "name": "Function",
+        "canonical": "f",
+        "aliases": [
+          "function"
+        ],
+        "contextual": true
+      },
+      {
+        "name": "Struct",
+        "canonical": "s",
+        "aliases": [
+          "struct"
+        ],
+        "contextual": true
+      },
+      {
+        "name": "Enum",
+        "canonical": "e",
+        "aliases": [
+          "enum"
+        ],
+        "contextual": true
+      },
+      {
+        "name": "Trait",
+        "canonical": "t",
+        "aliases": [
+          "trait"
+        ],
+        "contextual": true
+      },
+      {
+        "name": "Impl",
+        "canonical": "i",
+        "aliases": [
+          "impl"
+        ],
+        "contextual": true
+      },
+      {
+        "name": "Match",
+        "canonical": "m",
+        "aliases": [
+          "match"
+        ],
+        "contextual": true
+      },
+      {
+        "name": "If",
+        "canonical": "if",
+        "aliases": [],
+        "contextual": false
+      },
+      {
+        "name": "Then",
+        "canonical": "then",
+        "aliases": [],
+        "contextual": false
+      },
+      {
+        "name": "Else",
+        "canonical": "else",
+        "aliases": [],
+        "contextual": false
+      },
+      {
+        "name": "For",
+        "canonical": "for",
+        "aliases": [],
+        "contextual": false
+      },
+      {
+        "name": "In",
+        "canonical": "in",
+        "aliases": [],
+        "contextual": false
+      },
+      {
+        "name": "While",
+        "canonical": "wh",
+        "aliases": [
+          "while"
+        ],
+        "contextual": false
+      },
+      {
+        "name": "Loop",
+        "canonical": "lp",
+        "aliases": [
+          "loop"
+        ],
+        "contextual": false
+      },
+      {
+        "name": "Break",
+        "canonical": "br",
+        "aliases": [
+          "break"
+        ],
+        "contextual": false
+      },
+      {
+        "name": "Continue",
+        "canonical": "ct",
+        "aliases": [
+          "continue"
+        ],
+        "contextual": false
+      },
+      {
+        "name": "Return",
+        "canonical": "ret",
+        "aliases": [
+          "return"
+        ],
+        "contextual": false
+      },
+      {
+        "name": "Async",
+        "canonical": "as",
+        "aliases": [
+          "async"
+        ],
+        "contextual": false
+      },
+      {
+        "name": "Await",
+        "canonical": "aw",
+        "aliases": [
+          "await"
+        ],
+        "contextual": false
+      },
+      {
+        "name": "Spawn",
+        "canonical": "sp",
+        "aliases": [
+          "spawn"
+        ],
+        "contextual": false
+      },
+      {
+        "name": "Use",
+        "canonical": "us",
+        "aliases": [
+          "use"
+        ],
+        "contextual": false
+      },
+      {
+        "name": "Module",
+        "canonical": "md",
+        "aliases": [
+          "module",
+          "mod"
+        ],
+        "contextual": false
+      },
+      {
+        "name": "Public",
+        "canonical": "pub",
+        "aliases": [
+          "public"
+        ],
+        "contextual": false
+      },
+      {
+        "name": "Mutable",
+        "canonical": "mut",
+        "aliases": [],
+        "contextual": false
+      },
+      {
+        "name": "Reference",
+        "canonical": "ref",
+        "aliases": [],
+        "contextual": false
+      },
+      {
+        "name": "Move",
+        "canonical": "mv",
+        "aliases": [
+          "move"
+        ],
+        "contextual": false
+      },
+      {
+        "name": "Unsafe",
+        "canonical": "un",
+        "aliases": [
+          "unsafe"
+        ],
+        "contextual": false
+      },
+      {
+        "name": "Type",
+        "canonical": "type",
+        "aliases": [],
+        "contextual": false
+      },
+      {
+        "name": "Where",
+        "canonical": "where",
+        "aliases": [],
+        "contextual": false
+      },
+      {
+        "name": "Linear",
+        "canonical": "linear",
+        "aliases": [],
+        "contextual": false
+      },
+      {
+        "name": "Affine",
+        "canonical": "affine",
+        "aliases": [],
+        "contextual": false
+      }
     ]
   },
-  "version": "0.1.0"
+  "operators": {
+    "arithmetic": [
+      "+",
+      "-",
+      "*",
+      "/",
+      "%"
+    ],
+    "comparison": [
+      "==",
+      "!=",
+      "<",
+      "<=",
+      ">",
+      ">="
+    ],
+    "logical": [
+      "&&",
+      "||",
+      "!"
+    ],
+    "bitwise": [
+      "&",
+      "|",
+      "^",
+      "<<",
+      ">>"
+    ],
+    "assignment": [
+      "=",
+      ":=",
+      "+=",
+      "-=",
+      "*=",
+      "/=",
+      "%=",
+      "&&=",
+      "||="
+    ],
+    "other": [
+      "->",
+      "=>",
+      "::",
+      ":",
+      ".",
+      "..",
+      "..=",
+      "?",
+      "??",
+      "@"
+    ]
+  }
 }

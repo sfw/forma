@@ -11,8 +11,8 @@
 use std::collections::{HashMap, HashSet};
 
 use super::mir::{
-    BasicBlock, BinOp, BlockId, Constant, Function, Local, Operand, Program, Rvalue, Statement,
-    StatementKind, Terminator, UnOp,
+    BasicBlock, BinOp, BlockId, Constant, Function, Local, Operand, Place, Program, ProjectionElem,
+    Rvalue, Statement, StatementKind, Terminator, UnOp,
 };
 
 /// Statistics from one optimization round.
@@ -401,11 +401,23 @@ fn copy_propagate(func: &mut Function, stats: &mut OptStats) {
                         }
                     }
                 }
+                StatementKind::AssignPlace(place, _) => {
+                    let written = place.local;
+                    subst.retain(|d, s| *d != written && *s != written);
+                }
                 StatementKind::IndexAssign(local, _, _) => {
                     // Mutating an element of `local` — invalidate any mapping
                     // involving this local to prevent unsound substitution.
                     let written = *local;
                     subst.retain(|d, s| *d != written && *s != written);
+                }
+                StatementKind::Drop(local) => {
+                    let dropped = *local;
+                    subst.retain(|d, s| *d != dropped && *s != dropped);
+                }
+                StatementKind::DropPlace(place) => {
+                    let dropped = place.local;
+                    subst.retain(|d, s| *d != dropped && *s != dropped);
                 }
                 StatementKind::Nop => {}
             }
@@ -427,10 +439,15 @@ fn substitute_stmt(stmt: &mut Statement, subst: &HashMap<Local, Local>) -> usize
         StatementKind::Assign(_, rvalue) => {
             count += substitute_rvalue(rvalue, subst);
         }
+        StatementKind::AssignPlace(place, rvalue) => {
+            count += substitute_place(place, subst);
+            count += substitute_rvalue(rvalue, subst);
+        }
         StatementKind::IndexAssign(_, index_op, val_op) => {
             count += substitute_operand(index_op, subst);
             count += substitute_operand(val_op, subst);
         }
+        StatementKind::Drop(_) | StatementKind::DropPlace(_) => {}
         StatementKind::Nop => {}
     }
     count
@@ -473,8 +490,26 @@ fn substitute_rvalue(rvalue: &mut Rvalue, subst: &HashMap<Local, Local>) -> usiz
                 count += substitute_operand(op, subst);
             }
         }
+        Rvalue::RefPlace(place, _) => count += substitute_place(place, subst),
         Rvalue::Ref(_, _) | Rvalue::Discriminant(_) | Rvalue::EnumField(_, _) => {
             // These reference locals directly, not operands — don't substitute
+        }
+    }
+    count
+}
+
+fn substitute_place(place: &mut Place, subst: &HashMap<Local, Local>) -> usize {
+    let mut count = 0;
+    if let Some(&replacement) = subst.get(&place.local) {
+        place.local = replacement;
+        count += 1;
+    }
+    for projection in &mut place.projection {
+        if let ProjectionElem::Index(local) = projection
+            && let Some(&replacement) = subst.get(local)
+        {
+            *local = replacement;
+            count += 1;
         }
     }
     count
@@ -497,6 +532,18 @@ fn substitute_operand(op: &mut Operand, subst: &HashMap<Local, Local>) -> usize 
         Operand::Move(local) => {
             if let Some(&replacement) = subst.get(local) {
                 *local = replacement;
+                return 1;
+            }
+        }
+        Operand::Borrow(local, _) => {
+            if let Some(&replacement) = subst.get(local) {
+                *local = replacement;
+                return 1;
+            }
+        }
+        Operand::CopyPlace(place) | Operand::MovePlace(place) | Operand::BorrowPlace(place, _) => {
+            if let Some(&replacement) = subst.get(&place.local) {
+                place.local = replacement;
                 return 1;
             }
         }
@@ -878,10 +925,16 @@ fn peephole_double_negation(
 fn count_operand_uses(kind: &StatementKind, counts: &mut HashMap<Local, usize>) {
     match kind {
         StatementKind::Assign(_, rvalue) => count_rvalue_uses(rvalue, counts),
+        StatementKind::AssignPlace(place, rvalue) => {
+            count_place_uses(place, counts);
+            count_rvalue_uses(rvalue, counts);
+        }
         StatementKind::IndexAssign(_, idx, val) => {
             count_single_use(idx, counts);
             count_single_use(val, counts);
         }
+        StatementKind::Drop(local) => *counts.entry(*local).or_insert(0) += 1,
+        StatementKind::DropPlace(place) => *counts.entry(place.local).or_insert(0) += 1,
         StatementKind::Nop => {}
     }
 }
@@ -918,14 +971,27 @@ fn count_rvalue_uses(rvalue: &Rvalue, counts: &mut HashMap<Local, usize>) {
                 count_single_use(op, counts);
             }
         }
+        Rvalue::RefPlace(place, _) => count_place_uses(place, counts),
         Rvalue::Ref(_, _) | Rvalue::Discriminant(_) | Rvalue::EnumField(_, _) => {}
+    }
+}
+
+fn count_place_uses(place: &Place, counts: &mut HashMap<Local, usize>) {
+    *counts.entry(place.local).or_insert(0) += 1;
+    for projection in &place.projection {
+        if let ProjectionElem::Index(local) = projection {
+            *counts.entry(*local).or_insert(0) += 1;
+        }
     }
 }
 
 fn count_single_use(op: &Operand, counts: &mut HashMap<Local, usize>) {
     match op {
-        Operand::Copy(l) | Operand::Local(l) | Operand::Move(l) => {
+        Operand::Copy(l) | Operand::Local(l) | Operand::Move(l) | Operand::Borrow(l, _) => {
             *counts.entry(*l).or_insert(0) += 1;
+        }
+        Operand::CopyPlace(place) | Operand::MovePlace(place) | Operand::BorrowPlace(place, _) => {
+            *counts.entry(place.local).or_insert(0) += 1;
         }
         Operand::Constant(_) => {}
     }
@@ -1684,6 +1750,50 @@ mod tests {
         // Second pass should be idempotent
         let stats2 = optimize(&mut program);
         assert_eq!(stats2.total(), 0, "Second optimization should be no-op");
+    }
+
+    #[test]
+    fn generated_arithmetic_mir_is_equivalent_after_optimization() {
+        use crate::mir::{Interpreter, Value};
+
+        for operation in [BinOp::Add, BinOp::Sub, BinOp::Mul, BinOp::Div] {
+            for left in -8..=8 {
+                for right in -8..=8 {
+                    if operation == BinOp::Div && right == 0 {
+                        continue;
+                    }
+                    let blocks = vec![make_block(
+                        0,
+                        vec![assign(
+                            0,
+                            Rvalue::BinaryOp(
+                                operation,
+                                Operand::Constant(Constant::Int(left)),
+                                Operand::Constant(Constant::Int(right)),
+                            ),
+                        )],
+                        Terminator::Return(Some(Operand::Copy(Local(0)))),
+                    )];
+                    let mut original = Program::new();
+                    original
+                        .functions
+                        .insert("test".into(), make_function(vec![make_local(None)], blocks));
+                    let mut optimized = original.clone();
+                    optimize(&mut optimized);
+
+                    let before = Interpreter::new(original)
+                        .unwrap()
+                        .run("test", &[])
+                        .unwrap();
+                    let after = Interpreter::new(optimized)
+                        .unwrap()
+                        .run("test", &[])
+                        .unwrap();
+                    assert_eq!(before, after, "{operation:?} {left} {right}");
+                    assert!(matches!(after, Value::Int(_)));
+                }
+            }
+        }
     }
 
     #[test]

@@ -134,6 +134,25 @@ fn test_cli_parse_hello() {
 }
 
 #[test]
+fn test_cli_typeof_returns_semantic_identifier_type() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("types.forma");
+    std::fs::write(&path, "f answer() -> Int = 42\n").unwrap();
+    let output = Command::new(forma_bin())
+        .args(["typeof", "--position", "1:3"])
+        .arg(path)
+        .output()
+        .expect("failed to execute forma");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("() -> Int"),
+        "unexpected typeof output: {stdout}"
+    );
+    assert!(!stdout.contains("run type checker"));
+}
+
+#[test]
 fn test_cli_fmt_hello() {
     let output = Command::new(forma_bin())
         .args(["fmt"])
@@ -148,6 +167,29 @@ fn test_cli_fmt_hello() {
     assert!(
         stdout.contains("main"),
         "fmt output should contain formatted code with 'main'"
+    );
+}
+
+#[test]
+fn test_cli_fmt_write_preserves_comments_and_literal_spelling() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("lossless.forma");
+    let source = "# leading comment\nf main() -> Str = r`a  b` # trailing comment";
+    std::fs::write(&path, source).unwrap();
+
+    let output = Command::new(forma_bin())
+        .args(["fmt", "--write"])
+        .arg(&path)
+        .output()
+        .expect("failed to execute forma");
+    assert!(
+        output.status.success(),
+        "fmt failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(path).unwrap(),
+        format!("{source}\n")
     );
 }
 
@@ -313,6 +355,26 @@ fn test_cli_build_missing_import_json() {
 }
 
 #[test]
+fn test_cli_build_borrow_error_json() {
+    // Borrow errors are reported before optional LLVM code generation.
+    let output = Command::new(forma_bin())
+        .args(["--error-format", "json", "build"])
+        .arg(fixture("borrow_error.forma"))
+        .output()
+        .expect("failed to execute forma");
+    assert!(
+        !output.status.success(),
+        "forma build must reject source-level ownership violations"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("\"BORROW\""),
+        "JSON output should contain BORROW error category, got: {}",
+        stdout
+    );
+}
+
+#[test]
 fn test_cli_run_missing_import_json() {
     let output = Command::new(forma_bin())
         .args(["--error-format", "json", "run", "--allow-all"])
@@ -464,6 +526,112 @@ fn test_cli_verify_report_json() {
         "verify JSON output should contain summary, got: {}",
         stdout
     );
+    assert!(stdout.contains("\"status\": \"TESTED\""));
+    assert!(stdout.contains("\"seed\""));
+    assert!(stdout.contains("\"tested_domain\""));
+    assert!(!stdout.contains("PROVED"));
+}
+
+#[test]
+fn test_cli_verify_exhausts_finite_bool_domain() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("finite.forma");
+    std::fs::write(
+        &source,
+        "@post(result == value)\nf identity(value: Bool) -> Bool = value\n",
+    )
+    .unwrap();
+    let output = Command::new(forma_bin())
+        .args([
+            "verify",
+            "--report",
+            "--format",
+            "json",
+            "--level",
+            "exhaustive",
+        ])
+        .arg(&source)
+        .output()
+        .expect("failed to execute forma");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let function = &report["files"][0]["functions"][0];
+    assert_eq!(function["status"], "EXHAUSTIVE");
+    assert_eq!(function["examples_run"], 2);
+    assert!(function["seed"].is_null());
+}
+
+#[test]
+fn test_cli_formal_level_reports_unknown_without_solver() {
+    let output = Command::new(forma_bin())
+        .args([
+            "verify", "--report", "--format", "json", "--level", "formal",
+        ])
+        .arg(fixture("verify_contract_pass.forma"))
+        .output()
+        .expect("failed to execute forma");
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["files"][0]["functions"][0]["status"], "UNKNOWN");
+    assert_eq!(report["summary"]["proved"], 0);
+}
+
+#[test]
+fn test_cli_explain_and_verify_surface_struct_invariants() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("invariant.forma");
+    std::fs::write(
+        &source,
+        r#"@inv(balance >= 0, "balance must be non-negative")
+s Account
+    balance: Int
+
+@post(result >= 0)
+f balance(account: Account) -> Int = account.balance
+"#,
+    )
+    .unwrap();
+
+    let explained = Command::new(forma_bin())
+        .args(["explain", "--format", "json"])
+        .arg(&source)
+        .output()
+        .expect("failed to explain invariants");
+    assert!(
+        explained.status.success(),
+        "{}",
+        String::from_utf8_lossy(&explained.stderr)
+    );
+    let explanation: serde_json::Value = serde_json::from_slice(&explained.stdout).unwrap();
+    assert_eq!(explanation["structs"][0]["name"], "Account");
+    assert_eq!(
+        explanation["structs"][0]["invariants"][0]["pattern_name"],
+        "inv"
+    );
+
+    let verified = Command::new(forma_bin())
+        .args(["verify", "--report", "--format", "json"])
+        .arg(&source)
+        .output()
+        .expect("failed to report invariant obligations");
+    assert!(
+        verified.status.success(),
+        "{}",
+        String::from_utf8_lossy(&verified.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&verified.stdout).unwrap();
+    assert_eq!(report["files"][0]["invariants"][0]["type_name"], "Account");
+    assert_eq!(report["files"][0]["invariants"][0]["invariant_count"], 1);
+    assert_eq!(
+        report["files"][0]["invariants"][0]["formal_status"],
+        "UNKNOWN"
+    );
+    assert_eq!(report["summary"]["structs_with_invariants"], 1);
+    assert_eq!(report["summary"]["invariant_clauses"], 1);
 }
 
 #[test]
@@ -874,4 +1042,274 @@ fn test_cli_option_chaining() {
         "Expected success message, got: {}",
         stdout
     );
+}
+
+#[test]
+fn test_cli_grammar_json_uses_structured_keyword_catalog() {
+    let output = Command::new(forma_bin())
+        .args(["grammar", "--format", "json"])
+        .output()
+        .expect("failed to execute forma");
+    assert!(output.status.success());
+    let grammar: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(grammar["version"], "0.2.0");
+    let keywords = grammar["rules"]["keywords"].as_array().unwrap();
+    assert!(keywords.iter().any(|keyword| {
+        keyword["canonical"] == "f"
+            && keyword["aliases"]
+                .as_array()
+                .is_some_and(|aliases| aliases.iter().any(|alias| alias == "function"))
+    }));
+}
+
+#[test]
+fn test_checked_in_grammar_artifacts_cannot_drift() {
+    let output = Command::new(forma_bin())
+        .args(["grammar", "--check"])
+        .output()
+        .expect("failed to execute forma");
+    assert!(
+        output.status.success(),
+        "grammar artifacts are stale: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[cfg(feature = "llvm")]
+#[test]
+fn test_core_program_builds_and_runs_natively() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("main.forma");
+    let executable = dir.path().join("main-native");
+    std::fs::write(&source, "f main() -> Int = 42\n").unwrap();
+
+    let build = Command::new(forma_bin())
+        .args(["build", "--output"])
+        .arg(&executable)
+        .arg(&source)
+        .output()
+        .expect("failed to execute forma build");
+    assert!(
+        build.status.success(),
+        "native build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let run = Command::new(executable).output().unwrap();
+    assert_eq!(run.status.code(), Some(42));
+}
+
+#[cfg(feature = "llvm")]
+#[test]
+fn test_projected_tuple_program_matches_interpreter_and_native() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("projection.forma");
+    let executable = dir.path().join("projection-native");
+    std::fs::write(
+        &source,
+        "f main() -> Int\n    pair := (1, 2)\n    pair.1 := 41\n    pair.0 + pair.1\n",
+    )
+    .unwrap();
+
+    let interpreted = Command::new(forma_bin())
+        .args(["run", "--allow-all"])
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert_eq!(
+        interpreted.status.code(),
+        Some(42),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&interpreted.stdout),
+        String::from_utf8_lossy(&interpreted.stderr)
+    );
+
+    let built = Command::new(forma_bin())
+        .args(["build", "--output"])
+        .arg(&executable)
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let native = Command::new(&executable).output().unwrap();
+    assert_eq!(native.status.code(), Some(42));
+}
+
+#[cfg(feature = "llvm")]
+#[test]
+fn test_projected_struct_program_matches_interpreter_and_native() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("structure.forma");
+    let executable = dir.path().join("structure-native");
+    std::fs::write(
+        &source,
+        "s Pair\n    left: Int\n    right: Int\n\nf main() -> Int\n    pair := Pair { left: 1, right: 2 }\n    pair.right := 41\n    pair.left + pair.right\n",
+    )
+    .unwrap();
+    let interpreted = Command::new(forma_bin())
+        .args(["run", "--allow-all"])
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert_eq!(interpreted.status.code(), Some(42));
+    let built = Command::new(forma_bin())
+        .args(["build", "--output"])
+        .arg(&executable)
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    assert_eq!(Command::new(executable).status().unwrap().code(), Some(42));
+}
+
+#[cfg(feature = "llvm")]
+#[test]
+fn test_core_loop_matches_interpreter_and_native() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("loop.forma");
+    let executable = dir.path().join("loop-native");
+    std::fs::write(
+        &source,
+        "f main() -> Int\n    index := 0\n    total := 0\n    wh index < 6\n        total := total + index\n        index := index + 1\n    total\n",
+    )
+    .unwrap();
+    let interpreted = Command::new(forma_bin())
+        .args(["run", "--allow-all"])
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert_eq!(interpreted.status.code(), Some(15));
+    let built = Command::new(forma_bin())
+        .args(["build", "--output"])
+        .arg(&executable)
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    assert_eq!(Command::new(executable).status().unwrap().code(), Some(15));
+}
+
+#[cfg(feature = "llvm")]
+#[test]
+fn test_enum_discriminants_match_interpreter_and_native() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("enum.forma");
+    let executable = dir.path().join("enum-native");
+    std::fs::write(
+        &source,
+        "e Choice\n    First\n    Second\n\nf main() -> Int\n    choice := Second\n    m choice\n        First -> 1\n        Second -> 42\n",
+    )
+    .unwrap();
+
+    let interpreted = Command::new(forma_bin())
+        .args(["run", "--allow-all"])
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert_eq!(
+        interpreted.status.code(),
+        Some(42),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&interpreted.stdout),
+        String::from_utf8_lossy(&interpreted.stderr)
+    );
+    let built = Command::new(forma_bin())
+        .args(["build", "--output"])
+        .arg(&executable)
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let native = Command::new(executable).output().unwrap();
+    assert_eq!(native.status.code(), Some(42));
+}
+
+#[cfg(feature = "llvm")]
+#[test]
+fn test_option_payload_matches_interpreter_and_native() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("option.forma");
+    let executable = dir.path().join("option-native");
+    std::fs::write(
+        &source,
+        "f main() -> Int\n    value := Some(42)\n    m value\n        Some(x) -> x\n        None -> 0\n",
+    )
+    .unwrap();
+    let interpreted = Command::new(forma_bin())
+        .args(["run", "--allow-all"])
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert_eq!(interpreted.status.code(), Some(42));
+    let built = Command::new(forma_bin())
+        .args(["build", "--output"])
+        .arg(&executable)
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    assert_eq!(Command::new(executable).status().unwrap().code(), Some(42));
+}
+
+#[cfg(feature = "llvm")]
+#[test]
+fn test_fixed_array_projection_matches_interpreter_and_native() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("array.forma");
+    let executable = dir.path().join("array-native");
+    std::fs::write(
+        &source,
+        "f main() -> Int\n    values := [1; 3]\n    values[1] := 39\n    values[0] + values[1] + values[2]\n",
+    )
+    .unwrap();
+    let interpreted = Command::new(forma_bin())
+        .args(["run", "--allow-all"])
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert_eq!(interpreted.status.code(), Some(41));
+    let built = Command::new(forma_bin())
+        .args(["build", "--output"])
+        .arg(&executable)
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    assert_eq!(Command::new(executable).status().unwrap().code(), Some(41));
+}
+
+#[test]
+fn test_guest_exit_is_translated_only_by_cli_host() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("exit.forma");
+    std::fs::write(&source, "f main()\n    exit(23)\n").unwrap();
+    let output = Command::new(forma_bin())
+        .args(["run", "--allow-all"])
+        .arg(source)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(23));
 }

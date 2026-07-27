@@ -1,0 +1,247 @@
+# Hosted model provider adapter. No provider SDK or host-language agent logic.
+
+us model
+us codec
+us settings
+
+pub f tool_name_enum_source(
+    ref settings: ForgeSettings,
+    ref role: Str
+) -> Str
+    source := "[\"\""
+    remaining := agent_tool_names(ref settings, ref role)
+    wh remaining.len() > 0
+        (rest, next) := vec_pop(remaining)
+        remaining = rest
+        m next
+            Some(name) -> source = source + ",\"" + name + "\""
+            None -> source = source
+    source + "]"
+
+pub f agent_result_schema(
+    ref settings: ForgeSettings,
+    ref role: Str
+) -> Json
+    source := "{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{\"outcome\":{\"type\":\"string\",\"enum\":[\"completed\",\"findings\",\"blocked\",\"error\",\"tool_call\"]},\"artifact\":{\"type\":\"string\"},\"summary\":{\"type\":\"string\"},\"memory\":{\"type\":\"string\"},\"verification_disposition\":{\"type\":\"string\",\"enum\":[\"not_applicable\",\"passed\",\"findings\",\"blocked\",\"infrastructure_error\"]},\"failure_count\":{\"type\":\"integer\",\"minimum\":0},\"severity_score\":{\"type\":\"integer\",\"minimum\":0},\"failure_fingerprint\":{\"type\":\"string\"},\"evidence\":{\"type\":\"string\"},\"tool_name\":{\"type\":\"string\"},\"tool_input\":{\"type\":\"string\"},\"tool_payload\":{\"type\":\"string\"}},\"required\":[\"outcome\",\"artifact\",\"summary\",\"memory\",\"verification_disposition\",\"failure_count\",\"severity_score\",\"failure_fingerprint\",\"evidence\",\"tool_name\",\"tool_input\",\"tool_payload\"]}"
+    m json_parse(source)
+        Ok(value) ->
+            properties := m json_get(value, "properties")
+                Some(result) -> result
+                None -> json_object()
+            tool_name := m json_get(properties, "tool_name")
+                Some(result) -> result
+                None -> json_object()
+            enum_values := m json_parse(
+                tool_name_enum_source(ref settings, ref role)
+            )
+                Ok(result) -> result
+                Err(_) -> json_array()
+            tool_name = json_set(tool_name, "enum", enum_values)
+            properties = json_set(properties, "tool_name", tool_name)
+            json_set(value, "properties", properties)
+        Err(_) -> json_object()
+
+pub f response_format(
+    ref settings: ForgeSettings,
+    ref role: Str
+) -> Json
+    format := json_object()
+    format = json_set(format, "type", json_from_str("json_schema"))
+    format = json_set(format, "name", json_from_str("forge_agent_result"))
+    format = json_set(format, "strict", json_from_bool(true))
+    format = json_set(
+        format,
+        "schema",
+        agent_result_schema(ref settings, ref role)
+    )
+    text := json_object()
+    json_set(text, "format", format)
+
+pub f reasoning_config(ref settings: ForgeSettings) -> Json
+    value := json_object()
+    json_set(
+        value,
+        "effort",
+        json_from_str(str(settings.reasoning_effort))
+    )
+
+pub f context_management(ref settings: ForgeSettings) -> Json
+    value := json_object()
+    json_set(
+        value,
+        "compact_threshold",
+        json_from_int(settings.server_compact_threshold)
+    )
+
+pub f build_response_request(
+    ref settings: ForgeSettings,
+    ref role: Str,
+    prompt: Str
+) -> Json
+    request := json_object()
+    request = json_set(
+        request,
+        "model",
+        json_from_str(agent_model(ref settings, ref role))
+    )
+    request = json_set(
+        request,
+        "instructions",
+        json_from_str(
+            agent_instructions(ref settings, ref role) + "\n\n" +
+                agent_tool_catalog(ref settings, ref role)
+        )
+    )
+    request = json_set(request, "input", json_from_str(prompt))
+    request = json_set(
+        request,
+        "max_output_tokens",
+        json_from_int(settings.max_output_tokens)
+    )
+    request = json_set(
+        request,
+        "store",
+        json_from_bool(settings.store_provider_responses)
+    )
+    request = json_set(request, "reasoning", reasoning_config(ref settings))
+    request = json_set(
+        request,
+        "text",
+        response_format(ref settings, ref role)
+    )
+    json_set(
+        request,
+        "context_management",
+        context_management(ref settings)
+    )
+
+pub f content_text(item: Json) -> Str
+    remaining := array_or_empty(ref item, "content")
+    found := ""
+    wh vec_len(remaining) > 0
+        (rest, next) := vec_pop(remaining)
+        remaining = rest
+        m next
+            Some(content) ->
+                if string_or(ref content, "type", "") == "output_text"
+                    found = string_or(ref content, "text", "")
+            None -> found = found
+    found
+
+pub f output_text(response: Json) -> Str?
+    remaining := array_or_empty(ref response, "output")
+    found := ""
+    wh vec_len(remaining) > 0
+        (rest, next) := vec_pop(remaining)
+        remaining = rest
+        m next
+            Some(item) ->
+                candidate := content_text(item)
+                if str_len(candidate) > 0
+                    found = candidate
+            None -> found = found
+    if str_len(found) == 0 then None else Some(found)
+
+@post(result >= 0)
+pub f usage_int(ref response: Json, key: Str) -> Int
+    value := m json_get(response, "usage")
+        Some(usage) -> int_or(ref usage, key, 0)
+        None -> 0
+    if value < 0 then 0 else value
+
+@pre(input_tokens >= 0, "input token count must be non-negative")
+@pre(output_tokens >= 0, "output token count must be non-negative")
+@post(result.error.len() == 0 => result.input_tokens == input_tokens)
+@post(result.error.len() == 0 => result.output_tokens == output_tokens)
+pub f decode_agent_payload(
+    payload: Str,
+    response_id: Str,
+    input_tokens: Int,
+    output_tokens: Int
+) -> AgentResult
+    m json_parse(payload)
+        Err(error) -> failed_agent_result(
+            "provider returned invalid structured output: " + error
+        )
+        Ok(value) ->
+            AgentResult {
+                outcome: string_or(ref value, "outcome", "error"),
+                artifact: string_or(ref value, "artifact", ""),
+                summary: string_or(ref value, "summary", ""),
+                memory: string_or(ref value, "memory", ""),
+                verification_disposition: string_or(
+                    ref value,
+                    "verification_disposition",
+                    "not_applicable"
+                ),
+                failure_count: int_or(ref value, "failure_count", 0),
+                severity_score: int_or(ref value, "severity_score", 0),
+                failure_fingerprint: string_or(
+                    ref value,
+                    "failure_fingerprint",
+                    ""
+                ),
+                evidence: string_or(ref value, "evidence", ""),
+                tool_name: string_or(ref value, "tool_name", ""),
+                tool_input: string_or(ref value, "tool_input", ""),
+                tool_payload: string_or(ref value, "tool_payload", ""),
+                response_id: response_id,
+                input_tokens: input_tokens,
+                output_tokens: output_tokens,
+                error: ""
+            }
+
+pub f decode_provider_response(response: Json) -> AgentResult
+    response_id := string_or(ref response, "id", "")
+    input_tokens := usage_int(ref response, "input_tokens")
+    output_tokens := usage_int(ref response, "output_tokens")
+    m output_text(response)
+        None -> failed_agent_result(
+            "provider response contained no output_text"
+        )
+        Some(payload) ->
+            decode_agent_payload(
+                payload,
+                response_id,
+                input_tokens,
+                output_tokens
+            )
+
+@pre(prompt.len() > 0, "agent prompt must not be empty")
+@pre(api_key.len() > 0, "provider API key must not be empty")
+@pre(settings.provider_base_url.len() > 0)
+@pre(settings.max_output_tokens > 0)
+pub f invoke_agent(
+    ref settings: ForgeSettings,
+    ref role: Str,
+    prompt: Str,
+    api_key: Str
+) -> AgentResult
+    headers := map_new()
+    headers = map_insert(headers, "authorization", "Bearer " + api_key)
+    headers = map_insert(headers, "content-type", "application/json")
+    url := settings.provider_base_url + "/responses"
+    request := build_response_request(ref settings, ref role, prompt)
+    body := json_stringify(request)
+    m http_request(
+        "POST",
+        url,
+        body,
+        headers,
+        settings.provider_timeout_ms,
+        false
+    )
+        Err(error) -> failed_agent_result("provider request failed: " + error)
+        Ok(response) ->
+            status := response.0
+            body := response.1
+            if status < 200 || status >= 300
+                failed_agent_result(
+                    "provider returned HTTP " + int_to_str(status) + ": " + body
+                )
+            else
+                m json_parse(body)
+                    Err(error) -> failed_agent_result(
+                        "provider response was not JSON: " + error
+                    )
+                    Ok(document) -> decode_provider_response(document)

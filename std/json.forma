@@ -136,31 +136,31 @@
 # ============================================================
 
 # Safe get with default - get string or return default
-f json_get_str_or(json: Json, key: Str, default: Str) -> Str
+pub f json_get_str_or(json: Json, key: Str, default: Str) -> Str
     m json_get_str(json, key)
         Some(s) -> s
         None -> default
 
 # Safe get with default - get int or return default
-f json_get_int_or(json: Json, key: Str, default: Int) -> Int
+pub f json_get_int_or(json: Json, key: Str, default: Int) -> Int
     m json_get_int(json, key)
         Some(n) -> n
         None -> default
 
 # Safe get with default - get float or return default
-f json_get_float_or(json: Json, key: Str, default: Float) -> Float
+pub f json_get_float_or(json: Json, key: Str, default: Float) -> Float
     m json_get_float(json, key)
         Some(n) -> n
         None -> default
 
 # Safe get with default - get bool or return default
-f json_get_bool_or(json: Json, key: Str, default: Bool) -> Bool
+pub f json_get_bool_or(json: Json, key: Str, default: Bool) -> Bool
     m json_get_bool(json, key)
         Some(b) -> b
         None -> default
 
 # Check if JSON is empty object or array
-f json_is_empty(json: Json) -> Bool
+pub f json_is_empty(json: Json) -> Bool
     m json_type(json)
         "object" -> vec_len(json_keys(json)) == 0
         "array" -> json_array_len(json) == 0
@@ -169,21 +169,21 @@ f json_is_empty(json: Json) -> Bool
 # Get nested value using dot notation path
 # Example: json_path(obj, "user.profile.name")
 # Helper to return None[Json] explicitly
-f json_none() -> Json?
+pub f json_none() -> Json?
     None
 
-f json_path(json: Json, path: Str) -> Json?
+pub f json_path(json: Json, path: Str) -> Json?
     parts := str_split(path, ".")
     json_path_parts(json, parts, 0)
 
-f json_path_parts(json: Json, parts: [Str], idx: Int) -> Json?
+pub f json_path_parts(json: Json, parts: [Str], idx: Int) -> Json?
     if idx >= vec_len(parts) then Some(json)
     else
         m vec_get(parts, idx)
             Some(key) -> json_path_key(json, key, parts, idx)
             None -> json_none()
 
-f json_path_key(json: Json, key: Str, parts: [Str], idx: Int) -> Json?
+pub f json_path_key(json: Json, key: Str, parts: [Str], idx: Int) -> Json?
     m json_get(json, key)
         Some(next) -> json_path_parts(next, parts, idx + 1)
         None -> json_none()

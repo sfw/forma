@@ -1,6 +1,6 @@
 # FORMA Language Support for VS Code
 
-Syntax highlighting for the FORMA programming language.
+Syntax highlighting and language-server setup for the Forma 0.2 prototype.
 
 ## Features
 
@@ -8,6 +8,12 @@ Syntax highlighting for the FORMA programming language.
 - Comment toggling (`#` comments)
 - Bracket matching and auto-closing
 - Code folding based on indentation (FORMA uses significant whitespace)
+- Optional semantic diagnostics, hover, completion, definitions, references,
+  symbols, signatures, and formatting through `forma lsp`
+
+The TextMate grammar supplies highlighting only. Generated keyword/editor metadata
+in `docs/grammar-keywords.md` and `docs/editor-grammar.json` is the authoritative
+syntax catalog.
 
 ## Installation
 
@@ -55,7 +61,8 @@ Then install the generated `.vsix` file in VS Code via:
 ### Keywords
 - Declaration: `f` (function), `s` (struct), `e` (enum), `t` (trait), `i` (impl), `m` (match)
 - Control: `if`, `then`, `else`, `for`, `in`, `wh` (while), `lp` (loop), `br` (break), `ct` (continue), `ret` (return)
-- Modifiers: `pub`, `mut`, `as`, `aw` (await), `us` (use)
+- Modifiers and ownership: `pub`, `mut`, `ref`, `mv` (move), `un` (unsafe), `as`
+  (async), `aw` (await), `sp` (spawn), `us` (use), `md` (module)
 
 ### Types
 - Primitives: `Int`, `Float`, `Bool`, `Str`, `Char`, `Unit`, `Never`
@@ -88,10 +95,22 @@ f fib(n: Int) -> Int
     if n <= 1 then n else fib(n - 1) + fib(n - 2)
 
 f main() -> Int
-    result := fib(10)
+    result = fib(10)
     print(f"Fibonacci(10) = {result}")
     0
 ```
+
+## Language Server
+
+Build the compiler, then configure a VS Code LSP client to start:
+
+```bash
+/absolute/path/to/forma lsp
+```
+
+The repository extension does not bundle the compiler. LSP support is currently
+strongest for a single file; richer cross-file refactoring and rename workflows
+remain future work.
 
 ## License
 

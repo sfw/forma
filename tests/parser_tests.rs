@@ -98,6 +98,34 @@ fn test_struct_with_fields() {
 }
 
 #[test]
+fn parses_struct_invariants_as_type_contracts() {
+    let ast = parse_ok(
+        r#"@inv(balance >= 0, "balance must be non-negative")
+@inv(owner.len() > 0)
+s Account
+    owner: Str
+    balance: Int
+"#,
+    );
+    let ItemKind::Struct(structure) = &ast.items[0].kind else {
+        panic!("expected struct");
+    };
+    assert_eq!(structure.invariants.len(), 2);
+    assert_eq!(
+        structure.invariants[0].message.as_deref(),
+        Some("balance must be non-negative")
+    );
+    assert!(ast.items[0].attrs.is_empty());
+}
+
+#[test]
+fn rejects_old_expression_in_struct_invariant() {
+    assert!(parse_err(
+        "@inv(balance == old(balance))\ns Account\n    balance: Int\n"
+    ));
+}
+
+#[test]
 fn test_tuple_struct() {
     let ast = parse_ok("s Color(u8, u8, u8)");
     if let ItemKind::Struct(s) = &ast.items[0].kind {
@@ -704,4 +732,30 @@ fn test_struct_missing_field_type() {
 #[test]
 fn test_duplicate_arrow_in_fn_type() {
     parse_should_fail("f test -> (Int) -> -> Int\n    42");
+}
+
+#[test]
+fn deterministic_parser_mutations_never_panic() {
+    let seeds = [
+        "f main() -> Int = 42\n",
+        "s Pair\n    left: Int\n    right: Str\n",
+        "e Choice\n    First\n    Second(Int)\n",
+        "f main() -> Int\n    values := [1; 3]\n    values[0]\n",
+    ];
+    for seed in seeds {
+        for index in 0..seed.len() {
+            if !seed.is_char_boundary(index) {
+                continue;
+            }
+            let mut removed = seed.to_string();
+            removed.remove(index);
+            let _ = parse(&removed);
+
+            for insertion in ["@", "]", "\n", " pub "] {
+                let mut mutated = seed.to_string();
+                mutated.insert_str(index, insertion);
+                let _ = parse(&mutated);
+            }
+        }
+    }
 }

@@ -115,6 +115,8 @@ pub struct Struct {
     pub generics: Option<Generics>,
     pub kind: StructKind,
     pub visibility: Visibility,
+    /// Type invariants (`@inv`) checked at construction and ownership boundaries.
+    pub invariants: Vec<Contract>,
     pub span: Span,
 }
 
@@ -206,6 +208,7 @@ pub struct TypeAlias {
     pub name: Ident,
     pub generics: Option<Generics>,
     pub ty: Option<Type>,
+    pub visibility: Visibility,
     pub span: Span,
 }
 

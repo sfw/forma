@@ -117,7 +117,9 @@ mod tests {
         let got_str = unsafe { CStr::from_ptr(got).to_string_lossy().into_owned() };
         assert_eq!(got_str, "forma");
         // Free the returned string
-        unsafe { drop(CString::from_raw(got)); }
+        unsafe {
+            drop(CString::from_raw(got));
+        }
         forma_map_free(m);
     }
 

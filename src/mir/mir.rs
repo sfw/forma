@@ -40,6 +40,88 @@ impl fmt::Display for Local {
     }
 }
 
+/// A local or one of its projected subplaces.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Place {
+    pub local: Local,
+    pub projection: Vec<ProjectionElem>,
+}
+
+impl Place {
+    pub fn new(local: Local) -> Self {
+        Self {
+            local,
+            projection: Vec::new(),
+        }
+    }
+
+    pub fn field(mut self, name: impl Into<String>) -> Self {
+        self.projection.push(ProjectionElem::Field(name.into()));
+        self
+    }
+
+    pub fn tuple_field(mut self, index: usize) -> Self {
+        self.projection.push(ProjectionElem::TupleField(index));
+        self
+    }
+
+    pub fn index(mut self, local: Local) -> Self {
+        self.projection.push(ProjectionElem::Index(local));
+        self
+    }
+
+    pub fn deref(mut self) -> Self {
+        self.projection.push(ProjectionElem::Deref);
+        self
+    }
+
+    pub fn overlaps(&self, other: &Self) -> bool {
+        if self.local != other.local {
+            return false;
+        }
+        for (left, right) in self.projection.iter().zip(&other.projection) {
+            let same_or_aliasing_index = left == right
+                || matches!(
+                    (left, right),
+                    (ProjectionElem::Index(_), ProjectionElem::Index(_))
+                );
+            if !same_or_aliasing_index {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+impl From<Local> for Place {
+    fn from(local: Local) -> Self {
+        Self::new(local)
+    }
+}
+
+impl fmt::Display for Place {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.local)?;
+        for projection in &self.projection {
+            match projection {
+                ProjectionElem::Field(name) => write!(f, ".{name}")?,
+                ProjectionElem::TupleField(index) => write!(f, ".{index}")?,
+                ProjectionElem::Index(local) => write!(f, "[{}]", local)?,
+                ProjectionElem::Deref => write!(f, ".*")?,
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ProjectionElem {
+    Field(String),
+    TupleField(usize),
+    Index(Local),
+    Deref,
+}
+
 /// A MIR program - collection of functions.
 #[derive(Debug, Clone)]
 pub struct Program {
@@ -47,6 +129,15 @@ pub struct Program {
     pub entry: Option<String>,
     /// Enum variant registry: maps (enum_name, variant_name) -> variant index
     pub enum_variants: HashMap<(String, String), usize>,
+    /// Named struct layouts used by ownership/drop elaboration and backends.
+    pub struct_fields: HashMap<String, Vec<(String, Ty)>>,
+    /// Struct invariants checked by the interpreter at construction and
+    /// function/borrow boundaries.
+    pub struct_invariants: HashMap<String, Vec<MirContract>>,
+    /// Named types validated as implementing compiler-known `Copy`.
+    pub copy_types: std::collections::HashSet<String>,
+    /// Named types validated as safe to move across a task boundary.
+    pub send_types: std::collections::HashSet<String>,
 }
 
 impl Program {
@@ -55,7 +146,63 @@ impl Program {
             functions: HashMap::new(),
             entry: None,
             enum_variants: HashMap::new(),
+            struct_fields: HashMap::new(),
+            struct_invariants: HashMap::new(),
+            copy_types: std::collections::HashSet::new(),
+            send_types: std::collections::HashSet::new(),
         }
+    }
+
+    pub fn is_copy_type(&self, ty: &Ty) -> bool {
+        match ty {
+            Ty::Named(id, args) => {
+                self.copy_types.contains(&id.name) && args.iter().all(|arg| self.is_copy_type(arg))
+            }
+            Ty::Tuple(fields) => fields.iter().all(|field| self.is_copy_type(field)),
+            Ty::Array(element, _) => self.is_copy_type(element),
+            _ => ty.is_copy(),
+        }
+    }
+
+    pub fn is_send_type(&self, ty: &Ty) -> bool {
+        is_send_type(ty, &self.send_types)
+    }
+}
+
+pub(crate) fn is_send_type(ty: &Ty, send_types: &std::collections::HashSet<String>) -> bool {
+    match ty {
+        Ty::Ref(_, _)
+        | Ty::Ptr(_, _)
+        | Ty::RawPtr(_)
+        | Ty::MutexGuard(_)
+        | Ty::TcpStream
+        | Ty::TcpListener
+        | Ty::UdpSocket
+        | Ty::TlsStream
+        | Ty::Database
+        | Ty::Statement
+        | Ty::DbRow => false,
+        Ty::Named(id, args) => {
+            send_types.contains(&id.name)
+                && args
+                    .iter()
+                    .all(|argument| is_send_type(argument, send_types))
+        }
+        Ty::Tuple(fields) => fields.iter().all(|field| is_send_type(field, send_types)),
+        Ty::Array(element, _)
+        | Ty::List(element)
+        | Ty::Set(element)
+        | Ty::Option(element)
+        | Ty::Task(element)
+        | Ty::Future(element)
+        | Ty::Sender(element)
+        | Ty::Receiver(element)
+        | Ty::Mutex(element) => is_send_type(element, send_types),
+        Ty::Map(key, value) | Ty::Result(key, value) => {
+            is_send_type(key, send_types) && is_send_type(value, send_types)
+        }
+        Ty::Fn(_, _) | Ty::Associated(_, _) | Ty::Error => false,
+        _ => true,
     }
 }
 
@@ -193,8 +340,14 @@ pub struct Statement {
 pub enum StatementKind {
     /// Assign a value to a local: `_0 = rvalue`
     Assign(Local, Rvalue),
+    /// Assign through a projected place: `_0.field = rvalue`.
+    AssignPlace(Place, Rvalue),
     /// In-place index assignment: `local[index] = value`
     IndexAssign(Local, Operand, Operand),
+    /// Destroy an initialized local and make it unavailable.
+    Drop(Local),
+    /// Destroy an initialized projected place.
+    DropPlace(Place),
     /// No-op (placeholder)
     Nop,
 }
@@ -210,6 +363,8 @@ pub enum Rvalue {
     UnaryOp(UnOp, Operand),
     /// Create a reference: `&place` or `&mut place`
     Ref(Local, Mutability),
+    /// Create a reference to a projected place.
+    RefPlace(Place, Mutability),
     /// Dereference a pointer: `*operand`
     Deref(Operand),
     /// Tuple construction
@@ -269,12 +424,18 @@ pub enum Rvalue {
 pub enum Operand {
     /// A constant value
     Constant(Constant),
-    /// A local variable
+    /// A legacy local read. Lowering normalizes this to an explicit operation.
     Local(Local),
     /// Copy from a local (for Copy types)
     Copy(Local),
     /// Move from a local
     Move(Local),
+    /// Borrow a local without transferring ownership.
+    Borrow(Local, Mutability),
+    /// Copy, move, or borrow a projected place.
+    CopyPlace(Place),
+    MovePlace(Place),
+    BorrowPlace(Place, Mutability),
 }
 
 /// A constant value.
@@ -337,7 +498,7 @@ pub enum UnOp {
 }
 
 /// Mutability.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Mutability {
     Immutable,
     Mutable,
@@ -455,9 +616,12 @@ impl fmt::Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
             StatementKind::Assign(local, rvalue) => write!(f, "{} = {}", local, rvalue),
+            StatementKind::AssignPlace(place, rvalue) => write!(f, "{} = {}", place, rvalue),
             StatementKind::IndexAssign(local, index, value) => {
                 write!(f, "{}[{}] = {}", local, index, value)
             }
+            StatementKind::Drop(local) => write!(f, "drop {}", local),
+            StatementKind::DropPlace(place) => write!(f, "drop {}", place),
             StatementKind::Nop => write!(f, "nop"),
         }
     }
@@ -471,6 +635,8 @@ impl fmt::Display for Rvalue {
             Rvalue::UnaryOp(op, operand) => write!(f, "{:?} {}", op, operand),
             Rvalue::Ref(local, Mutability::Immutable) => write!(f, "&{}", local),
             Rvalue::Ref(local, Mutability::Mutable) => write!(f, "&mut {}", local),
+            Rvalue::RefPlace(place, Mutability::Immutable) => write!(f, "&{}", place),
+            Rvalue::RefPlace(place, Mutability::Mutable) => write!(f, "&mut {}", place),
             Rvalue::Deref(op) => write!(f, "*{}", op),
             Rvalue::Tuple(ops) => {
                 write!(f, "(")?;
@@ -550,6 +716,14 @@ impl fmt::Display for Operand {
             Operand::Local(l) => write!(f, "{}", l),
             Operand::Copy(l) => write!(f, "copy {}", l),
             Operand::Move(l) => write!(f, "move {}", l),
+            Operand::Borrow(l, Mutability::Immutable) => write!(f, "borrow {}", l),
+            Operand::Borrow(l, Mutability::Mutable) => write!(f, "borrow mut {}", l),
+            Operand::CopyPlace(place) => write!(f, "copy {}", place),
+            Operand::MovePlace(place) => write!(f, "move {}", place),
+            Operand::BorrowPlace(place, Mutability::Immutable) => write!(f, "borrow {}", place),
+            Operand::BorrowPlace(place, Mutability::Mutable) => {
+                write!(f, "borrow mut {}", place)
+            }
         }
     }
 }

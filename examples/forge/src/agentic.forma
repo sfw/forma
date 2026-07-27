@@ -1,0 +1,866 @@
+# Live LLM-driven Forge orchestration.
+
+us model
+us codec
+us graph
+us kernel
+us settings
+us provider
+us memory
+us tool_plugins
+
+@post(result.run_id == old(transition.state.run_id))
+@post(result.events.len() == old(transition.state.events).len())
+pub f take_transition_state(transition: Transition) -> WorkflowState
+    transition.state
+
+@post(result == state.status)
+pub f workflow_status(ref state: WorkflowState) -> Str
+    str(state.status)
+
+@post(result == state.run_id)
+pub f run_identifier(ref state: WorkflowState) -> Str
+    str(state.run_id)
+
+@pre(
+    status == "running" || status == "completed" || status == "failed" ||
+        status == "awaiting_intervention" || status == "cancelled",
+    "workflow status must be recognized"
+)
+@post(result.status == old(status))
+@post(result.events.len() == old(state.events).len())
+pub f set_workflow_status(
+    state: WorkflowState,
+    status: Str
+) -> WorkflowState
+    next := state
+    next.status = status
+    next
+
+@post(result.len() > 0)
+@post(result.contains(state.repair.artifact))
+pub f repair_context(ref state: WorkflowState) -> Str
+    "Revision: " + int_to_str(state.repair.revision) +
+        "\nStrategy: " + int_to_str(state.repair.strategy) +
+        "\nCurrent artifact:\n" + state.repair.artifact +
+        "\nVerification evidence:\n" + state.repair.evidence_artifact
+
+@post(result == agent.outcome)
+pub f agent_outcome(ref agent: AgentResult) -> Str
+    str(agent.outcome)
+
+@post(result == agent.artifact)
+pub f agent_artifact(ref agent: AgentResult) -> Str
+    str(agent.artifact)
+
+@post(result == agent.summary)
+pub f agent_summary(ref agent: AgentResult) -> Str
+    str(agent.summary)
+
+@post(result == agent.error)
+pub f agent_error(ref agent: AgentResult) -> Str
+    str(agent.error)
+
+@post(result == agent.evidence)
+pub f agent_evidence(ref agent: AgentResult) -> Str
+    str(agent.evidence)
+
+@post(result == agent.response_id)
+pub f agent_response_id(ref agent: AgentResult) -> Str
+    str(agent.response_id)
+
+@post(result.len() > 0)
+pub f node_role(ref graph: WorkflowGraph, ref node_id: Str) -> Str
+    index := node_index(ref graph.nodes, ref node_id)
+    if index < 0 then "workflow agent" else str(graph.nodes[index].role)
+
+pub f node_self_corrects(ref graph: WorkflowGraph, ref node_id: Str) -> Bool
+    index := node_index(ref graph.nodes, ref node_id)
+    index >= 0 && graph.nodes[index].self_correcting
+
+pub f safe_workspace_path(
+    ref settings: ForgeSettings,
+    ref relative_path: Str
+) -> Str?
+    m path_resolve_within(settings.workspace_root, relative_path)
+        Ok(path) -> Some(path)
+        Err(_) -> None
+
+pub f command_arguments(source: Str) -> [Str]!Str
+    m json_parse(source)
+        Err(error) -> Err("command arguments must be JSON: " + error)
+        Ok(value) ->
+            if !json_is_array(value)
+                Err("command arguments must be a JSON array")
+            else
+                raw := json_values(value)
+                args := []
+                valid := true
+                i := 0
+                wh i < raw.len()
+                    if !json_is_string(raw[i])
+                        valid = false
+                    else
+                        args = vec_push(args, json_string(raw[i]))
+                    i = i + 1
+                if valid then Ok(args)
+                else Err("every command argument must be a string")
+
+pub f plugin_context(ref settings: ForgeSettings) -> Str
+    allowed_source := "["
+    i := 0
+    wh i < settings.allowed_commands.len()
+        if i > 0
+            allowed_source = allowed_source + ","
+        allowed_source = allowed_source +
+            json_stringify(json_from_str(str(settings.allowed_commands[i])))
+        i = i + 1
+    allowed_source = allowed_source + "]"
+    context := json_object()
+    context = json_set(
+        context,
+        "workspace_root",
+        json_from_str(str(settings.workspace_root))
+    )
+    allowed_json := m json_parse(allowed_source)
+        Ok(value) -> value
+        Err(_) -> json_array()
+    context = json_set(context, "allowed_commands", allowed_json)
+    context = json_set(
+        context,
+        "command_timeout_ms",
+        json_from_int(settings.command_timeout_ms)
+    )
+    context = json_set(
+        context,
+        "max_command_output_chars",
+        json_from_int(settings.max_command_output_chars)
+    )
+    json_stringify(context)
+
+pub f plugin_capability_flag(ref capability: Str) -> Str
+    if capability == "read" then "--allow-read"
+    else if capability == "write" then "--allow-write"
+    else if capability == "network" then "--allow-network"
+    else if capability == "exec" then "--allow-exec"
+    else ""
+
+pub f plugin_process_arguments(
+    ref plugin: ToolPlugin,
+    ref settings: ForgeSettings,
+    ref agent: AgentResult
+) -> [Str]
+    arguments := ["run", str(plugin.entrypoint), "--allow-env"]
+    i := 0
+    wh i < plugin.capabilities.len()
+        flag := plugin_capability_flag(ref plugin.capabilities[i])
+        if flag.len() > 0
+            arguments = vec_push(arguments, flag)
+        i = i + 1
+    arguments = vec_push(arguments, "--")
+    arguments = vec_push(arguments, str(agent.tool_input))
+    arguments = vec_push(arguments, str(agent.tool_payload))
+    vec_push(arguments, plugin_context(ref settings))
+
+pub f plugin_environment(ref plugin: ToolPlugin) -> Map[Str]
+    environment := map_new()
+    i := 0
+    wh i < plugin.environment.len()
+        name := str(plugin.environment[i])
+        m env_get(name)
+            Some(value) ->
+                environment = map_insert(environment, name, value)
+            None -> environment = environment
+        i = i + 1
+    environment
+
+@post(result.len() > 0)
+pub f execute_agent_tool(
+    ref settings: ForgeSettings,
+    ref role: Str,
+    ref agent: AgentResult
+) -> Str
+    plugin_index := tool_plugin_index(
+        ref settings.tool_plugins,
+        ref agent.tool_name
+    )
+    if plugin_index < 0
+        "TOOL_ERROR: unknown tool plugin " + agent.tool_name
+    else if !agent_allows_tool(
+        ref settings,
+        ref role,
+        ref agent.tool_name
+    )
+        "TOOL_DENIED: role is not configured for " + agent.tool_name
+    else
+        workspace_relative := "."
+        m safe_workspace_path(ref settings, ref workspace_relative)
+            None -> "TOOL_ERROR: workspace_root cannot be resolved"
+            Some(workspace) ->
+                arguments := plugin_process_arguments(
+                    ref settings.tool_plugins[plugin_index],
+                    ref settings,
+                    ref agent
+                )
+                allowed_runtimes := [str(settings.forma_executable)]
+                environment := plugin_environment(
+                    ref settings.tool_plugins[plugin_index]
+                )
+                m process_run(
+                    settings.forma_executable,
+                    arguments,
+                    workspace,
+                    environment,
+                    allowed_runtimes,
+                    settings.command_timeout_ms,
+                    settings.max_command_output_chars
+                )
+                    Err(error) -> "TOOL_ERROR: could not run plugin: " + error
+                    Ok(output) ->
+                        if output.2 != 0
+                            "TOOL_ERROR: plugin exited " +
+                                int_to_str(output.2) + "\n" + output.1
+                        else if output.0.len() == 0
+                            "TOOL_ERROR: plugin returned no output"
+                        else output.0
+
+@post(result.contains(agent.outcome))
+pub f result_record(ref agent: AgentResult) -> Str
+    "outcome: " + agent.outcome +
+        "\nsummary: " + agent.summary +
+        "\nartifact:\n" + agent.artifact +
+        "\nmemory:\n" + agent.memory +
+        "\nevidence:\n" + agent.evidence
+
+@pre(settings.max_agent_turns > 0)
+@pre(run_id.len() > 0, "agent session run id must not be empty")
+@pre(node_id.len() > 0, "agent session node id must not be empty")
+@pre(role.len() > 0, "agent session role must not be empty")
+@pre(initial_prompt.len() > 0, "agent session prompt must not be empty")
+@pre(api_key.len() > 0, "agent session API key must not be empty")
+pub f invoke_session(
+    ref settings: ForgeSettings,
+    ref db: Database,
+    ref run_id: Str,
+    ref node_id: Str,
+    ref role: Str,
+    initial_prompt: Str,
+    api_key: Str
+) -> AgentResult
+    prompt := initial_prompt
+    turn := 0
+    final := failed_agent_result("agent exhausted its configured turn budget")
+    finished := false
+    wh !finished && turn < settings.max_agent_turns
+        used_tokens := run_token_usage(ref db, ref run_id)
+        if used_tokens < 0
+            final = blocked_agent_result(
+                "token ledger is unavailable; refusing an unmetered provider call"
+            )
+            finished = true
+        else if used_tokens >= settings.max_total_tokens
+            final = blocked_agent_result(
+                "run token budget exhausted (" +
+                    int_to_str(used_tokens) + "/" +
+                    int_to_str(settings.max_total_tokens) + ")"
+            )
+            finished = true
+        else
+            input_memory_error := remember(
+                ref db,
+                str(run_id),
+                str(node_id),
+                str(role),
+                "input",
+                str(prompt),
+                "",
+                0,
+                0
+            )
+            m input_memory_error
+                Some(error) ->
+                    final = blocked_agent_result(
+                        "could not durably record provider input: " + error
+                    )
+                    finished = true
+                None -> finished = finished
+            if !finished
+                result := invoke_agent(
+                    ref settings,
+                    ref role,
+                    prompt,
+                    str(api_key)
+                )
+                response_memory_error := remember(
+                    ref db,
+                    str(run_id),
+                    str(node_id),
+                    str(role),
+                    "response",
+                    result_record(ref result),
+                    agent_response_id(ref result),
+                    result.input_tokens,
+                    result.output_tokens
+                )
+                m response_memory_error
+                    Some(error) ->
+                        final = blocked_agent_result(
+                            "provider response received but could not be recorded: " +
+                                error
+                        )
+                        finished = true
+                    None -> finished = finished
+                if !finished
+                    if agent_outcome(ref result) == "tool_call"
+                        tool_output := execute_agent_tool(
+                            ref settings,
+                            ref role,
+                            ref result
+                        )
+                        tool_memory_error := remember(
+                            ref db,
+                            str(run_id),
+                            str(node_id),
+                            str(role),
+                            "tool",
+                            str(tool_output),
+                            "",
+                            0,
+                            0
+                        )
+                        m tool_memory_error
+                            Some(error) ->
+                                final = blocked_agent_result(
+                                    "tool result could not be recorded: " + error
+                                )
+                                finished = true
+                            None ->
+                                recall := recall_context(
+                                    ref db,
+                                    ref run_id,
+                                    settings.recall_messages
+                                )
+                                prompt = "Continue the task after the tool result. Use another " +
+                                    "tool only if necessary, otherwise return the final result.\n\n" +
+                                    recall
+                    else
+                        final = result
+                        finished = true
+        turn = turn + 1
+    final
+
+@pre(run_id.len() > 0, "compaction run id must not be empty")
+@pre(api_key.len() > 0, "compaction API key must not be empty")
+@post(result == "not_compacted" || result == "compacted")
+pub f maybe_compact(
+    ref settings: ForgeSettings,
+    ref db: Database,
+    ref run_id: Str,
+    api_key: Str
+) -> Str
+    status := "not_compacted"
+    (source, through, chars) := uncompacted_context(
+        ref db,
+        ref run_id,
+        settings.keep_recent_messages
+    )
+    used_tokens := run_token_usage(ref db, ref run_id)
+    if chars >= settings.compact_after_chars && used_tokens >= 0 && used_tokens < settings.max_total_tokens
+        compactor_role := "memory compactor"
+        prompt := settings.compaction_prompt +
+            "\n\nPreserve decisions, constraints, failures, repairs, file changes, " +
+            "open questions, and identifiers. Remove repetition.\n\n" + source
+        result := invoke_agent(
+            ref settings,
+            ref compactor_role,
+            prompt,
+            api_key
+        )
+        summary := agent_summary(ref result)
+        if agent_outcome(ref result) == "completed" && str_len(summary) > 0
+            ignored := save_compaction(
+                ref db,
+                str(run_id),
+                through,
+                summary,
+                agent_response_id(ref result),
+                result.input_tokens,
+                result.output_tokens
+            )
+            status = "compacted"
+    status
+
+@post(result.failure_count == agent.failure_count)
+@post(result.severity_score == agent.severity_score)
+@pre(agent.failure_count >= 0, "verification failure count must be non-negative")
+@pre(agent.severity_score >= 0, "verification severity must be non-negative")
+pub f verification_from_agent(ref agent: AgentResult) -> VerificationResult
+    verification_result(
+        str(agent.verification_disposition),
+        agent.failure_count,
+        agent.severity_score,
+        str(agent.failure_fingerprint),
+        str(agent.evidence)
+    )
+
+@pre(settings.max_repair_turns > 0)
+@pre(node_id.len() > 0, "repair node id must not be empty")
+@pre(goal.len() > 0, "repair goal must not be empty")
+@pre(api_key.len() > 0, "repair API key must not be empty")
+@post(result.events.len() >= old(state.events).len())
+pub f repair_until_stable(
+    ref settings: ForgeSettings,
+    ref graph: WorkflowGraph,
+    ref db: Database,
+    state: WorkflowState,
+    ref node_id: Str,
+    ref goal: Str,
+    first: AgentResult,
+    api_key: Str
+) -> WorkflowState
+    started := begin_repair_cycle(
+        state,
+        str(node_id),
+        agent_artifact(ref first)
+    )
+    policy := repair_policy_for_node(ref graph, ref node_id)
+    verified := record_verification(
+        ref policy,
+        take_transition_state(started),
+        verification_from_agent(ref first)
+    )
+    next := take_transition_state(verified)
+    repair_run_id := run_identifier(ref next)
+    repair_turn := 0
+    wh repair_status(ref next) == "repairing" && repair_turn < settings.max_repair_turns
+        repair_role := "repair agent"
+        recall := recall_context(
+            ref db,
+            ref repair_run_id,
+            settings.recall_messages
+        )
+        repair_prompt := "Repair the current artifact. Goal: " + goal +
+            "\nNode: " + node_id +
+            "\n" + repair_context(ref next) +
+            "\nRecall:\n" + recall
+        repaired := invoke_session(
+            ref settings,
+            ref db,
+            ref repair_run_id,
+            ref node_id,
+            ref repair_role,
+            repair_prompt,
+            str(api_key)
+        )
+        repaired_artifact := agent_artifact(ref repaired)
+        if agent_outcome(ref repaired) == "error" || str_len(repaired_artifact) == 0
+            next = set_workflow_status(next, "awaiting_intervention")
+            next = append_event(
+                next,
+                str(node_id),
+                "repair_paused",
+                agent_error(ref repaired)
+            )
+        else
+            applied := apply_repair(next, repaired_artifact)
+            next = take_transition_state(applied)
+            recall = recall_context(
+                ref db,
+                ref repair_run_id,
+                settings.recall_messages
+            )
+            verify_prompt := "Verify this revised artifact against the goal. " +
+                "Return passed, findings, blocked, or infrastructure_error. " +
+                "Never hide findings.\nGoal: " + goal +
+                "\nArtifact:\n" + repair_artifact(ref next) +
+                "\nRecall:\n" + recall
+            validation_role := "validation agent"
+            checked := invoke_session(
+                ref settings,
+                ref db,
+                ref repair_run_id,
+                ref node_id,
+                ref validation_role,
+                verify_prompt,
+                str(api_key)
+            )
+            recorded := record_verification(
+                ref policy,
+                next,
+                verification_from_agent(ref checked)
+            )
+            next = take_transition_state(recorded)
+        repair_turn = repair_turn + 1
+    if repair_status(ref next) == "repairing"
+        next = set_workflow_status(next, "awaiting_intervention")
+        next = append_event(
+            next,
+            str(node_id),
+            "repair_paused",
+            "configured repair-turn budget exhausted"
+        )
+    next
+
+pub f apply_live_node_result(
+    ref settings: ForgeSettings,
+    ref graph: WorkflowGraph,
+    ref db: Database,
+    state: WorkflowState,
+    ref node_id: Str,
+    ref goal: Str,
+    result: AgentResult,
+    api_key: Str
+) -> WorkflowState
+    if agent_outcome(ref result) == "blocked"
+        next := set_workflow_status(state, "awaiting_intervention")
+        append_event(
+            next,
+            str(node_id),
+            "node_paused",
+            agent_evidence(ref result)
+        )
+    else if agent_outcome(ref result) == "findings" && node_self_corrects(ref graph, ref node_id)
+        next := repair_until_stable(
+            ref settings,
+            ref graph,
+            ref db,
+            state,
+            ref node_id,
+            ref goal,
+            result,
+            api_key
+        )
+        if repair_cycle_completed(ref next)
+            completed := complete_node(
+                ref graph,
+                next,
+                str(node_id),
+                repair_artifact(ref next)
+            )
+            take_transition_state(completed)
+        else next
+    else if agent_outcome(ref result) == "completed"
+        completed := complete_node(
+            ref graph,
+            state,
+            str(node_id),
+            agent_artifact(ref result)
+        )
+        take_transition_state(completed)
+    else
+        failure_error := agent_error(ref result)
+        failed := fail_node(
+            ref graph,
+            state,
+            str(node_id),
+            if str_len(failure_error) > 0
+                failure_error
+            else agent_summary(ref result)
+        )
+        take_transition_state(failed)
+
+pub f invoke_isolated_session(
+    settings_source: Str,
+    run_id: Str,
+    node_id: Str,
+    role: Str,
+    prompt: Str
+) -> AgentResult
+    m load_settings(settings_source)
+        Err(error) -> failed_agent_result(error)
+        Ok(settings) ->
+            m env_get(settings.api_key_env)
+                None ->
+                    failed_agent_result(
+                        "missing API key environment variable: " +
+                            settings.api_key_env
+                    )
+                Some(api_key) ->
+                    connection := if settings.database_url_env.len() > 0
+                        m env_get(settings.database_url_env)
+                            None ->
+                                Err(
+                                    "missing PostgreSQL URL environment variable: " +
+                                        settings.database_url_env
+                                )
+                            Some(url) -> db_connect_postgres(url)
+                    else db_open(settings.database_path)
+                    m connection
+                        Err(error) -> failed_agent_result(error)
+                        Ok(db) ->
+                            result := invoke_session(
+                                ref settings,
+                                ref db,
+                                ref run_id,
+                                ref node_id,
+                                ref role,
+                                prompt,
+                                api_key
+                            )
+                            db_close(db)
+                            result
+
+@pre(settings.max_agent_turns > 0)
+@pre(graph.nodes.len() > 0, "live workflow requires a graph node")
+@pre(goal.len() > 0, "live workflow goal must not be empty")
+@pre(api_key.len() > 0, "live workflow API key must not be empty")
+@post(result.run_id.len() > 0)
+@post(result.events.len() > 0)
+@post(result.next_sequence == result.events.len())
+pub f continue_live_workflow(
+    ref settings: ForgeSettings,
+    ref graph: WorkflowGraph,
+    ref db: Database,
+    goal: Str,
+    workspace: Str,
+    api_key: Str,
+    settings_source: Str,
+    state: WorkflowState
+) -> WorkflowState
+    run_id := str(state.run_id)
+    started_at_ms := m load_run_created_at_ms(ref db, ref run_id)
+        Ok(value) -> value
+        Err(_) -> time_now_ms()
+    total_turns := 0
+    wh workflow_status(ref state) == "running" && total_turns < settings.max_agent_turns
+        elapsed_ms := time_now_ms() - started_at_ms
+        used_tokens := run_token_usage(ref db, ref run_id)
+        if elapsed_ms >= settings.workflow_timeout_ms
+            state = set_workflow_status(state, "awaiting_intervention")
+            state = append_event(
+                state,
+                "",
+                "run_paused",
+                "configured workflow deadline exhausted"
+            )
+        else if used_tokens < 0
+            state = set_workflow_status(state, "awaiting_intervention")
+            state = append_event(
+                state,
+                "",
+                "run_paused",
+                "token ledger unavailable; refusing unmetered execution"
+            )
+        else if used_tokens >= settings.max_total_tokens
+            state = set_workflow_status(state, "awaiting_intervention")
+            state = append_event(
+                state,
+                "",
+                "run_paused",
+                "configured run token budget exhausted"
+            )
+        else
+            ready := ready_nodes(ref graph, ref state)
+            if vec_len(ready) == 0
+                state = set_workflow_status(state, "awaiting_intervention")
+                state = append_event(
+                    state,
+                    "",
+                    "run_paused",
+                    "no runnable node; state preserved"
+                )
+            else
+                remaining_ready := ready
+                node_ids := []
+                tasks := []
+                wh vec_len(remaining_ready) > 0 && tasks.len() < settings.max_parallel_nodes
+                    (rest, next_ready) := vec_pop(remaining_ready)
+                    remaining_ready = rest
+                    node_id := m next_ready
+                        Some(value) -> value
+                        None -> ""
+                    role := node_role(ref graph, ref node_id)
+                    started := start_node(ref graph, state, str(node_id))
+                    state = take_transition_state(started)
+                    recall := recall_context(
+                        ref db,
+                        ref run_id,
+                        settings.recall_messages
+                    )
+                    prompt := "Execute this engineering workflow node.\nGoal: " +
+                        goal + "\nNode: " + node_id + "\nRole: " + role +
+                        "\nUse configured tools when evidence or changes are needed. " +
+                        "Do not claim work you have not verified.\n\nRecall:\n" +
+                        recall + "\n\nWorkspace context:\n" + workspace
+                    child_settings := str(settings_source)
+                    child_run_id := str(run_id)
+                    child_node_id := str(node_id)
+                    child_role := str(role)
+                    node_ids = vec_push(node_ids, node_id)
+                    tasks = vec_push(
+                        tasks,
+                        sp invoke_isolated_session(
+                            child_settings,
+                            child_run_id,
+                            child_node_id,
+                            child_role,
+                            prompt
+                        )
+                    )
+                results := await_all(tasks)
+                # Every started task must be joined into durable state even if
+                # a sibling requests intervention.
+                wh results.len() > 0
+                    (remaining_results, next_result) := vec_pop(results)
+                    results = remaining_results
+                    (remaining_ids, next_id) := vec_pop(node_ids)
+                    node_ids = remaining_ids
+                    result := m next_result
+                        Some(value) -> value
+                        None -> failed_agent_result("parallel task returned no result")
+                    node_id := m next_id
+                        Some(value) -> value
+                        None -> ""
+                    state = apply_live_node_result(
+                        ref settings,
+                        ref graph,
+                        ref db,
+                        state,
+                        ref node_id,
+                        ref goal,
+                        result,
+                        str(api_key)
+                    )
+                    maybe_compact(
+                        ref settings,
+                        ref db,
+                        ref run_id,
+                        str(api_key)
+                    )
+                    m persist_workflow_state(ref db, ref state)
+                        Some(error) ->
+                            state = set_workflow_status(
+                                state,
+                                "awaiting_intervention"
+                            )
+                            state = append_event(
+                                state,
+                                str(node_id),
+                                "run_paused",
+                                "event journal write failed: " + error
+                            )
+                        None -> state = state
+                    total_turns = total_turns + 1
+    if workflow_status(ref state) == "running"
+        state = set_workflow_status(state, "awaiting_intervention")
+        state = append_event(
+            state,
+            "",
+            "run_paused",
+            "configured workflow-turn budget exhausted"
+        )
+    m persist_workflow_state(ref db, ref state)
+        Some(error) ->
+            state = set_workflow_status(state, "awaiting_intervention")
+            state = append_event(
+                state,
+                "",
+                "run_paused",
+                "final event journal write failed: " + error
+            )
+            retry_persist := persist_workflow_state(ref db, ref state)
+        None -> state = state
+    status_update := update_run_status(
+        ref db,
+        run_id,
+        workflow_status(ref state)
+    )
+    state
+
+@pre(settings.max_agent_turns > 0)
+@pre(graph.nodes.len() > 0, "live workflow requires a graph node")
+@pre(goal.len() > 0, "live workflow goal must not be empty")
+@pre(api_key.len() > 0, "live workflow API key must not be empty")
+pub f run_live_workflow(
+    ref settings: ForgeSettings,
+    ref graph: WorkflowGraph,
+    ref db: Database,
+    goal: Str,
+    workspace: Str,
+    api_key: Str,
+    settings_source: Str,
+    graph_source: Str
+) -> WorkflowState!Str
+    run_id := uuid_v4()
+    m create_run(
+        ref db,
+        str(run_id),
+        str(goal),
+        forge_execution_digest(ref settings, ref graph_source)
+    )
+        Some(error) -> Err("could not create durable run: " + error)
+        None ->
+            state := initial_state(ref graph, str(run_id))
+            m persist_workflow_state(ref db, ref state)
+                Some(error) ->
+                    Err("could not persist initial workflow state: " + error)
+                None ->
+                    Ok(
+                        continue_live_workflow(
+                            ref settings,
+                            ref graph,
+                            ref db,
+                            goal,
+                            workspace,
+                            api_key,
+                            settings_source,
+                            state
+                        )
+                    )
+
+@pre(run_id.len() > 0, "resume run id must not be empty")
+@pre(api_key.len() > 0, "resume API key must not be empty")
+pub f resume_live_workflow(
+    ref settings: ForgeSettings,
+    ref graph: WorkflowGraph,
+    ref db: Database,
+    run_id: Str,
+    workspace: Str,
+    api_key: Str,
+    settings_source: Str,
+    graph_source: Str
+) -> WorkflowState!Str
+    expected_digest := forge_execution_digest(ref settings, ref graph_source)
+    m load_run_settings_digest(ref db, ref run_id)
+        Err(error) -> Err(error)
+        Ok(digest) ->
+            if digest != expected_digest
+                Err("settings digest changed; refusing unsafe resume")
+            else
+                m load_run_goal(ref db, ref run_id)
+                    Err(error) -> Err(error)
+                    Ok(goal) ->
+                        m load_events(ref db, ref run_id)
+                            Err(error) -> Err(error)
+                            Ok(events) ->
+                                if events.len() == 0
+                                    Err("run has no durable events")
+                                else
+                                    state := replay_trace(
+                                        ref graph,
+                                        ref events,
+                                        str(run_id)
+                                    )
+                                    status := workflow_status(ref state)
+                                    if status == "completed" || status == "failed" || status == "cancelled"
+                                        Err("terminal runs cannot be resumed")
+                                    else
+                                        state.status = "running"
+                                        state = append_event(
+                                            state,
+                                            "",
+                                            "run_resumed",
+                                            "durable event replay completed"
+                                        )
+                                        Ok(
+                                            continue_live_workflow(
+                                                ref settings,
+                                                ref graph,
+                                                ref db,
+                                                goal,
+                                                workspace,
+                                                api_key,
+                                                settings_source,
+                                                state
+                                            )
+                                        )

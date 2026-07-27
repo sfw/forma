@@ -1,8 +1,18 @@
-# FORMA Language Reference
+# Forma 0.2 Language Reference
 
-A progressive guide to the FORMA programming language.
+A progressive guide to the implemented Forma 0.2 prototype.
 
-FORMA is an AI-optimized systems programming language that delivers memory safety without lifetimes, concise syntax that costs fewer tokens, and grammar-constrained generation for correct-by-construction code.
+Forma is interpreter-first, with affine source semantics, inferred loans,
+capability-gated effects, and tiered verification. It remains 0.x: the compiler,
+generated grammar, generated builtin metadata, and feature profiles are more
+authoritative than historical planning documents.
+
+Normative companion sources:
+
+- `planning/design/FORMA_0_2_SEMANTICS.md` — semantic baseline
+- `docs/profiles.md` — support and backend boundaries
+- `docs/grammar.ebnf` and `docs/grammar.json` — generated grammar
+- `docs/builtins.json` — generated builtin ownership/effect/profile metadata
 
 ---
 
@@ -22,12 +32,15 @@ FORMA is an AI-optimized systems programming language that delivers memory safet
 - [Closures & Higher-Order Functions](#closures--higher-order-functions)
 - [Generics](#generics)
 - [Traits & Implementations](#traits--implementations)
+- [Ownership](#ownership)
 - [References](#references)
+- [Effects & Capabilities](#effects--capabilities)
 - [Contracts](#contracts)
 - [Modules & Imports](#modules--imports)
 - [Async & Concurrency](#async--concurrency)
 - [Standard Library Overview](#standard-library-overview)
 - [Tooling](#tooling)
+- [Feature Profiles](#feature-profiles)
 - [For AI Developers](#for-ai-developers)
 
 ---
@@ -63,7 +76,10 @@ Every FORMA program starts at `main`. By default, `main` returns nothing (unit).
 
 ### Key Design Choices
 
-**Why short keywords?** Every token costs money in LLM API calls. `f` instead of `fn` or `function`, `s` instead of `struct`, `m` instead of `match`. FORMA reduces token usage by ~38% compared to Rust.
+**Why short keywords?** Concise canonical spellings reduce source size and make
+the grammar predictable. Readable long aliases exist for many control and
+concurrency forms. End-to-end token and repair-cost improvements remain an
+experimental question, not a fixed percentage claim.
 
 **Why indentation-based?** Braces are a leading source of syntax errors in AI-generated code. Indentation is unambiguous and reduces the grammar's complexity.
 
@@ -108,26 +124,30 @@ f main()
 
 ## Variables & Mutability
 
-Variables are declared with `:=` (walrus operator). All variables are mutable by default:
+`=` creates an immutable binding. `:=` creates or updates a mutable binding:
 
 ```forma
 f main()
-    x := 42          # Type inferred as Int
-    name := "Alice"   # Type inferred as Str
-    pi := 3.14159     # Type inferred as Float
+    limit = 42          # immutable Int
+    name = "Alice"      # immutable Str
+    pi = 3.14159        # immutable Float
+    count := 0          # mutable Int
 
     # Reassignment uses :=
-    x := x + 1
-    print(x)          # 43
+    count := count + 1
+    print(count)        # 1
 ```
 
 You can add explicit type annotations:
 
 ```forma
 f main()
-    x: Int = 42
-    name: Str = "Alice"
+    limit: Int = 42
+    buffer: [Int] := vec_new()
 ```
+
+These operators describe mutability, not ownership. Assigning a non-`Copy` value
+to another binding moves it unless the value is explicitly cloned.
 
 ---
 
@@ -797,9 +817,25 @@ f print_area[T](shape: T) -> Unit where T: Area + Display
 
 ---
 
+## Ownership
+
+Ordinary non-`Copy` values are affine. They may move or be dropped, but cannot be
+used after a move or duplicated implicitly. Passing to an owned parameter,
+assigning to another binding, returning, or destructuring by value moves the
+value. `clone(value)` explicitly duplicates a `Clone` value; `mv value` may force
+or document a move.
+
+The compiler tracks initialized places and partial moves. Every initialized owned
+place is destroyed exactly once. `Copy`, `Clone`, `Drop`, `Send`, and `Sync` are
+compiler-known traits with structural validation; a type with `Drop` is not
+`Copy`.
+
 ## References
 
-FORMA uses **second-class references** — references exist only as function parameters, never in structs or return types. This eliminates lifetime annotations entirely.
+Forma uses **second-class references**. They cannot be stored in ordinary
+aggregates, captured by escaping closures, or sent to another task. A returned
+reference is permitted only when it is derived from a reference parameter under
+the reference-elision rules. Users do not write lifetime parameters.
 
 ### Ref Parameters
 
@@ -835,13 +871,15 @@ Like Rust, FORMA enforces borrow safety:
 - Only one `ref mut` borrow at a time
 - Cannot have `ref` and `ref mut` borrows simultaneously
 
-The difference: since references are second-class, these rules are trivially checkable without lifetime analysis.
+Loan regions are inferred with non-lexical analysis. “Second-class” narrows the
+problem; it does not make ownership or provenance checks trivial.
 
 ---
 
 ## Contracts
 
-Design-by-contract with `@pre` and `@post` annotations:
+Design-by-contract with function `@pre`/`@post` annotations and struct `@inv`
+annotations:
 
 ```forma
 @pre(n >= 0, "n must be non-negative")
@@ -850,6 +888,43 @@ f factorial(n: Int) -> Int
     if n <= 1 then 1
     else n * factorial(n - 1)
 ```
+
+### Struct Invariants
+
+Place one or more `@inv(condition[, "message"])` annotations immediately before
+a named struct. Its fields are in scope by name:
+
+```forma
+@inv(balance >= 0, "balance cannot be negative")
+@inv(currency.len() == 3, "currency must be an ISO-style code")
+s Account
+    balance: Int
+    currency: Str
+```
+
+An invariant defines every valid externally observable `Account`. The Hosted
+interpreter checks it:
+
+1. after a struct literal is fully initialized;
+2. when the value enters a function;
+3. when the value is returned from a function; and
+4. when a `ref mut` parameter is released to its caller.
+
+An exclusive mutation may temporarily make related fields inconsistent while
+the function body is running, but it must restore the invariant before return.
+`old(...)` and `result` are not available in an invariant; they describe
+transitions, while an invariant describes one value. Invariants currently
+require named structs.
+
+External JSON, TOML, database rows, and network responses remain untrusted.
+Validate them in a fallible decoder before constructing an invariant-bearing
+value. Invariant failure is a programming defect, not an expected input error.
+
+`forma explain` includes invariant clauses and their runtime boundaries.
+`forma verify --report` counts them as obligations and reports formal
+preservation as `UNKNOWN`; the current SMT subset does not prove struct
+invariant preservation. The 0.2 LLVM path type-checks invariant declarations but
+does not yet inject native runtime checks.
 
 Contracts are checked at runtime by default:
 
@@ -984,6 +1059,12 @@ forma verify src --report --format json --examples 20 --seed 42
 
 # Human-readable report
 forma verify src --report --format human
+
+# Check the complete supported finite domain
+forma verify src --level exhaustive --max-domain 4096 --report
+
+# Attempt proof over the Experimental pure subset
+forma verify src --level formal --report
 ```
 
 Verification runs with capabilities revoked by default (no file/network/exec side effects) unless `--allow-side-effects` is explicitly set. This makes it CI-safe and reproducible.
@@ -999,6 +1080,26 @@ f sort(values: [Int]) -> [Int]
 ```
 
 ---
+
+## Effects & Capabilities
+
+Effects describe authority a function may use; runtime capabilities grant it to
+one execution. Effects are inferred through direct calls. Every effectful builtin
+declares its effect, capability, parameter ownership, and backend support in the
+generated builtin registry.
+
+```bash
+forma run reader.forma --allow-read
+forma run writer.forma --allow-write
+forma run client.forma --allow-network
+forma run tool.forma --allow-exec
+forma run configured.forma --allow-env
+forma run ffi.forma --allow-unsafe
+```
+
+Use least privilege. `--allow-all` grants broad host authority. Capability denial,
+execution bounds, and checked interpreter handles provide containment, but are not
+a complete hostile-code sandbox; untrusted execution may require OS isolation.
 
 ## Modules & Imports
 
@@ -1062,6 +1163,12 @@ as f main()
     print("Both complete!")
 ```
 
+Task captures move into the child and must satisfy compiler-known `Send`.
+References cannot cross task boundaries. Task handles are affine and must be
+awaited, cancelled, returned, or explicitly detached. Sending through a channel
+moves the value. Cancellation, deadlines, task limits, and a subset of parent
+capabilities propagate to children.
+
 ### Channels
 
 Send messages between concurrent tasks:
@@ -1093,7 +1200,10 @@ mutex_unlock(mtx)
 
 ## Standard Library Overview
 
-FORMA includes 316+ builtin functions. Here are the key categories:
+Forma’s compiler-provided surface is generated into `docs/builtins.json`, including
+exact signatures, ownership modes, effects, capabilities, and backend support.
+`docs/builtins.md` is its generated human-readable index. The categories below are
+a convenient overview, not an independent inventory.
 
 ### I/O
 
@@ -1174,6 +1284,7 @@ Requires `--allow-read` and/or `--allow-write` capability flags:
 | `dir_list(path)` | List directory contents |
 | `dir_create(path)` | Create directory |
 | `path_join(a, b)` | Join path segments |
+| `path_resolve_within(root, relative)` | Canonicalize a relative path and reject traversal or symlink escape |
 
 ### JSON
 
@@ -1195,6 +1306,7 @@ Requires `--allow-network` capability flag:
 | `http_get(url)` | HTTP GET request |
 | `http_post(url, body)` | HTTP POST request |
 | `http_post_json(url, json)` | POST with JSON |
+| `http_request(method, url, body, headers, timeout_ms, follow_redirects)` | General authenticated HTTP request with explicit redirect and timeout policy |
 | `http_serve(port, handler)` | Start HTTP server |
 | `tcp_connect(host, port)` | TCP connection |
 | `tcp_read(conn)` | Read from TCP |
@@ -1208,17 +1320,43 @@ Capability-gated groups:
 - `--allow-env`: environment variable builtins (`env_get`, `env_set`, `env_remove`, `env_vars`)
 - `--allow-unsafe`: pointer/memory allocation and low-level unsafe builtins
 
-### Database (SQLite)
+For agent and automation tools, prefer
+`process_run(program, args, cwd, environment, allowed_programs, timeout_ms,
+max_output_chars)`. It invokes a program directly without shell parsing,
+requires an exact allowlist match, clears the inherited environment, applies a
+deadline, terminates the process group on timeout, and returns bounded stdout,
+stderr, and exit status. `path_resolve_within` is the corresponding canonical
+workspace-containment primitive.
+
+### Database (SQLite and PostgreSQL)
+
+SQLite is the local embedded backend. PostgreSQL is the authenticated remote
+backend and requires `--allow-network`. Keep PostgreSQL connection URLs in
+environment variables and read them with `env_get`; do not place credentials in
+source code or settings files.
 
 | Function | Description |
 |----------|-------------|
 | `db_open(path)` | Open SQLite database |
 | `db_open_memory()` | In-memory database |
+| `db_connect_postgres(url)` | Connect to PostgreSQL, including TLS options from the URL |
 | `db_execute(db, sql)` | Execute SQL |
 | `db_query(db, sql)` | Query rows |
 | `db_close(db)` | Close database |
 | `row_get_int(row, col)` | Get integer column |
 | `row_get_str(row, col)` | Get string column |
+
+Prepared statements and row access work across both backends. Forma source uses
+`?` placeholders for both SQLite and PostgreSQL; PostgreSQL conversion is
+quote/comment aware. Write `??` outside a quoted region when PostgreSQL SQL
+needs a literal question-mark operator.
+
+### TOML
+
+| Function | Description |
+|----------|-------------|
+| `toml_parse(source)` | Parse TOML into `Json` |
+| `toml_stringify(value)` | Serialize compatible `Json` as TOML |
 
 ### Random
 
@@ -1298,6 +1436,9 @@ forma explain <file> --examples=3 --seed 42 --format json
 forma explain <file> --max-examples 3 --seed 42 --format json
 forma verify <file-or-dir> --report --format human
 forma verify <file-or-dir> --report --format json --examples 20 --seed 42
+forma verify <file-or-dir> --level test --report
+forma verify <file-or-dir> --level exhaustive --max-domain 4096 --report
+forma verify <file-or-dir> --level formal --report
 forma verify <file-or-dir> --report --max-steps 10000 --timeout 1000
 forma lex <file>                   # Dump tokens
 forma parse <file>                 # Dump AST
@@ -1332,11 +1473,16 @@ When running `forma verify`, capabilities are revoked by default. Only use `--al
 - `--examples` generates deterministic I/O samples when paired with `--seed`.
 - Use `--examples=N` or `--max-examples N` to request an explicit explain-example count.
 - `explain --examples` includes both satisfying examples and counterexamples that violate detected preconditions.
-- `forma verify --report` executes generated examples and emits per-function status:
-  - `PASS`: all generated examples satisfied contract checks
-  - `SKIP`: function could not be safely/meaningfully executed (for example, capability-restricted paths)
-  - `WARN`: no contracts defined
-  - `FAIL`: one or more generated examples violated checks or errored
+- `forma verify --report` emits explicit per-function confidence states:
+  - `UNCONTRACTED`: no contract obligation was declared
+  - `TESTED`: reproducible generated examples passed within reported bounds
+  - `COUNTEREXAMPLE`: an execution or model violated an obligation
+  - `EXHAUSTIVE`: every tuple in a supported finite domain was checked
+  - `PROVED`: supported SMT obligations were discharged
+  - `UNKNOWN`: unsupported, too large, timed out, or otherwise not proved
+  - `SKIPPED`: work was intentionally not attempted
+- `--level test|exhaustive|formal` selects the confidence mechanism.
+- Generated examples never produce `PROVED`; formal verification is Experimental.
 - Generated examples run side-effect safe by default; `--allow-side-effects` opts into full capabilities.
 - Resource controls for verify:
   - `--max-steps` limits interpreter steps per generated example
@@ -1384,18 +1530,34 @@ forma> greet("World")
 
 ---
 
+## Feature Profiles
+
+| Profile | Boundary |
+| --- | --- |
+| Core | Portable ownership-aware subset used for backend parity |
+| Hosted | Managed interpreter features including dynamic data, I/O, networking, databases, and concurrency handles |
+| Native | Selected runtime-backed facilities implemented by the native toolchain |
+| Experimental | Weaker compatibility guarantees, including whole-program LLVM parity and formal verification |
+
+Profile support propagates through direct calls. A function wrapping a Hosted-only
+operation remains Hosted. Consult `docs/profiles.md` and compiler support reports
+for exact boundaries.
+
 ## For AI Developers
 
 ### Grammar-Constrained Generation
 
-FORMA exports its grammar in EBNF and JSON formats, enabling constrained decoding. This means LLMs can generate only syntactically valid FORMA code:
+Forma exports its grammar in EBNF and JSON formats for compatible
+constrained-decoding systems:
 
 ```bash
 forma grammar --format ebnf > forma.ebnf
 forma grammar --format json > forma.json
 ```
 
-Use these grammars with constrained decoding toolkits (Outlines, guidance, llama.cpp grammars) to eliminate syntax errors at generation time.
+Grammar constraints can prevent many syntactically invalid generations. They do
+not establish type, ownership, capability, profile, or behavioral correctness.
+Always run the compiler after generation.
 
 ### Structured Errors for Self-Correction
 
@@ -1511,8 +1673,8 @@ For a dense, token-efficient reference designed to fit in LLM system prompts, se
 | `==`, `!=`, `<`, `<=`, `>`, `>=` | Comparison |
 | `&&`, `\|\|`, `!` | Logical |
 | `&`, `\|`, `^`, `<<`, `>>` | Bitwise |
-| `=` | Assignment (struct fields) |
-| `:=` | Variable binding / reassignment |
+| `=` | Immutable binding; also appears in declarations/initializers |
+| `:=` | Mutable binding creation or update |
 | `+=`, `-=`, `*=`, `/=`, `%=` | Compound assignment |
 | `?` | Error propagation |
 | `??` | Null coalescing |

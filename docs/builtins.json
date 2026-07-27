@@ -1,0 +1,5518 @@
+[
+  {
+    "name": "file_is_dir",
+    "signature": "(Str) -> Bool",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "ReadFile"
+    ],
+    "capability": "Read",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `file_is_dir`."
+  },
+  {
+    "name": "file_is_file",
+    "signature": "(Str) -> Bool",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "ReadFile"
+    ],
+    "capability": "Read",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `file_is_file`."
+  },
+  {
+    "name": "file_size",
+    "signature": "(Str) -> Int!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "ReadFile"
+    ],
+    "capability": "Read",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `file_size`."
+  },
+  {
+    "name": "dns_lookup",
+    "signature": "(Str) -> [Str]!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `dns_lookup`."
+  },
+  {
+    "name": "dns_reverse_lookup",
+    "signature": "(Str) -> Str!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `dns_reverse_lookup`."
+  },
+  {
+    "name": "tcp_accept",
+    "signature": "(TcpListener) -> TcpStream!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `tcp_accept`."
+  },
+  {
+    "name": "tcp_close",
+    "signature": "(TcpStream) -> ()",
+    "typeParameters": [],
+    "parameterModes": [
+      "Owned"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `tcp_close`."
+  },
+  {
+    "name": "tcp_listener_close",
+    "signature": "(TcpListener) -> ()",
+    "typeParameters": [],
+    "parameterModes": [
+      "Owned"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `tcp_listener_close`."
+  },
+  {
+    "name": "tcp_local_addr",
+    "signature": "(TcpStream) -> Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `tcp_local_addr`."
+  },
+  {
+    "name": "tcp_peer_addr",
+    "signature": "(TcpStream) -> Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `tcp_peer_addr`."
+  },
+  {
+    "name": "tcp_read",
+    "signature": "(TcpStream, Int) -> Str!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `tcp_read`."
+  },
+  {
+    "name": "tcp_read_exact",
+    "signature": "(TcpStream, Int) -> Str!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `tcp_read_exact`."
+  },
+  {
+    "name": "tcp_read_line",
+    "signature": "(TcpStream) -> Str!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `tcp_read_line`."
+  },
+  {
+    "name": "tcp_set_timeout",
+    "signature": "(TcpStream, Int) -> ()",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `tcp_set_timeout`."
+  },
+  {
+    "name": "tcp_write",
+    "signature": "(TcpStream, Str) -> Int!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `tcp_write`."
+  },
+  {
+    "name": "tcp_write_all",
+    "signature": "(TcpStream, Str) -> ()!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `tcp_write_all`."
+  },
+  {
+    "name": "udp_close",
+    "signature": "(UdpSocket) -> ()",
+    "typeParameters": [],
+    "parameterModes": [
+      "Owned"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `udp_close`."
+  },
+  {
+    "name": "udp_connect",
+    "signature": "(UdpSocket, Str, Int) -> ()!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `udp_connect`."
+  },
+  {
+    "name": "udp_recv",
+    "signature": "(UdpSocket, Int) -> Str!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `udp_recv`."
+  },
+  {
+    "name": "udp_recv_from",
+    "signature": "(UdpSocket, Int) -> (Str, Str, Int)!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `udp_recv_from`."
+  },
+  {
+    "name": "udp_send",
+    "signature": "(UdpSocket, Str) -> Int!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `udp_send`."
+  },
+  {
+    "name": "udp_send_to",
+    "signature": "(UdpSocket, Str, Int, Str) -> Int!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared",
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `udp_send_to`."
+  },
+  {
+    "name": "tls_close",
+    "signature": "(TlsStream) -> ()",
+    "typeParameters": [],
+    "parameterModes": [
+      "Owned"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `tls_close`."
+  },
+  {
+    "name": "tls_read",
+    "signature": "(TlsStream, Int) -> Str!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `tls_read`."
+  },
+  {
+    "name": "tls_write",
+    "signature": "(TlsStream, Str) -> Int!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `tls_write`."
+  },
+  {
+    "name": "db_close",
+    "signature": "(Database) -> ()",
+    "typeParameters": [],
+    "parameterModes": [
+      "Owned"
+    ],
+    "effects": [
+      "Database"
+    ],
+    "capability": "Write",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `db_close`."
+  },
+  {
+    "name": "db_execute",
+    "signature": "(Database, Str) -> Int!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Database"
+    ],
+    "capability": "Write",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `db_execute`."
+  },
+  {
+    "name": "db_execute_prepared",
+    "signature": "∀?64. (Statement, [?64]) -> Int!Str",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Database"
+    ],
+    "capability": "Write",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `db_execute_prepared`."
+  },
+  {
+    "name": "db_open_memory",
+    "signature": "() -> Database!Str",
+    "typeParameters": [],
+    "parameterModes": [],
+    "effects": [
+      "Database"
+    ],
+    "capability": "Write",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `db_open_memory`."
+  },
+  {
+    "name": "db_prepare",
+    "signature": "(Database, Str) -> Statement!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Database"
+    ],
+    "capability": "Write",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `db_prepare`."
+  },
+  {
+    "name": "db_query",
+    "signature": "(Database, Str) -> [Row]!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Database"
+    ],
+    "capability": "Write",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `db_query`."
+  },
+  {
+    "name": "db_query_one",
+    "signature": "(Database, Str) -> Row?!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Database"
+    ],
+    "capability": "Write",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `db_query_one`."
+  },
+  {
+    "name": "db_query_prepared",
+    "signature": "∀?65. (Statement, [?65]) -> [Row]!Str",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Database"
+    ],
+    "capability": "Write",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `db_query_prepared`."
+  },
+  {
+    "name": "args",
+    "signature": "() -> [Str]",
+    "typeParameters": [],
+    "parameterModes": [],
+    "effects": [
+      "Environment"
+    ],
+    "capability": "Env",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `args`."
+  },
+  {
+    "name": "cwd",
+    "signature": "() -> Str",
+    "typeParameters": [],
+    "parameterModes": [],
+    "effects": [
+      "Environment"
+    ],
+    "capability": "Env",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `cwd`."
+  },
+  {
+    "name": "home_dir",
+    "signature": "() -> Str?",
+    "typeParameters": [],
+    "parameterModes": [],
+    "effects": [
+      "Environment"
+    ],
+    "capability": "Env",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `home_dir`."
+  },
+  {
+    "name": "temp_dir",
+    "signature": "() -> Str",
+    "typeParameters": [],
+    "parameterModes": [],
+    "effects": [
+      "Environment"
+    ],
+    "capability": "Env",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `temp_dir`."
+  },
+  {
+    "name": "pid",
+    "signature": "() -> Int",
+    "typeParameters": [],
+    "parameterModes": [],
+    "effects": [
+      "Environment"
+    ],
+    "capability": "Env",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `pid`."
+  },
+  {
+    "name": "file_read",
+    "signature": "(Str) -> Result[Str, Str]",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "ReadFile"
+    ],
+    "capability": "Read",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `file_read`."
+  },
+  {
+    "name": "file_read_bytes",
+    "signature": "(Str) -> [Int]!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "ReadFile"
+    ],
+    "capability": "Read",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `file_read_bytes`."
+  },
+  {
+    "name": "file_exists",
+    "signature": "(Str) -> Bool",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "ReadFile"
+    ],
+    "capability": "Read",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `file_exists`."
+  },
+  {
+    "name": "dir_list",
+    "signature": "(Str) -> [Str]!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "ReadFile"
+    ],
+    "capability": "Read",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `dir_list`."
+  },
+  {
+    "name": "path_resolve_within",
+    "signature": "(Str, Str) -> Str!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "ReadFile"
+    ],
+    "capability": "Read",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `path_resolve_within`."
+  },
+  {
+    "name": "http_file_response",
+    "signature": "(Str) -> HttpResponse!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "ReadFile"
+    ],
+    "capability": "Read",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `http_file_response`."
+  },
+  {
+    "name": "file_write",
+    "signature": "(Str, Str) -> Result[(), Str]",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "WriteFile"
+    ],
+    "capability": "Write",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `file_write`."
+  },
+  {
+    "name": "file_write_bytes",
+    "signature": "(Str, [Int]) -> ()!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "WriteFile"
+    ],
+    "capability": "Write",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `file_write_bytes`."
+  },
+  {
+    "name": "file_append",
+    "signature": "(Str, Str) -> Result[(), Str]",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "WriteFile"
+    ],
+    "capability": "Write",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `file_append`."
+  },
+  {
+    "name": "file_copy",
+    "signature": "(Str, Str) -> ()!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "WriteFile"
+    ],
+    "capability": "Write",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `file_copy`."
+  },
+  {
+    "name": "file_move",
+    "signature": "(Str, Str) -> ()!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "WriteFile"
+    ],
+    "capability": "Write",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `file_move`."
+  },
+  {
+    "name": "file_remove",
+    "signature": "(Str) -> ()!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "WriteFile"
+    ],
+    "capability": "Write",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `file_remove`."
+  },
+  {
+    "name": "dir_create",
+    "signature": "(Str) -> ()!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "WriteFile"
+    ],
+    "capability": "Write",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `dir_create`."
+  },
+  {
+    "name": "dir_create_all",
+    "signature": "(Str) -> ()!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "WriteFile"
+    ],
+    "capability": "Write",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `dir_create_all`."
+  },
+  {
+    "name": "dir_remove",
+    "signature": "(Str) -> ()!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "WriteFile"
+    ],
+    "capability": "Write",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `dir_remove`."
+  },
+  {
+    "name": "dir_remove_all",
+    "signature": "(Str) -> ()!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "WriteFile"
+    ],
+    "capability": "Write",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `dir_remove_all`."
+  },
+  {
+    "name": "chdir",
+    "signature": "(Str) -> ()!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "WriteFile"
+    ],
+    "capability": "Write",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `chdir`."
+  },
+  {
+    "name": "db_open",
+    "signature": "(Str) -> Database!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Database"
+    ],
+    "capability": "Write",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `db_open`."
+  },
+  {
+    "name": "db_connect_postgres",
+    "signature": "(Str) -> Database!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Database"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `db_connect_postgres`."
+  },
+  {
+    "name": "http_get",
+    "signature": "(Str) -> (Int, Str, {Str:Str})!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `http_get`."
+  },
+  {
+    "name": "http_post",
+    "signature": "(Str, Str) -> (Int, Str, {Str:Str})!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `http_post`."
+  },
+  {
+    "name": "http_post_json",
+    "signature": "(Str, Json) -> (Int, Str, {Str:Str})!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `http_post_json`."
+  },
+  {
+    "name": "http_request",
+    "signature": "(Str, Str, Str, Map[Str], Int, Bool) -> (Int, Str, {Str:Str})!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared",
+      "Shared",
+      "Shared",
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `http_request`."
+  },
+  {
+    "name": "http_request_json",
+    "signature": "(Str, Str, Json, Map[Str]) -> (Int, Str, {Str:Str})!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared",
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `http_request_json`."
+  },
+  {
+    "name": "http_put",
+    "signature": "(Str, Str) -> (Int, Str, {Str:Str})!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `http_put`."
+  },
+  {
+    "name": "http_delete",
+    "signature": "(Str) -> (Int, Str, {Str:Str})!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `http_delete`."
+  },
+  {
+    "name": "http_serve",
+    "signature": "∀?63. (Int, (HttpRequest) -> HttpResponse) -> ()!Str",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `http_serve`."
+  },
+  {
+    "name": "tcp_connect",
+    "signature": "(Str, Int) -> TcpStream!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `tcp_connect`."
+  },
+  {
+    "name": "tcp_listen",
+    "signature": "(Str, Int) -> TcpListener!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `tcp_listen`."
+  },
+  {
+    "name": "udp_bind",
+    "signature": "(Str, Int) -> UdpSocket!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `udp_bind`."
+  },
+  {
+    "name": "tls_connect",
+    "signature": "(Str, Int) -> TlsStream!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Network"
+    ],
+    "capability": "Network",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `tls_connect`."
+  },
+  {
+    "name": "exec",
+    "signature": "(Str) -> (Str, Str, Int)!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Process"
+    ],
+    "capability": "Exec",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `exec`."
+  },
+  {
+    "name": "process_run",
+    "signature": "(Str, [Str], Str, Map[Str], [Str], Int, Int) -> (Str, Str, Int)!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared",
+      "Shared",
+      "Shared",
+      "Shared",
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Process"
+    ],
+    "capability": "Exec",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `process_run`."
+  },
+  {
+    "name": "exit",
+    "signature": "(Int) -> !",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Process"
+    ],
+    "capability": "Exec",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `exit`."
+  },
+  {
+    "name": "env_get",
+    "signature": "(Str) -> Option[Str]",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Environment"
+    ],
+    "capability": "Env",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `env_get`."
+  },
+  {
+    "name": "env_set",
+    "signature": "(Str, Str) -> ()",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Environment"
+    ],
+    "capability": "Env",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `env_set`."
+  },
+  {
+    "name": "env_remove",
+    "signature": "(Str) -> ()",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Environment"
+    ],
+    "capability": "Env",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `env_remove`."
+  },
+  {
+    "name": "env_vars",
+    "signature": "() -> {Str:Str}",
+    "typeParameters": [],
+    "parameterModes": [],
+    "effects": [
+      "Environment"
+    ],
+    "capability": "Env",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `env_vars`."
+  },
+  {
+    "name": "ptr_null",
+    "signature": "() -> *Void",
+    "typeParameters": [],
+    "parameterModes": [],
+    "effects": [
+      "Unsafe"
+    ],
+    "capability": "Unsafe",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `ptr_null`."
+  },
+  {
+    "name": "ptr_is_null",
+    "signature": "(*Void) -> Bool",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Unsafe"
+    ],
+    "capability": "Unsafe",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `ptr_is_null`."
+  },
+  {
+    "name": "ptr_offset",
+    "signature": "(*Void, Int) -> *Void",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Unsafe"
+    ],
+    "capability": "Unsafe",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `ptr_offset`."
+  },
+  {
+    "name": "ptr_addr",
+    "signature": "(*Void) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Unsafe"
+    ],
+    "capability": "Unsafe",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `ptr_addr`."
+  },
+  {
+    "name": "ptr_from_addr",
+    "signature": "(Int) -> *Void",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Unsafe"
+    ],
+    "capability": "Unsafe",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `ptr_from_addr`."
+  },
+  {
+    "name": "str_to_cstr",
+    "signature": "(Str) -> *Void",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Unsafe"
+    ],
+    "capability": "Unsafe",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `str_to_cstr`."
+  },
+  {
+    "name": "cstr_to_str",
+    "signature": "(*Void) -> Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Unsafe"
+    ],
+    "capability": "Unsafe",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `cstr_to_str`."
+  },
+  {
+    "name": "cstr_to_str_len",
+    "signature": "(*Void, Int) -> Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Unsafe"
+    ],
+    "capability": "Unsafe",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `cstr_to_str_len`."
+  },
+  {
+    "name": "cstr_free",
+    "signature": "(*Void) -> ()",
+    "typeParameters": [],
+    "parameterModes": [
+      "Owned"
+    ],
+    "effects": [
+      "Unsafe"
+    ],
+    "capability": "Unsafe",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `cstr_free`."
+  },
+  {
+    "name": "alloc",
+    "signature": "(Int) -> *Void",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Unsafe"
+    ],
+    "capability": "Unsafe",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `alloc`."
+  },
+  {
+    "name": "alloc_zeroed",
+    "signature": "(Int) -> *Void",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Unsafe"
+    ],
+    "capability": "Unsafe",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `alloc_zeroed`."
+  },
+  {
+    "name": "dealloc",
+    "signature": "(*Void, Int) -> ()",
+    "typeParameters": [],
+    "parameterModes": [
+      "Owned",
+      "Shared"
+    ],
+    "effects": [
+      "Unsafe"
+    ],
+    "capability": "Unsafe",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `dealloc`."
+  },
+  {
+    "name": "mem_copy",
+    "signature": "(*Void, *Void, Int) -> ()",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Unsafe"
+    ],
+    "capability": "Unsafe",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `mem_copy`."
+  },
+  {
+    "name": "mem_set",
+    "signature": "(*Void, Int, Int) -> ()",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Unsafe"
+    ],
+    "capability": "Unsafe",
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Unsupported",
+    "verification": "Unsupported",
+    "documentation": "Capability-gated builtin `mem_set`."
+  },
+  {
+    "name": "print",
+    "signature": "∀?6. (?6) -> ()",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Console"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `print`."
+  },
+  {
+    "name": "eprintln",
+    "signature": "(Str) -> ()",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Console"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `eprintln`."
+  },
+  {
+    "name": "debug",
+    "signature": "∀?7. (?7) -> ()",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Console"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `debug`."
+  },
+  {
+    "name": "error",
+    "signature": "∀?9. (?9) -> ()",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Console"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `error`."
+  },
+  {
+    "name": "info",
+    "signature": "∀?8. (?8) -> ()",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Console"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `info`."
+  },
+  {
+    "name": "log_debug",
+    "signature": "(Str) -> ()",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Console"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `log_debug`."
+  },
+  {
+    "name": "log_error",
+    "signature": "(Str) -> ()",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Console"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `log_error`."
+  },
+  {
+    "name": "log_info",
+    "signature": "(Str) -> ()",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Console"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `log_info`."
+  },
+  {
+    "name": "log_warn",
+    "signature": "(Str) -> ()",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Console"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `log_warn`."
+  },
+  {
+    "name": "log_set_format",
+    "signature": "(Str) -> ()",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Console"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `log_set_format`."
+  },
+  {
+    "name": "log_set_level",
+    "signature": "(Str) -> ()",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Console"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `log_set_level`."
+  },
+  {
+    "name": "time_now",
+    "signature": "() -> Int",
+    "typeParameters": [],
+    "parameterModes": [],
+    "effects": [
+      "Clock"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `time_now`."
+  },
+  {
+    "name": "time_now_ms",
+    "signature": "() -> Int",
+    "typeParameters": [],
+    "parameterModes": [],
+    "effects": [
+      "Clock"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `time_now_ms`."
+  },
+  {
+    "name": "time_sleep",
+    "signature": "(Int) -> ()",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Clock"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `time_sleep`."
+  },
+  {
+    "name": "random",
+    "signature": "() -> Float",
+    "typeParameters": [],
+    "parameterModes": [],
+    "effects": [
+      "Random"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `random`."
+  },
+  {
+    "name": "random_int",
+    "signature": "(Int, Int) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [
+      "Random"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `random_int`."
+  },
+  {
+    "name": "random_bool",
+    "signature": "() -> Bool",
+    "typeParameters": [],
+    "parameterModes": [],
+    "effects": [
+      "Random"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `random_bool`."
+  },
+  {
+    "name": "random_choice",
+    "signature": "∀?44. ([?44]) -> ?44",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Random"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `random_choice`."
+  },
+  {
+    "name": "random_shuffle",
+    "signature": "∀?67. ([?67]) -> [?67]",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Random"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `random_shuffle`."
+  },
+  {
+    "name": "shuffle",
+    "signature": "∀?62. ([?62]) -> [?62]",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Random"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `shuffle`."
+  },
+  {
+    "name": "uuid_v4",
+    "signature": "() -> Str",
+    "typeParameters": [],
+    "parameterModes": [],
+    "effects": [
+      "Random"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `uuid_v4`."
+  },
+  {
+    "name": "await_all",
+    "signature": "∀?46. ([Task[?46]]) -> [?46]",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Owned"
+    ],
+    "effects": [
+      "Concurrency"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `await_all`."
+  },
+  {
+    "name": "await_any",
+    "signature": "∀?47. ([Task[?47]]) -> ?47",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Owned"
+    ],
+    "effects": [
+      "Concurrency"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `await_any`."
+  },
+  {
+    "name": "channel_close",
+    "signature": "∀?53. (Sender[?53]) -> ()",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Concurrency"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `channel_close`."
+  },
+  {
+    "name": "channel_new",
+    "signature": "∀?48. (Int) -> (Sender[?48], Receiver[?48])",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Concurrency"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `channel_new`."
+  },
+  {
+    "name": "channel_recv",
+    "signature": "∀?50. (Receiver[?50]) -> ?50!Str",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Concurrency"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `channel_recv`."
+  },
+  {
+    "name": "channel_send",
+    "signature": "∀?49. (Sender[?49], ?49) -> ()!Str",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared",
+      "Owned"
+    ],
+    "effects": [
+      "Concurrency"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `channel_send`."
+  },
+  {
+    "name": "channel_try_recv",
+    "signature": "∀?52. (Receiver[?52]) -> ?52?",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Concurrency"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `channel_try_recv`."
+  },
+  {
+    "name": "channel_try_send",
+    "signature": "∀?51. (Sender[?51], ?51) -> Bool",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared",
+      "Owned"
+    ],
+    "effects": [
+      "Concurrency"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `channel_try_send`."
+  },
+  {
+    "name": "mutex_get",
+    "signature": "∀?58. (MutexGuard[?58]) -> ?58",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Concurrency"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `mutex_get`."
+  },
+  {
+    "name": "mutex_lock",
+    "signature": "∀?55. (Mutex[?55]) -> MutexGuard[?55]",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Concurrency"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `mutex_lock`."
+  },
+  {
+    "name": "mutex_new",
+    "signature": "∀?54. (?54) -> Mutex[?54]",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Concurrency"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `mutex_new`."
+  },
+  {
+    "name": "mutex_set",
+    "signature": "∀?59. (MutexGuard[?59], ?59) -> ()",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared",
+      "Owned"
+    ],
+    "effects": [
+      "Concurrency"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `mutex_set`."
+  },
+  {
+    "name": "mutex_try_lock",
+    "signature": "∀?56. (Mutex[?56]) -> MutexGuard[?56]?",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Concurrency"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `mutex_try_lock`."
+  },
+  {
+    "name": "mutex_unlock",
+    "signature": "∀?57. (MutexGuard[?57]) -> ()",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Concurrency"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `mutex_unlock`."
+  },
+  {
+    "name": "sleep_async",
+    "signature": "(Int) -> Future[()]",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Concurrency"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `sleep_async`."
+  },
+  {
+    "name": "timeout",
+    "signature": "∀?45. (Int, Future[?45]) -> ?45!Str",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared",
+      "Owned"
+    ],
+    "effects": [
+      "Concurrency"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `timeout`."
+  },
+  {
+    "name": "panic",
+    "signature": "(Str) -> !",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Panic"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `panic`."
+  },
+  {
+    "name": "assert",
+    "signature": "(Bool) -> ()",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [
+      "Panic"
+    ],
+    "capability": null,
+    "pure": false,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Unsupported",
+    "documentation": "Effectful compiler-provided builtin `assert`."
+  },
+  {
+    "name": "abs",
+    "signature": "(Int) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `abs`."
+  },
+  {
+    "name": "abs_float",
+    "signature": "(Float) -> Float",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `abs_float`."
+  },
+  {
+    "name": "acos",
+    "signature": "(Float) -> Float",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `acos`."
+  },
+  {
+    "name": "all",
+    "signature": "∀?76. ([?76], (?76) -> Bool) -> Bool",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `all`."
+  },
+  {
+    "name": "and_then",
+    "signature": "∀?80, ?81. (?80?, (?80) -> ?81?) -> ?81?",
+    "typeParameters": [
+      "T0",
+      "T1"
+    ],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `and_then`."
+  },
+  {
+    "name": "any",
+    "signature": "∀?75. ([?75], (?75) -> Bool) -> Bool",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `any`."
+  },
+  {
+    "name": "asin",
+    "signature": "(Float) -> Float",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `asin`."
+  },
+  {
+    "name": "atan2",
+    "signature": "(Float, Float) -> Float",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `atan2`."
+  },
+  {
+    "name": "base64_decode",
+    "signature": "(Str) -> Str!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `base64_decode`."
+  },
+  {
+    "name": "base64_decode_bytes",
+    "signature": "(Str) -> [Int]!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `base64_decode_bytes`."
+  },
+  {
+    "name": "base64_encode",
+    "signature": "(Str) -> Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `base64_encode`."
+  },
+  {
+    "name": "base64_encode_bytes",
+    "signature": "([Int]) -> Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `base64_encode_bytes`."
+  },
+  {
+    "name": "binary_search",
+    "signature": "([Int], Int) -> Int?",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `binary_search`."
+  },
+  {
+    "name": "ceil",
+    "signature": "(Float) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `ceil`."
+  },
+  {
+    "name": "char_is_alpha",
+    "signature": "(Char) -> Bool",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `char_is_alpha`."
+  },
+  {
+    "name": "char_is_alphanumeric",
+    "signature": "(Char) -> Bool",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `char_is_alphanumeric`."
+  },
+  {
+    "name": "char_is_digit",
+    "signature": "(Char) -> Bool",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `char_is_digit`."
+  },
+  {
+    "name": "char_is_whitespace",
+    "signature": "(Char) -> Bool",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `char_is_whitespace`."
+  },
+  {
+    "name": "char_to_int",
+    "signature": "(Char) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `char_to_int`."
+  },
+  {
+    "name": "char_to_str",
+    "signature": "(Char) -> Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `char_to_str`."
+  },
+  {
+    "name": "cos",
+    "signature": "(Float) -> Float",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `cos`."
+  },
+  {
+    "name": "duration_days",
+    "signature": "(Int) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `duration_days`."
+  },
+  {
+    "name": "duration_hours",
+    "signature": "(Int) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `duration_hours`."
+  },
+  {
+    "name": "duration_minutes",
+    "signature": "(Int) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `duration_minutes`."
+  },
+  {
+    "name": "duration_seconds",
+    "signature": "(Int) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `duration_seconds`."
+  },
+  {
+    "name": "exp",
+    "signature": "(Float) -> Float",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `exp`."
+  },
+  {
+    "name": "expect",
+    "signature": "∀?36. (Option[?36], Str) -> ?36",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `expect`."
+  },
+  {
+    "name": "filter",
+    "signature": "∀?72. ([?72], (?72) -> Bool) -> [?72]",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `filter`."
+  },
+  {
+    "name": "flatten",
+    "signature": "∀?79. (?79??) -> ?79?",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `flatten`."
+  },
+  {
+    "name": "floor",
+    "signature": "(Float) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `floor`."
+  },
+  {
+    "name": "from_cdouble",
+    "signature": "(CDouble) -> Float",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `from_cdouble`."
+  },
+  {
+    "name": "from_cfloat",
+    "signature": "(CFloat) -> Float",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `from_cfloat`."
+  },
+  {
+    "name": "from_cint",
+    "signature": "(CInt) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `from_cint`."
+  },
+  {
+    "name": "from_clong",
+    "signature": "(CLong) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `from_clong`."
+  },
+  {
+    "name": "from_csize",
+    "signature": "(CSize) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `from_csize`."
+  },
+  {
+    "name": "from_cuint",
+    "signature": "(CUInt) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `from_cuint`."
+  },
+  {
+    "name": "from_culong",
+    "signature": "(CULong) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `from_culong`."
+  },
+  {
+    "name": "gzip_compress",
+    "signature": "(Str) -> [Int]",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `gzip_compress`."
+  },
+  {
+    "name": "gzip_decompress",
+    "signature": "([Int]) -> Str!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `gzip_decompress`."
+  },
+  {
+    "name": "hash_string",
+    "signature": "(Str) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `hash_string`."
+  },
+  {
+    "name": "hex_decode",
+    "signature": "(Str) -> Str!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `hex_decode`."
+  },
+  {
+    "name": "hex_decode_bytes",
+    "signature": "(Str) -> [Int]!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `hex_decode_bytes`."
+  },
+  {
+    "name": "hex_encode",
+    "signature": "(Str) -> Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `hex_encode`."
+  },
+  {
+    "name": "hex_encode_bytes",
+    "signature": "([Int]) -> Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `hex_encode_bytes`."
+  },
+  {
+    "name": "http_json_response",
+    "signature": "(Int, Json) -> HttpResponse",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `http_json_response`."
+  },
+  {
+    "name": "http_redirect",
+    "signature": "(Str) -> HttpResponse",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `http_redirect`."
+  },
+  {
+    "name": "http_req_form",
+    "signature": "(HttpRequest) -> {Str:Str}",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `http_req_form`."
+  },
+  {
+    "name": "http_req_header",
+    "signature": "(HttpRequest, Str) -> Str?",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `http_req_header`."
+  },
+  {
+    "name": "http_req_json",
+    "signature": "(HttpRequest) -> Json!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `http_req_json`."
+  },
+  {
+    "name": "http_req_param",
+    "signature": "(HttpRequest, Str) -> Str?",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `http_req_param`."
+  },
+  {
+    "name": "http_request_new",
+    "signature": "(Str, Str, Str) -> HttpRequest",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `http_request_new`."
+  },
+  {
+    "name": "http_response",
+    "signature": "(Int, Str) -> HttpResponse",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `http_response`."
+  },
+  {
+    "name": "http_response_with_headers",
+    "signature": "(Int, Str, {Str:Str}) -> HttpResponse",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `http_response_with_headers`."
+  },
+  {
+    "name": "i32",
+    "signature": "(Int) -> i32",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `i32`."
+  },
+  {
+    "name": "i64",
+    "signature": "(Int) -> i64",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `i64`."
+  },
+  {
+    "name": "int_to_char",
+    "signature": "(Int) -> Char?",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `int_to_char`."
+  },
+  {
+    "name": "int_to_str",
+    "signature": "(Int) -> Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `int_to_str`."
+  },
+  {
+    "name": "is_err",
+    "signature": "∀?42, ?43. (Result[?42, ?43]) -> Bool",
+    "typeParameters": [
+      "T0",
+      "T1"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `is_err`."
+  },
+  {
+    "name": "is_none",
+    "signature": "∀?39. (Option[?39]) -> Bool",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `is_none`."
+  },
+  {
+    "name": "is_ok",
+    "signature": "∀?40, ?41. (Result[?40, ?41]) -> Bool",
+    "typeParameters": [
+      "T0",
+      "T1"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `is_ok`."
+  },
+  {
+    "name": "is_some",
+    "signature": "∀?38. (Option[?38]) -> Bool",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `is_some`."
+  },
+  {
+    "name": "json_array",
+    "signature": "() -> Json",
+    "typeParameters": [],
+    "parameterModes": [],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_array`."
+  },
+  {
+    "name": "json_array_get",
+    "signature": "(Json, Int) -> Json?",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_array_get`."
+  },
+  {
+    "name": "json_array_len",
+    "signature": "(Json) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_array_len`."
+  },
+  {
+    "name": "json_from_bool",
+    "signature": "(Bool) -> Json",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_from_bool`."
+  },
+  {
+    "name": "json_from_float",
+    "signature": "(Float) -> Json",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_from_float`."
+  },
+  {
+    "name": "json_from_int",
+    "signature": "(Int) -> Json",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_from_int`."
+  },
+  {
+    "name": "json_from_str",
+    "signature": "(Str) -> Json",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_from_str`."
+  },
+  {
+    "name": "json_get",
+    "signature": "(Json, Str) -> Json?",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_get`."
+  },
+  {
+    "name": "json_get_array",
+    "signature": "(Json, Str) -> [Json]?",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_get_array`."
+  },
+  {
+    "name": "json_get_bool",
+    "signature": "(Json, Str) -> Bool?",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_get_bool`."
+  },
+  {
+    "name": "json_get_float",
+    "signature": "(Json, Str) -> Float?",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_get_float`."
+  },
+  {
+    "name": "json_get_int",
+    "signature": "(Json, Str) -> Int?",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_get_int`."
+  },
+  {
+    "name": "json_get_str",
+    "signature": "(Json, Str) -> Str?",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_get_str`."
+  },
+  {
+    "name": "json_has",
+    "signature": "(Json, Str) -> Bool",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_has`."
+  },
+  {
+    "name": "json_is_array",
+    "signature": "(Json) -> Bool",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_is_array`."
+  },
+  {
+    "name": "json_is_bool",
+    "signature": "(Json) -> Bool",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_is_bool`."
+  },
+  {
+    "name": "json_is_null",
+    "signature": "(Json) -> Bool",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_is_null`."
+  },
+  {
+    "name": "json_is_number",
+    "signature": "(Json) -> Bool",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_is_number`."
+  },
+  {
+    "name": "json_is_object",
+    "signature": "(Json) -> Bool",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_is_object`."
+  },
+  {
+    "name": "json_is_string",
+    "signature": "(Json) -> Bool",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_is_string`."
+  },
+  {
+    "name": "json_keys",
+    "signature": "(Json) -> [Str]",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_keys`."
+  },
+  {
+    "name": "json_null",
+    "signature": "() -> Json",
+    "typeParameters": [],
+    "parameterModes": [],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_null`."
+  },
+  {
+    "name": "json_object",
+    "signature": "() -> Json",
+    "typeParameters": [],
+    "parameterModes": [],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_object`."
+  },
+  {
+    "name": "json_parse",
+    "signature": "(Str) -> Json!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_parse`."
+  },
+  {
+    "name": "toml_parse",
+    "signature": "(Str) -> Json!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `toml_parse`."
+  },
+  {
+    "name": "toml_stringify",
+    "signature": "(Json) -> Str!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `toml_stringify`."
+  },
+  {
+    "name": "json_set",
+    "signature": "(Json, Str, Json) -> Json",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_set`."
+  },
+  {
+    "name": "json_stringify",
+    "signature": "(Json) -> Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_stringify`."
+  },
+  {
+    "name": "json_stringify_pretty",
+    "signature": "(Json) -> Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_stringify_pretty`."
+  },
+  {
+    "name": "json_to_value",
+    "signature": "∀?60. (Json) -> ?60",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_to_value`."
+  },
+  {
+    "name": "json_type",
+    "signature": "(Json) -> Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_type`."
+  },
+  {
+    "name": "json_values",
+    "signature": "(Json) -> [Json]",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `json_values`."
+  },
+  {
+    "name": "len",
+    "signature": "∀?12. ([?12]) -> Int",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `len`."
+  },
+  {
+    "name": "log",
+    "signature": "(Float) -> Float",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `log`."
+  },
+  {
+    "name": "log10",
+    "signature": "(Float) -> Float",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `log10`."
+  },
+  {
+    "name": "log2",
+    "signature": "(Float) -> Float",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `log2`."
+  },
+  {
+    "name": "map",
+    "signature": "∀?70, ?71. ([?70], (?70) -> ?71) -> [?71]",
+    "typeParameters": [
+      "T0",
+      "T1"
+    ],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `map`."
+  },
+  {
+    "name": "map_contains",
+    "signature": "∀?27. (Map[?27], Str) -> Bool",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `map_contains`."
+  },
+  {
+    "name": "map_get",
+    "signature": "∀?25. (Map[?25], Str) -> ?25?",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `map_get`."
+  },
+  {
+    "name": "map_insert",
+    "signature": "∀?26. (Map[?26], Str, ?26) -> Map[?26]",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Owned",
+      "Owned",
+      "Owned"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `map_insert`."
+  },
+  {
+    "name": "map_keys",
+    "signature": "∀?29. (Map[?29]) -> [Str]",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `map_keys`."
+  },
+  {
+    "name": "map_len",
+    "signature": "∀?24. (Map[?24]) -> Int",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `map_len`."
+  },
+  {
+    "name": "map_new",
+    "signature": "∀?23. () -> Map[?23]",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `map_new`."
+  },
+  {
+    "name": "map_opt",
+    "signature": "∀?77, ?78. (?77?, (?77) -> ?78) -> ?78?",
+    "typeParameters": [
+      "T0",
+      "T1"
+    ],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `map_opt`."
+  },
+  {
+    "name": "map_remove",
+    "signature": "∀?28. (Map[?28], Str) -> (Map[?28], ?28?)",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Owned",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `map_remove`."
+  },
+  {
+    "name": "map_values",
+    "signature": "∀?30. (Map[?30]) -> [?30]",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `map_values`."
+  },
+  {
+    "name": "max_of",
+    "signature": "([Int]) -> Int?",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `max_of`."
+  },
+  {
+    "name": "min_of",
+    "signature": "([Int]) -> Int?",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `min_of`."
+  },
+  {
+    "name": "path_absolute",
+    "signature": "(Str) -> Str!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `path_absolute`."
+  },
+  {
+    "name": "path_extension",
+    "signature": "(Str) -> Str?",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `path_extension`."
+  },
+  {
+    "name": "path_filename",
+    "signature": "(Str) -> Str?",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `path_filename`."
+  },
+  {
+    "name": "path_is_absolute",
+    "signature": "(Str) -> Bool",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `path_is_absolute`."
+  },
+  {
+    "name": "path_is_relative",
+    "signature": "(Str) -> Bool",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `path_is_relative`."
+  },
+  {
+    "name": "path_join",
+    "signature": "([Str]) -> Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `path_join`."
+  },
+  {
+    "name": "path_parent",
+    "signature": "(Str) -> Str?",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `path_parent`."
+  },
+  {
+    "name": "path_stem",
+    "signature": "(Str) -> Str?",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `path_stem`."
+  },
+  {
+    "name": "pow",
+    "signature": "(Float, Float) -> Float",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `pow`."
+  },
+  {
+    "name": "reduce",
+    "signature": "∀?73, ?74. ([?73], ?74, (?74, ?73) -> ?74) -> ?74",
+    "typeParameters": [
+      "T0",
+      "T1"
+    ],
+    "parameterModes": [
+      "Shared",
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `reduce`."
+  },
+  {
+    "name": "regex_captures",
+    "signature": "(Str, Str) -> [Str]?",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `regex_captures`."
+  },
+  {
+    "name": "regex_find",
+    "signature": "(Str, Str) -> Str?",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `regex_find`."
+  },
+  {
+    "name": "regex_find_all",
+    "signature": "(Str, Str) -> [Str]",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `regex_find_all`."
+  },
+  {
+    "name": "regex_is_valid",
+    "signature": "(Str) -> Bool",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `regex_is_valid`."
+  },
+  {
+    "name": "regex_match",
+    "signature": "(Str, Str) -> Bool",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `regex_match`."
+  },
+  {
+    "name": "regex_replace",
+    "signature": "(Str, Str, Str) -> Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `regex_replace`."
+  },
+  {
+    "name": "regex_replace_all",
+    "signature": "(Str, Str, Str) -> Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `regex_replace_all`."
+  },
+  {
+    "name": "regex_split",
+    "signature": "(Str, Str) -> [Str]",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `regex_split`."
+  },
+  {
+    "name": "reverse",
+    "signature": "∀?61. ([?61]) -> [?61]",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `reverse`."
+  },
+  {
+    "name": "round",
+    "signature": "(Float) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `round`."
+  },
+  {
+    "name": "row_get",
+    "signature": "∀?66. (Row, Int) -> ?66?",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `row_get`."
+  },
+  {
+    "name": "row_get_bool",
+    "signature": "(Row, Int) -> Bool",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `row_get_bool`."
+  },
+  {
+    "name": "row_get_float",
+    "signature": "(Row, Int) -> Float",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `row_get_float`."
+  },
+  {
+    "name": "row_get_int",
+    "signature": "(Row, Int) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `row_get_int`."
+  },
+  {
+    "name": "row_get_str",
+    "signature": "(Row, Int) -> Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `row_get_str`."
+  },
+  {
+    "name": "row_is_null",
+    "signature": "(Row, Int) -> Bool",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `row_is_null`."
+  },
+  {
+    "name": "row_len",
+    "signature": "(Row) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `row_len`."
+  },
+  {
+    "name": "sha256",
+    "signature": "(Str) -> Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `sha256`."
+  },
+  {
+    "name": "sha256_bytes",
+    "signature": "([Int]) -> Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `sha256_bytes`."
+  },
+  {
+    "name": "sin",
+    "signature": "(Float) -> Float",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `sin`."
+  },
+  {
+    "name": "sizeof",
+    "signature": "(Str) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `sizeof`."
+  },
+  {
+    "name": "sort_floats",
+    "signature": "([Float]) -> [Float]",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `sort_floats`."
+  },
+  {
+    "name": "sort_ints",
+    "signature": "([Int]) -> [Int]",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `sort_ints`."
+  },
+  {
+    "name": "sort_ints_desc",
+    "signature": "([Int]) -> [Int]",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `sort_ints_desc`."
+  },
+  {
+    "name": "sort_strings",
+    "signature": "([Str]) -> [Str]",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `sort_strings`."
+  },
+  {
+    "name": "sort_strings_desc",
+    "signature": "([Str]) -> [Str]",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `sort_strings_desc`."
+  },
+  {
+    "name": "sqrt",
+    "signature": "(Float) -> Float",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `sqrt`."
+  },
+  {
+    "name": "str",
+    "signature": "∀?10. (?10) -> Str",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `str`."
+  },
+  {
+    "name": "str_char_at",
+    "signature": "(Str, Int) -> Char?",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `str_char_at`."
+  },
+  {
+    "name": "str_concat",
+    "signature": "(Str, Str) -> Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `str_concat`."
+  },
+  {
+    "name": "str_contains",
+    "signature": "(Str, Str) -> Bool",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `str_contains`."
+  },
+  {
+    "name": "str_ends_with",
+    "signature": "(Str, Str) -> Bool",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `str_ends_with`."
+  },
+  {
+    "name": "str_len",
+    "signature": "(Str) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `str_len`."
+  },
+  {
+    "name": "str_replace",
+    "signature": "(Str, Str, Str) -> Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `str_replace`."
+  },
+  {
+    "name": "str_replace_all",
+    "signature": "(Str, Str, Str) -> Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `str_replace_all`."
+  },
+  {
+    "name": "str_slice",
+    "signature": "(Str, Int, Int) -> Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `str_slice`."
+  },
+  {
+    "name": "str_split",
+    "signature": "(Str, Str) -> [Str]",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `str_split`."
+  },
+  {
+    "name": "str_starts_with",
+    "signature": "(Str, Str) -> Bool",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `str_starts_with`."
+  },
+  {
+    "name": "str_to_float",
+    "signature": "(Str) -> Float?",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `str_to_float`."
+  },
+  {
+    "name": "str_to_int",
+    "signature": "(Str) -> Int?",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `str_to_int`."
+  },
+  {
+    "name": "str_to_int_radix",
+    "signature": "(Str, Int) -> Int?",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `str_to_int_radix`."
+  },
+  {
+    "name": "str_trim",
+    "signature": "(Str) -> Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `str_trim`."
+  },
+  {
+    "name": "sum_of",
+    "signature": "([Int]) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `sum_of`."
+  },
+  {
+    "name": "tan",
+    "signature": "(Float) -> Float",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `tan`."
+  },
+  {
+    "name": "time_add",
+    "signature": "(Int, Int) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `time_add`."
+  },
+  {
+    "name": "time_day",
+    "signature": "(Int) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `time_day`."
+  },
+  {
+    "name": "time_diff",
+    "signature": "(Int, Int) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `time_diff`."
+  },
+  {
+    "name": "time_format",
+    "signature": "(Int, Str) -> Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `time_format`."
+  },
+  {
+    "name": "time_format_iso",
+    "signature": "(Int) -> Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `time_format_iso`."
+  },
+  {
+    "name": "time_format_rfc2822",
+    "signature": "(Int) -> Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `time_format_rfc2822`."
+  },
+  {
+    "name": "time_from_parts",
+    "signature": "(Int, Int, Int, Int, Int, Int) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared",
+      "Shared",
+      "Shared",
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `time_from_parts`."
+  },
+  {
+    "name": "time_hour",
+    "signature": "(Int) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `time_hour`."
+  },
+  {
+    "name": "time_minute",
+    "signature": "(Int) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `time_minute`."
+  },
+  {
+    "name": "time_month",
+    "signature": "(Int) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `time_month`."
+  },
+  {
+    "name": "time_parse",
+    "signature": "(Str, Str) -> Int!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `time_parse`."
+  },
+  {
+    "name": "time_parse_iso",
+    "signature": "(Str) -> Int!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `time_parse_iso`."
+  },
+  {
+    "name": "time_second",
+    "signature": "(Int) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `time_second`."
+  },
+  {
+    "name": "time_sub",
+    "signature": "(Int, Int) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `time_sub`."
+  },
+  {
+    "name": "time_weekday",
+    "signature": "(Int) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `time_weekday`."
+  },
+  {
+    "name": "time_year",
+    "signature": "(Int) -> Int",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `time_year`."
+  },
+  {
+    "name": "to_cdouble",
+    "signature": "(Float) -> CDouble",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `to_cdouble`."
+  },
+  {
+    "name": "to_cfloat",
+    "signature": "(Float) -> CFloat",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `to_cfloat`."
+  },
+  {
+    "name": "to_cint",
+    "signature": "(Int) -> CInt",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `to_cint`."
+  },
+  {
+    "name": "to_clong",
+    "signature": "(Int) -> CLong",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `to_clong`."
+  },
+  {
+    "name": "to_csize",
+    "signature": "(Int) -> CSize",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `to_csize`."
+  },
+  {
+    "name": "to_cuint",
+    "signature": "(Int) -> CUInt",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `to_cuint`."
+  },
+  {
+    "name": "to_culong",
+    "signature": "(Int) -> CULong",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `to_culong`."
+  },
+  {
+    "name": "type_of",
+    "signature": "∀?34. (?34) -> Str",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `type_of`."
+  },
+  {
+    "name": "unwrap",
+    "signature": "∀?35. (Option[?35]) -> ?35",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `unwrap`."
+  },
+  {
+    "name": "unwrap_or",
+    "signature": "∀?37. (Option[?37], ?37) -> ?37",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `unwrap_or`."
+  },
+  {
+    "name": "uuid_parse",
+    "signature": "(Str) -> Str!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `uuid_parse`."
+  },
+  {
+    "name": "vec_concat",
+    "signature": "∀?20. ([?20], [?20]) -> [?20]",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `vec_concat`."
+  },
+  {
+    "name": "vec_first",
+    "signature": "∀?18. ([?18]) -> ?18?",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `vec_first`."
+  },
+  {
+    "name": "vec_get",
+    "signature": "∀?16. ([?16], Int) -> ?16?",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `vec_get`."
+  },
+  {
+    "name": "vec_index_of",
+    "signature": "∀?69. ([?69], ?69) -> Int?",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `vec_index_of`."
+  },
+  {
+    "name": "vec_last",
+    "signature": "∀?19. ([?19]) -> ?19?",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `vec_last`."
+  },
+  {
+    "name": "vec_len",
+    "signature": "∀?13. ([?13]) -> Int",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `vec_len`."
+  },
+  {
+    "name": "vec_new",
+    "signature": "∀?11. () -> [?11]",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `vec_new`."
+  },
+  {
+    "name": "vec_pop",
+    "signature": "∀?15. ([?15]) -> ([?15], ?15?)",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `vec_pop`."
+  },
+  {
+    "name": "vec_push",
+    "signature": "∀?14. ([?14], ?14) -> [?14]",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Owned",
+      "Owned"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `vec_push`."
+  },
+  {
+    "name": "vec_reverse",
+    "signature": "∀?22. ([?22]) -> [?22]",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `vec_reverse`."
+  },
+  {
+    "name": "vec_set",
+    "signature": "∀?17. ([?17], Int, ?17) -> [?17]",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Owned",
+      "Shared",
+      "Owned"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `vec_set`."
+  },
+  {
+    "name": "vec_slice",
+    "signature": "∀?21. ([?21], Int, Int) -> [?21]",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared",
+      "Shared",
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `vec_slice`."
+  },
+  {
+    "name": "vec_sort",
+    "signature": "∀?68. ([?68]) -> [?68]",
+    "typeParameters": [
+      "T0"
+    ],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `vec_sort`."
+  },
+  {
+    "name": "zlib_compress",
+    "signature": "(Str) -> [Int]",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `zlib_compress`."
+  },
+  {
+    "name": "zlib_decompress",
+    "signature": "([Int]) -> Str!Str",
+    "typeParameters": [],
+    "parameterModes": [
+      "Shared"
+    ],
+    "effects": [],
+    "capability": null,
+    "pure": true,
+    "interpreter": "Supported",
+    "native": "Experimental",
+    "verification": "Experimental",
+    "documentation": "Compiler-provided builtin `zlib_decompress`."
+  }
+]

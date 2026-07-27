@@ -83,7 +83,7 @@ pub enum Ty {
     /// TLS stream for encrypted connections
     TlsStream,
 
-    /// SQLite database connection
+    /// Backend-neutral database connection
     Database,
 
     /// SQLite prepared statement
@@ -544,7 +544,9 @@ impl Ty {
             | Ty::Never => true,
             Ty::Tuple(tys) => tys.iter().all(|t| t.is_copy()),
             Ty::Array(ty, _) => ty.is_copy(),
-            Ty::Ref(_, _) => true,
+            Ty::Option(ty) => ty.is_copy(),
+            Ty::Result(ok, err) => ok.is_copy() && err.is_copy(),
+            Ty::Ref(_, Mutability::Immutable) => true,
             Ty::Ptr(_, _) => true,
             _ => false,
         }

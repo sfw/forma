@@ -1,13 +1,18 @@
-# FORMA AI Quick Reference
-<!-- Token-efficient reference for LLM system prompts. ~600 lines. -->
-<!-- Include this in context windows for correct FORMA code generation. -->
+# Forma 0.2 AI Quick Reference
+<!-- Compact operational context for agents. -->
+<!-- Compiler output and generated docs/grammar.* / docs/builtins.json remain authoritative. -->
+
+Forma is an evolving 0.x language. Do not invent syntax or builtins. When this
+document and the compiler disagree, follow `forma check`, semantic queries, the
+generated grammar, and `docs/builtins.json`.
 
 ## Syntax Overview
 
 - Indentation-based (like Python), no braces required
 - Comments: `# ...`
-- Variables: `x := value` (mutable by default)
-- Type annotations: `x: Type = value`
+- Immutable binding: `x = value`
+- Mutable binding/update: `x := value`, then `x := replacement`
+- Type annotations: `x: Type = value` or `x: Type := value`
 - Last expression is return value
 - Generics use `[T]` not `<T>`
 - F-strings: `f"hello {name}, result is {x + 1}"`
@@ -83,7 +88,8 @@ Arithmetic:   + - * / %
 Comparison:   == != < <= > >=
 Logical:      && || !
 Bitwise:      & | ^ << >>
-Assignment:   := = += -= *= /= %=
+Bindings:     = (immutable)  := (mutable create/update)
+Compound:     += -= *= /= %=
 Special:      ? (propagate) ?? (coalesce) -> => .. ..= :: . @
 ```
 
@@ -196,10 +202,15 @@ result := f"{x} + {y} = {x + y}"                # expressions allowed
 
 ### Variables
 ```forma
-x := 42                                          # infer type
-x: Int = 42                                      # explicit type
-x := x + 1                                       # reassign
+limit = 42                                       # immutable, inferred Int
+title: Str = "Forma"                             # immutable, annotated
+count := 0                                       # mutable, inferred Int
+count := count + 1                               # update mutable binding
+buffer: [Int] := vec_new()                       # mutable, annotated
 ```
+
+Binding syntax controls mutability, not ownership. Assigning a non-`Copy` value
+to another binding moves it unless it is explicitly cloned.
 
 ### Modules & Imports
 ```forma
@@ -218,6 +229,10 @@ type Handler[T] = (T) -> Unit
 
 ### Contracts
 ```forma
+@inv(balance >= 0, "balance cannot be negative")
+s Account
+    balance: Int
+
 @pre(n >= 0)
 @post(result > 0, "must be positive")
 f factorial(n: Int) -> Int
@@ -233,6 +248,13 @@ f deposit(balance: Int, delta: Int) -> Int
 f sort(values: [Int]) -> [Int]
     sort_ints(values)
 ```
+
+`@inv` applies only to named structs. Struct fields are directly in scope;
+`old(...)` and `result` are not. Invariants run after construction, at function
+entry/return, and when a `ref mut` borrow returns. Temporary inconsistency inside
+an exclusive mutation is allowed only if validity is restored before return.
+Keep decoders fallible: validate untrusted JSON/TOML/database/network data before
+constructing an invariant-bearing struct.
 
 Named contract patterns (expand to expressions):
 - `@nonempty(x)` (pre-only), `@nonnegative(x)`, `@positive(x)`, `@nonzero(x)`
@@ -336,6 +358,10 @@ vec_index_of([10, 20, 30], 20)     # Some(1)
 
 ## Reference Parameters
 
+Ordinary non-`Copy` values are affine: they may move or be dropped, but cannot be
+used after a move or duplicated implicitly. Owned parameters move their arguments.
+Use `clone(value)` for explicit duplication.
+
 ```forma
 # Read-only reference
 f sum(ref arr: [Int]) -> Int
@@ -352,6 +378,36 @@ f sort(ref mut arr: [Int]) -> Unit
 total := sum(ref data)
 sort(ref mut data)
 ```
+
+References are second-class. They cannot be stored in ordinary aggregates,
+captured by escaping closures, or sent to another task. A returned reference is
+allowed only when derived from a reference parameter. Loan regions are inferred.
+
+## Effects, Capabilities, and Profiles
+
+- Effects are inferred through direct calls and describe possible authority.
+- Capabilities grant authority to one execution; effects do not grant it.
+- File, network, process, environment, and unsafe/FFI builtins are gated by the
+  capability documented in `docs/builtins.json`.
+- Core is the portable semantic subset.
+- Hosted requires the managed interpreter runtime.
+- Native identifies currently runtime-backed native facilities.
+- Experimental has weaker compatibility guarantees.
+- Profile support is transitive through calls.
+
+Capability flags: `--allow-read`, `--allow-write`, `--allow-network`,
+`--allow-exec`, `--allow-env`, `--allow-unsafe`, `--allow-all`.
+
+Prefer least privilege. Capability flags are not complete OS isolation for
+hostile code.
+
+## Structured Concurrency Rules
+
+- Task captures move into the child and must satisfy compiler-known `Send`.
+- References cannot cross task boundaries.
+- Task handles are affine: await, cancel, return, or explicitly detach them.
+- Cancellation, deadlines, task limits, and a subset of capabilities propagate.
+- Channels and mutexes are Hosted handles; sending moves the value.
 
 ## Common Patterns
 
@@ -412,6 +468,10 @@ f main()
 
 ## Key Builtins (by category)
 
+This is a convenience index, not the registry. For exact signatures, parameter
+ownership modes, effects, capability requirements, and backend support, consult
+the generated `docs/builtins.json`.
+
 ### I/O & Logging
 `print(v)` `eprintln(v)` `str(v)` `debug(v)` `info(v)` `warning(v)` `error(v)`
 `log_info(msg)` `log_warn(msg)` `log_error(msg)` `log_debug(msg)` `log_set_level(lvl)` `log_set_format(fmt)`
@@ -438,7 +498,11 @@ f main()
 `file_read(p)` `file_write(p,c)` `file_exists(p)` `file_append(p,c)` `file_read_bytes(p)` `file_write_bytes(p,b)` `file_copy(src,dst)` `file_move(src,dst)` `file_remove(p)` `file_size(p)` `file_is_file(p)` `file_is_dir(p)` `dir_list(p)` `dir_create(p)` `dir_create_all(p)` `dir_remove(p)` `dir_remove_all(p)`
 
 ### Path Operations
-`path_join(a,b)` `path_parent(p)` `path_filename(p)` `path_stem(p)` `path_extension(p)` `path_absolute(p)` `path_is_absolute(p)` `path_is_relative(p)`
+`path_join(a,b)` `path_parent(p)` `path_filename(p)` `path_stem(p)` `path_extension(p)` `path_absolute(p)` `path_is_absolute(p)` `path_is_relative(p)` `path_resolve_within(root,relative)`
+
+For scoped agent file tools, resolve every external relative path with
+`path_resolve_within` before I/O. It rejects absolute paths, parent traversal,
+and canonical symlink escapes.
 
 ### Stdlib File I/O (requires `us std.io`)
 `file_read_lines(p)` `file_write_lines(p,lines)`
@@ -462,7 +526,25 @@ f main()
 `dns_lookup(host)` `dns_reverse_lookup(ip)`
 
 ### Database
-`db_open(path)` `db_open_memory()` `db_execute(db,sql)` `db_query(db,sql)` `db_query_one(db,sql)` `db_prepare(db,sql)` `db_execute_prepared(stmt,params)` `db_query_prepared(stmt,params)` `db_close(db)` `row_get(r,i)` `row_get_int(r,i)` `row_get_str(r,i)` `row_get_float(r,i)` `row_get_bool(r,i)` `row_is_null(r,i)` `row_len(r)`
+`db_open(path)` `db_open_memory()` `db_connect_postgres(url)` `db_execute(db,sql)` `db_query(db,sql)` `db_query_one(db,sql)` `db_prepare(db,sql)` `db_execute_prepared(stmt,params)` `db_query_prepared(stmt,params)` `db_close(db)` `row_get(r,i)` `row_get_int(r,i)` `row_get_str(r,i)` `row_get_float(r,i)` `row_get_bool(r,i)` `row_is_null(r,i)` `row_len(r)`
+
+Use SQLite locally. For remote PostgreSQL, obtain the connection URL with
+`env_get` and pass it to `db_connect_postgres`; never embed database credentials
+in source or settings. Prepared queries use `?` placeholders on both backends;
+write `??` for a literal PostgreSQL question-mark operator.
+
+### Structured Processes (needs --allow-exec)
+`process_run(program,args,cwd,environment,allowed_programs,timeout_ms,max_output_chars)`
+uses direct invocation rather than a shell, exact executable authority, a
+cleared environment plus explicit entries, a deadline, process-group
+termination, and bounded stdout/stderr. Prefer it over shell-oriented process
+helpers for automation and agent harnesses.
+
+### HTTP and configuration
+`http_request(method,url,body,headers,timeout_ms,follow_redirects)` supports
+authorization headers and arbitrary text request bodies. `toml_parse(source)`
+and `toml_stringify(value)` provide human-authored configuration interchange;
+keep API payloads and workflow graphs in JSON.
 
 ### Async/Channels
 `channel_new()` `channel_send(s,v)` `channel_recv(r)` `channel_try_send(s,v)` `channel_try_recv(r)` `channel_close(ch)` `mutex_new(v)` `mutex_lock(m)` `mutex_unlock(m)` `mutex_try_lock(m)` `mutex_get(m)` `mutex_set(m,v)` `sleep_async(s)` `await_all(tasks)` `await_any(tasks)` `timeout(future,ms)`
@@ -524,6 +606,9 @@ forma explain <file> --format json      # contract intent in JSON
 forma explain <file> --examples=3 --seed 42
 forma verify <path> --report --format human
 forma verify <path> --report --format json --examples 20 --seed 42
+forma verify <path> --level test --report
+forma verify <path> --level exhaustive --max-domain 4096 --report
+forma verify <path> --level formal --report
 forma verify <path> --report --max-steps 10000 --timeout 1000
 forma verify <path> --report --allow-side-effects
 forma grammar --format ebnf             # export grammar
@@ -540,3 +625,19 @@ forma complete <file> --position L:C    # completions
 ```
 
 **Security:** `--allow-all` enables file, network, process, env, and unsafe operations. Do not use on untrusted code. Prefer least-privilege: `--allow-read`, `--allow-write`, `--allow-network`, `--allow-exec`, `--allow-env`, `--allow-unsafe`. The `--allow-exec` flag permits shell command execution and should be treated as full shell access.
+
+## Verification Result Rules
+
+| Result | Meaning |
+| --- | --- |
+| `UNCONTRACTED` | No contract obligation was declared |
+| `TESTED` | Reproducible generated examples passed within reported bounds |
+| `COUNTEREXAMPLE` | An execution or model violated an obligation |
+| `EXHAUSTIVE` | Every tuple in a supported finite domain was checked |
+| `PROVED` | The supported SMT obligations were discharged |
+| `UNKNOWN` | Unsupported, too large, timed out, or not proved |
+| `SKIPPED` | Work was intentionally not attempted |
+
+Never describe `TESTED` as proof. Formal verification is Experimental and covers
+only its pure supported subset. Preserve `UNKNOWN`, `SKIPPED`, bounds, seeds, and
+unsupported effects in summaries.

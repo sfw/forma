@@ -85,7 +85,7 @@ impl<'a> Parser<'a> {
         } else if self.is_impl_keyword() {
             ItemKind::Impl(self.parse_impl(is_unsafe)?)
         } else if self.check(TokenKind::Type) {
-            ItemKind::TypeAlias(self.parse_type_alias()?)
+            ItemKind::TypeAlias(self.parse_type_alias(vis)?)
         } else if self.check(TokenKind::Us) {
             ItemKind::Use(self.parse_use()?)
         } else if self.check(TokenKind::Md) {
@@ -120,6 +120,18 @@ impl<'a> Parser<'a> {
                 }
 
                 keep.push(attr);
+            }
+            keep
+        } else if let ItemKind::Struct(ref mut structure) = kind {
+            let mut keep = Vec::new();
+            for attr in attrs {
+                if attr.name.name == "inv"
+                    && let Some(contract) = Self::extract_contract(&attr)
+                {
+                    structure.invariants.push(contract);
+                } else {
+                    keep.push(attr);
+                }
             }
             keep
         } else {
@@ -177,7 +189,7 @@ impl<'a> Parser<'a> {
         let name = self.parse_ident()?;
 
         // Check for contract attributes that take expression arguments
-        let is_contract = name.name == "pre" || name.name == "post";
+        let is_contract = name.name == "pre" || name.name == "post" || name.name == "inv";
 
         let args = if self.match_token(TokenKind::LParen) {
             if is_contract {
@@ -1156,6 +1168,7 @@ impl<'a> Parser<'a> {
             generics,
             kind,
             visibility: vis,
+            invariants: Vec::new(),
             span: start.merge(self.previous_span()),
         })
     }
@@ -1394,7 +1407,9 @@ impl<'a> Parser<'a> {
 
     fn parse_trait_item(&mut self) -> Result<TraitItem> {
         if self.check(TokenKind::Type) {
-            Ok(TraitItem::TypeAlias(self.parse_type_alias()?))
+            Ok(TraitItem::TypeAlias(
+                self.parse_type_alias(Visibility::Private)?,
+            ))
         } else if self.is_function_keyword() || self.check(TokenKind::As) {
             let is_async = self.match_token(TokenKind::As);
             match self.parse_function(is_async, false, Visibility::Private)? {
@@ -1489,7 +1504,9 @@ impl<'a> Parser<'a> {
 
     fn parse_impl_item(&mut self) -> Result<ImplItem> {
         if self.check(TokenKind::Type) {
-            Ok(ImplItem::TypeAlias(self.parse_type_alias()?))
+            Ok(ImplItem::TypeAlias(
+                self.parse_type_alias(Visibility::Private)?,
+            ))
         } else if self.is_function_keyword()
             || self.check(TokenKind::As)
             || self.check(TokenKind::Pub)
@@ -1509,7 +1526,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_type_alias(&mut self) -> Result<TypeAlias> {
+    fn parse_type_alias(&mut self, visibility: Visibility) -> Result<TypeAlias> {
         let start = self.current_span();
         self.expect(TokenKind::Type)?;
         let name = self.parse_ident()?;
@@ -1524,6 +1541,7 @@ impl<'a> Parser<'a> {
             name,
             generics,
             ty,
+            visibility,
             span: start.merge(self.previous_span()),
         })
     }
@@ -4165,6 +4183,12 @@ impl<'a> Parser<'a> {
     fn check_contextual(&self, keyword: &str) -> bool {
         match self.tokens.get(self.pos).map(|t| &t.kind) {
             Some(TokenKind::Ident(name)) => name == keyword,
+            Some(TokenKind::F) => keyword == "f",
+            Some(TokenKind::S) => keyword == "s",
+            Some(TokenKind::E) => keyword == "e",
+            Some(TokenKind::T) => keyword == "t",
+            Some(TokenKind::I) => keyword == "i",
+            Some(TokenKind::M) => keyword == "m",
             _ => false,
         }
     }
@@ -4254,13 +4278,12 @@ impl<'a> Parser<'a> {
     }
 
     /// Check if 'i' is being used as the impl keyword.
-    /// True when: i <TypeName>
+    /// True when: i <TypeName> or i[T] <Trait> for <Type>
     fn is_impl_keyword(&self) -> bool {
         if !self.check_contextual("i") {
             return false;
         }
-        // i must be followed by identifier (type name)
-        self.peek_is_ident()
+        self.peek_is_ident() || matches!(self.peek_kind(1), Some(TokenKind::LBracket))
     }
 
     /// Check if 'm' is being used as the match keyword.

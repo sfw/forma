@@ -6,11 +6,11 @@
 # ============================================================
 
 # Check if string is empty
-f str_is_empty(s: Str) -> Bool
+pub f str_is_empty(s: Str) -> Bool
     str_len(s) == 0
 
 # Check if string is blank (empty or only whitespace)
-f str_is_blank(s: Str) -> Bool
+pub f str_is_blank(s: Str) -> Bool
     str_is_empty(str_trim(s))
 
 # ============================================================
@@ -18,7 +18,7 @@ f str_is_blank(s: Str) -> Bool
 # ============================================================
 
 # Repeat a string n times
-f str_repeat(s: Str, n: Int) -> Str
+pub f str_repeat(s: Str, n: Int) -> Str
     result := ""
     idx := 0
     wh idx < n
@@ -27,7 +27,7 @@ f str_repeat(s: Str, n: Int) -> Str
     result
 
 # Pad string on the left to reach target length
-f str_pad_left(s: Str, target_len: Int, pad_char: Str) -> Str
+pub f str_pad_left(s: Str, target_len: Int, pad_char: Str) -> Str
     current_len := str_len(s)
     if current_len >= target_len then s
     else
@@ -35,7 +35,7 @@ f str_pad_left(s: Str, target_len: Int, pad_char: Str) -> Str
         str_concat(padding, s)
 
 # Pad string on the right to reach target length
-f str_pad_right(s: Str, target_len: Int, pad_char: Str) -> Str
+pub f str_pad_right(s: Str, target_len: Int, pad_char: Str) -> Str
     current_len := str_len(s)
     if current_len >= target_len then s
     else
@@ -43,7 +43,7 @@ f str_pad_right(s: Str, target_len: Int, pad_char: Str) -> Str
         str_concat(s, padding)
 
 # Replace first occurrence of pattern with replacement
-f str_replace_first(s: Str, pattern: Str, replacement: Str) -> Str
+pub f str_replace_first(s: Str, pattern: Str, replacement: Str) -> Str
     # Find pattern location by checking all positions
     s_len := str_len(s)
     p_len := str_len(pattern)
@@ -68,7 +68,7 @@ f str_replace_first(s: Str, pattern: Str, replacement: Str) -> Str
 # ============================================================
 
 # Join array of strings with separator
-f str_join(parts: [Str], sep: Str) -> Str
+pub f str_join(parts: [Str], sep: Str) -> Str
     len := vec_len(parts)
     if len == 0 then ""
     else
@@ -80,11 +80,11 @@ f str_join(parts: [Str], sep: Str) -> Str
         result
 
 # Split string into lines
-f str_lines(s: Str) -> [Str]
+pub f str_lines(s: Str) -> [Str]
     str_split(s, "\n")
 
 # Split string into words (by whitespace)
-f str_words(s: Str) -> [Str]
+pub f str_words(s: Str) -> [Str]
     # Simple implementation: split by spaces
     str_split(s, " ")
 
@@ -93,27 +93,27 @@ f str_words(s: Str) -> [Str]
 # ============================================================
 
 # Create a new string builder (empty array of strings)
-f sb_new() -> [Str]
+pub f sb_new() -> [Str]
     []
 
 # Append a string to the builder
-f sb_append(builder: [Str], s: Str) -> [Str]
+pub f sb_append(builder: [Str], s: Str) -> [Str]
     vec_push(builder, s)
 
 # Append a string followed by newline
-f sb_append_line(builder: [Str], s: Str) -> [Str]
+pub f sb_append_line(builder: [Str], s: Str) -> [Str]
     vec_push(vec_push(builder, s), "\n")
 
 # Append just a newline
-f sb_newline(builder: [Str]) -> [Str]
+pub f sb_newline(builder: [Str]) -> [Str]
     vec_push(builder, "\n")
 
 # Build the final string from the builder
-f sb_build(builder: [Str]) -> Str
+pub f sb_build(builder: [Str]) -> Str
     str_join(builder, "")
 
 # Append an integer as string
-f sb_append_int(builder: [Str], n: Int) -> [Str]
+pub f sb_append_int(builder: [Str], n: Int) -> [Str]
     vec_push(builder, int_to_str(n))
 
 # ============================================================
@@ -121,29 +121,29 @@ f sb_append_int(builder: [Str], n: Int) -> [Str]
 # ============================================================
 
 # Convert char to single-character string
-f str_from_char(c: Char) -> Str
+pub f str_from_char(c: Char) -> Str
     char_to_str(c)
 
 # Get character at index as string (single char)
-f str_char_at_str(s: Str, idx: Int) -> Option[Str]
+pub f str_char_at_str(s: Str, idx: Int) -> Option[Str]
     m str_char_at(s, idx)
         Some(c) -> Some(str_from_char(c))
         None -> None
 
 # Check if character is a digit
-f is_digit(c: Char) -> Bool
+pub f is_digit(c: Char) -> Bool
     char_is_digit(c)
 
 # Check if character is a letter
-f is_alpha(c: Char) -> Bool
+pub f is_alpha(c: Char) -> Bool
     char_is_alpha(c)
 
 # Check if character is alphanumeric
-f is_alphanumeric(c: Char) -> Bool
+pub f is_alphanumeric(c: Char) -> Bool
     char_is_alphanumeric(c)
 
 # Check if character is whitespace
-f is_whitespace(c: Char) -> Bool
+pub f is_whitespace(c: Char) -> Bool
     char_is_whitespace(c)
 
 # ============================================================
@@ -151,17 +151,17 @@ f is_whitespace(c: Char) -> Bool
 # ============================================================
 
 # Parse integer from string, returning Option
-f parse_int(s: Str) -> Option[Int]
+pub f parse_int(s: Str) -> Option[Int]
     str_to_int(s)
 
 # Parse integer with default value
-f parse_int_or(s: Str, default: Int) -> Int
+pub f parse_int_or(s: Str, default: Int) -> Int
     m str_to_int(s)
         Some(n) -> n
         None -> default
 
 # Check if string represents a valid integer
-f str_is_int(s: Str) -> Bool
+pub f str_is_int(s: Str) -> Bool
     m str_to_int(s)
         Some(_) -> true
         None -> false
@@ -172,7 +172,7 @@ f str_is_int(s: Str) -> Bool
 
 # Compare strings lexicographically
 # Returns: -1 if a < b, 0 if a == b, 1 if a > b
-f str_compare(a: Str, b: Str) -> Int
+pub f str_compare(a: Str, b: Str) -> Int
     len_a := str_len(a)
     len_b := str_len(b)
     min_len := if len_a < len_b then len_a else len_b
@@ -199,7 +199,7 @@ f str_compare(a: Str, b: Str) -> Int
     else 0
 
 # Find index of substring, or -1 if not found
-f str_index_of(haystack: Str, needle: Str) -> Int
+pub f str_index_of(haystack: Str, needle: Str) -> Int
     h_len := str_len(haystack)
     n_len := str_len(needle)
 

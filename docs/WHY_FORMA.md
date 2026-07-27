@@ -1,242 +1,210 @@
-# Why FORMA?
+# Why Forma?
 
-## The Shift Nobody Prepared For
+Forma is a working proposal for a future in which software agents produce and
+revise more code than people can review line by line.
 
-In 2023, AI wrote its first million lines of production code. By 2025, that number crossed a billion. The way software gets written has fundamentally changed — but our programming languages haven't.
+The project does not begin with the claim that AI-generated code is correct. It
+begins with the opposite assumption: generation is fallible, review capacity is
+finite, and important facts about a program should be available from the language
+toolchain rather than reconstructed from prose or intuition.
 
-Rust, Go, C++, and TypeScript were designed for a world where humans write code and compilers catch mistakes. They optimize for human readability, human intuition, and human debugging.
+## The shift
 
-That world is changing rapidly.
+Most mainstream languages were designed around a person writing source and a
+compiler checking it. Agentic development adds a fast, iterative producer that
+can react to tools but can also invent syntax, APIs, types, authority, and false
+confidence.
 
-What's replacing it has six problems that no existing language solves. AI can't handle lifetimes. It hallucinates types and APIs. It generates invalid syntax. It wastes tokens on verbose keywords. And even when it does produce working code, nobody can review it fast enough — teams are shipping AI-generated functions they haven't fully read, because code review doesn't scale to hundreds of functions a day.
+That changes the design question from “what syntax is pleasant to type?” to:
 
-FORMA is designed from the ground up to solve all six.
+- What information should constrain generation before text is emitted?
+- What compiler results can guide deterministic repair?
+- How can ownership and authority stay visible across agent revisions?
+- What should a person review when reading every implementation is unrealistic?
+- How can tools report evidence without calling a test a proof?
 
-## Six Problems, Six Solutions
+Forma explores these questions in the language, compiler, runtime, and tooling as
+one system.
 
-### 1. Memory Safety Without Lifetimes
+## The proposal
 
-Rust's compiler is famously strict. For AI, it's a wall — [94.8% of AI failures targeting Rust are compilation errors](https://arxiv.org/abs/2411.13990), with dependency resolution (unresolved imports, missing methods) accounting for 61.9% of failures. Lifetimes and ownership add a second layer of complexity on top.
+### 1. Constrain syntax from one grammar model
 
-The problem isn't AI stupidity — it's that Rust demands reasoning about module paths, trait bounds, and ownership flow across the entire call graph. AI models generate code token by token. They can't hold these cross-cutting concerns in context.
+Forma exports EBNF and JSON grammar for constrained-decoding systems. The same
+structured model also produces keyword and editor artifacts. This can reduce one
+class of generation errors, but it does not guarantee type correctness or program
+correctness.
 
-**FORMA's solution: Second-class references.** References exist but can't be stored in structs or returned from functions. This eliminates lifetime annotations entirely:
+```bash
+forma grammar --format ebnf
+forma grammar --format json
+```
+
+### 2. Make semantic repair machine-readable
+
+Checking can return structured diagnostics, and semantic queries expose types and
+completion candidates. An agent can use those results in a repair loop instead of
+guessing from compiler prose.
+
+```bash
+forma check program.forma --error-format json
+forma typeof program.forma --position "5:10"
+forma complete program.forma --position "5:10"
+```
+
+These tools reduce hallucination risk; they cannot make an unconstrained model
+incapable of hallucinating.
+
+### 3. Use affine ownership from the first interpreter
+
+Non-`Copy` values may move or be dropped but cannot be used after a move or
+duplicated implicitly. References are deliberately second-class and their loan
+regions are inferred. This removes written lifetime parameters without removing
+ownership obligations.
 
 ```forma
-# Rust: fn longest<'a>(x: &'a str, y: &'a str) -> &'a str
-# FORMA: Just works, no lifetime tracking needed
-f get_longest(strings: [Str]) -> Str
-    longest := strings[0]
-    for s in strings
-        if len(s) > len(longest) then
-            longest := s
-    longest
+f consume(items: Vec[Item]) -> Unit
+f inspect(ref items: Vec[Item]) -> Int
+f update(ref mut items: Vec[Item]) -> Unit
 ```
 
-The compiler guarantees memory safety through scope analysis, not lifetime inference. AI doesn't need to reason about lifetimes because they don't exist.
+The interpreter may use managed storage internally, but source programs still
+observe moves, loans, and exactly-once destruction.
 
-### 2. Strong Type Inference + Structured Errors
+### 4. Separate effects from authority
 
-Modern type systems are powerful but intricate. AI hallucinates type signatures, invents trait bounds, and mismatches generics — 33.6% of AI Rust failures are type mismatches.
+Effects describe what a function may attempt. Capabilities grant that authority
+to one execution. An agent can therefore write a useful file-processing program
+without receiving unrelated network or process authority.
 
-**FORMA's solution:** Hindley-Milner type inference means AI rarely needs explicit annotations. When types do mismatch, errors are machine-readable JSON with fix suggestions:
+```bash
+forma run report.forma --allow-read --allow-write
+```
+
+The capability system is interpreter containment, not a complete hostile-code
+sandbox. Untrusted execution may also require OS process isolation.
+
+### 5. Turn intent into a reviewable artifact
+
+Contracts let an agent state preconditions and postconditions next to code.
+`forma explain` translates that intent for people and tools.
 
 ```forma
-# Type inference handles most cases
-f process[T](items: [T]) -> [T]
-    result := vec_new()
-    for item in items
-        vec_push(result, item)
-    result
+@nonempty(items)
+@sorted(result)
+@permutation(items, result)
+f ordered(items: [Int]) -> [Int]
+    sort_ints(items)
 ```
 
-```json
-{
-  "error": "type_mismatch",
-  "expected": "Int",
-  "found": "String",
-  "suggestion": "Use str_parse_int() to convert"
-}
-```
+This does not solve specification. A wrong contract can be verified successfully.
+The human review task becomes smaller and clearer: confirm the contract, authority,
+profile, and evidence, then inspect implementation where risk requires it.
 
-AI can parse these errors and self-correct without human intervention.
+### 6. Name the evidence honestly
 
-### 3. No API Hallucination
-
-AI models trained on diverse codebases confidently use APIs that don't exist:
-
-```rust
-// AI invents methods
-let result = my_vec.filter_map_reduce(|x| x * 2);  // This isn't real
-```
-
-**FORMA's solution: Type-constrained decoding.** FORMA exports available methods for any type, letting AI tooling constrain generation to real APIs:
+Forma separates reproducible generated testing, exhaustive checking of supported
+finite domains, and formal proof attempts over a supported pure subset.
 
 ```bash
-# Query available methods for a type
-forma typeof "vec.?" --context "v vec = [1, 2, 3]"
-# Returns: push, pop, len, map, filter, fold, ...
+forma verify rules.forma --level test --report
+forma verify rules.forma --level exhaustive --report
+forma verify rules.forma --level formal --report
 ```
 
-AI pipelines can use this to only generate method calls that actually exist.
+The results—`TESTED`, `EXHAUSTIVE`, `PROVED`, `COUNTEREXAMPLE`, `UNKNOWN`,
+`SKIPPED`, and `UNCONTRACTED`—are intentionally not interchangeable.
 
-### 4. No Syntax Errors
+## Why one semantic spine matters
 
-Even when logic is correct, syntax errors creep in. A misplaced semicolon, forgotten brace, or wrong operator breaks everything.
+A language designed for tool-mediated development fails if every tool constructs
+its own partial interpretation. Forma’s parser, resolver, type checker, ownership
+analysis, effect inference, interpreter, native backend, LSP, formatter, and
+verifier share compiler state and typed MIR.
 
-**FORMA's solution: Grammar-constrained generation.** FORMA exports its grammar for constrained decoding. AI can only generate syntactically valid tokens:
+Ownership gates run before optimization. Drop elaboration runs before backend
+selection. Profiles propagate through calls. Verification consumes the same
+contracts users execute. This architecture is the central proposal—not the short
+keywords.
 
-```bash
-forma grammar --format ebnf > forma.ebnf
-forma grammar --format json > forma.json
-```
+## The agentic workflow
 
-```python
-# In your AI pipeline: constrain to valid syntax
-from outlines import generate
-generator = generate.cfg(model, open("forma.ebnf").read())
-code = generator(prompt)  # Guaranteed syntactically valid
-```
+1. A person supplies intent, constraints, and acceptable authority.
+2. An agent selects compiler-known syntax and APIs.
+3. The grammar constrains syntax where the generation stack supports it.
+4. `forma check --error-format json` returns repairable semantic failures.
+5. The agent revises until the compiler accepts the program.
+6. Runtime capability flags grant only the required authority.
+7. Contracts are explained and verified at the strongest supported level.
+8. A person reviews the contract, capability set, profile, evidence, and selected
+   high-risk implementation details.
 
-This eliminates syntax errors entirely — not by catching them, but by making them impossible.
+The compiler is not the agent, and the agent is not the authority. Each has a
+different role.
 
-### 5. Token Efficiency
+## What is a hypothesis, not a fact?
 
-AI API pricing scales with tokens — every character in a prompt or completion costs money and adds latency.
+Forma deliberately leaves several claims open to measurement:
 
-FORMA uses single-character keywords and type shortcuts:
+- Does concise syntax materially lower end-to-end generation cost after prompts,
+  diagnostics, and repair turns are included?
+- Do constrained grammars improve successful semantic completion, or merely move
+  failures from parsing into typing?
+- Can agents write useful contracts more reliably than implementations?
+- Do reviewers catch more defects when shown contracts, authority, profiles, and
+  evidence summaries?
+- Does affine ownership without written lifetimes improve generation success while
+  retaining an acceptable programming model?
+- Can a shared semantic service keep editor, verifier, and backend behavior aligned
+  as the language grows?
 
-| Concept | Rust | FORMA | Savings |
-|---------|------|-------|---------|
-| Function definition | `fn` | `f` | 50% |
-| Match expression | `match x {` | `m x {` | 38% |
-| Optional type | `Option<String>` | `String?` | 67% |
-| Result type | `Result<T, Error>` | `T!` | 76% |
-| For loop | `for x in items` | `i x in items` | 25% |
-
-Across typical codebases, FORMA uses **~35% fewer tokens** than equivalent Rust. That's lower API costs, faster generation, and more code fitting in context windows.
-
-### 6. Verifiable AI Intent
-
-The first five advantages help AI generate correct code. The sixth solves the problem that comes after: **how do you know what it actually does?**
-
-Most AI coding stacks stop at "it compiles." But compilation says nothing about correctness. An AI can generate a sort function that compiles perfectly yet silently drops elements, or a deposit function that compiles but doesn't add the right amount. The trust gap isn't "does it run?" — it's "does it do what I wanted?"
-
-Teams are shipping AI-written functions faster than any human can read them. Code review was already a bottleneck when humans wrote everything. Now AI can produce hundreds of functions a day, and the reviewers are the same three senior engineers. Either review becomes a rubber stamp (dangerous) or a bottleneck that eliminates the speed advantage of AI generation (pointless).
-
-FORMA closes this gap. Contracts declare intent directly on the functions they describe, and the verification UX makes that intent inspectable without reading source:
-
-```bash
-# Translate contracts to plain English
-forma explain myfile.forma --format human
-
-# Generate a CI-consumable trust report
-forma verify src --report --format json --examples 20 --seed 42
-```
-
-Here's what that looks like in practice:
-
-```
-┌─ verified_sort(items: [Int]) -> [Int]
-│  Requires:
-│    - items is not empty
-│  Guarantees:
-│    - [@sorted] for every i in 0..result.len() - 1, result[i] is at most result[i + 1]
-│    - [@permutation] permutation(items, result)
-└─ Examples:
-     [valid] ([3]) -> [3]
-     [valid] ([0, -6]) -> [-6, 0]
-```
-
-Compare this to the alternatives: manual code review (slow, error-prone, doesn't scale), separate test suites (disconnected from the code they verify), or "trust the model" (not a strategy). FORMA's contracts live on the function they describe, `explain` translates them to English, and `verify` generates evidence that they hold.
-
-This matters operationally:
-- Product and QA teams can read what contracts mean without reading source code.
-- CI can consume JSON trust reports with deterministic seeds.
-- Verification runs with side effects disabled by default, so generated examples are safe to run in automation.
-
-Instead of "the model said this function is safe," you get a reproducible artifact that shows what was checked and what still needs contracts. Code review stops being "read 500 lines of sort logic" and becomes "confirm that the contract says what I wanted."
-
-## Why Existing Solutions Don't Work
-
-### "Just use better prompts"
-
-Prompt engineering helps but doesn't solve fundamental issues. You can't prompt away lifetime complexity — the information AI needs isn't in the prompt. And prompts can't give you verification tools for what gets generated.
-
-### "Use language-specific fine-tuning"
-
-Fine-tuning on Rust code produces models that are better at Rust but still fail on lifetimes. The failure mode is inherent to the language design, not the training data. And fine-tuning doesn't help the reviewer understand what the model produced.
-
-### "Add more type annotations in prompts"
-
-This helps with type errors but makes prompts expensive and unwieldy. It doesn't help with lifetimes, and it does nothing for the trust problem.
-
-### "Just use Python/JavaScript"
-
-Interpreted languages work well with AI — but they're not systems languages. You can't build operating systems, game engines, or embedded software in Python. And dynamically typed languages make the review problem worse, not better — there are no contracts to explain.
-
-## The Performance Question
-
-"Simpler language = slower code?"
-
-No. FORMA compiles to native code via LLVM — the same backend powering Rust, Clang, and Swift. The second-class reference model doesn't prevent optimization; it just changes how the compiler reasons about memory.
-
-Before execution, FORMA runs a MIR optimization pass (constant folding, copy propagation, dead block elimination, peephole optimizations) that eliminates redundant temporaries and simplifies control flow. For LLVM builds, these MIR-level optimizations complement LLVM's own passes.
-
-For the same algorithms, FORMA should produce comparable machine code to Rust. We're not trading performance for simplicity — we're trading *language complexity* for *AI compatibility*.
-
-## Who Is FORMA For?
-
-### AI Agent Developers
-
-If you're building AI systems that generate code, FORMA lets your models write correct systems-level code without lifetime gymnastics — and gives your users `explain` and `verify` tools to audit what the AI produced.
-
-### Teams Adopting AI-Assisted Development
-
-If your team uses Copilot, Claude, or similar tools, FORMA reduces the "fix AI's mistakes" tax on every generation. More importantly, it solves the review problem: your senior engineers don't need to read every AI-generated function line by line. They read the contract explanations, check the verify report, and focus their time on the functions that lack contracts or fail verification.
-
-### Systems Programmers
-
-If you like Rust's safety guarantees but not its complexity, FORMA offers the same safety with a gentler learning curve — for humans too.
-
-### Language Researchers
-
-If you're studying AI + programming languages, FORMA is an existence proof that language design can dramatically improve AI code generation — and that verification UX can close the trust gap between generation and deployment.
+The repository needs reproducible experiments before making quantitative answers.
+Older percentage and “impossible error” claims were removed for this reason.
 
 ## Trade-offs
 
-FORMA isn't Rust. Some things are intentionally different:
+- Second-class references simplify borrowing but rule out some safe patterns.
+- Affine values make ownership visible but demand explicit state threading in some
+  collection APIs.
+- Short canonical keywords reduce source size but can be unfamiliar to people.
+- Contracts reduce review scope only when their intent is correct.
+- Formal verification is powerful only inside its supported model.
+- Capability checks improve least-privilege execution but do not isolate a hostile
+  process by themselves.
+- Interpreter-first development accelerates semantic work while delaying complete
+  native parity.
+- A deliberately small ecosystem avoids ambiguous compatibility claims but offers
+  fewer libraries than established languages.
 
-**No stored references:** You can't build self-referential data structures directly. Use indices or handles instead.
+## Who should evaluate Forma?
 
-**More cloning:** Without lifetime-tracked borrows, some patterns require explicit clones. The compiler helps optimize these.
+- Researchers exploring languages and tools for coding agents
+- Teams designing structured generation, repair, and review loops
+- Compiler engineers interested in shared semantic tooling
+- Verification researchers working on evidence UX
+- Security engineers studying capability-aware generated programs
+- Language designers investigating ownership without written lifetimes
 
-**Smaller ecosystem:** FORMA is new. Rust has crates.io. We're building stdlib and FFI to bridge this gap.
+It is not yet a replacement for a mature production ecosystem.
 
-**Less flexible:** Rust's expressiveness comes from complexity. FORMA trades some expressiveness for AI compatibility.
+## Open questions for the community
 
-## Inspirations
+- Which program facts should be mandatory in an agent handoff?
+- What is the smallest useful contract language for generated application code?
+- Should agents be allowed to request capabilities, or only explain why they need
+  them for a person or policy engine to grant?
+- How should confidence reports compose across packages and network boundaries?
+- Which profile boundary best predicts deployability?
+- When should an `UNKNOWN` verification result block delivery?
+- What evidence would falsify Forma’s core design hypotheses?
 
-FORMA draws from the best ideas in programming language design:
+These are the discussion. Forma is the executable artifact around them.
 
-- **Rust** — Ownership model and memory safety without garbage collection
-- **Python** — Clean, readable syntax with indentation-based structure
-- **Dafny/Eiffel** — Contract-based verification with preconditions and postconditions
-- **Haskell/ML** — Hindley-Milner type inference and algebraic data types
+## Continue
 
-We've combined these influences into something new: a language optimized for AI generation and human verification.
-
-## Getting Started
-
-```bash
-git clone https://github.com/sfw/forma.git
-cd forma
-cargo build --release
-./target/release/forma run examples/showcase/01_hello_world.forma
-```
-
-See the [README](../README.md) for full installation instructions and the [showcase examples](../examples/showcase/) for a tour of FORMA's features.
-
----
-
-*FORMA: Code that writes itself correctly — and proves it.*
+- Read the [agentic engineering thesis](AGENTIC_ENGINEERING.md).
+- Use the [language guide](reference.md).
+- Give an agent the [AI quick reference](ai-reference.md).
+- Inspect the [0.2 profiles](profiles.md) and
+  [implementation status](../planning/design/FORMA_0_2_IMPLEMENTATION_STATUS.md).
+- Run the compiler and bring counterexamples to the issue tracker.

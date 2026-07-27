@@ -77,7 +77,10 @@ pub extern "C" fn forma_unreachable() -> ! {
 #[no_mangle]
 pub extern "C" fn forma_bounds_check(index: i64, len: i64) {
     if index < 0 || index >= len {
-        eprintln!("FORMA panic: index out of bounds: index {} len {}", index, len);
+        eprintln!(
+            "FORMA panic: index out of bounds: index {} len {}",
+            index, len
+        );
         process::exit(1);
     }
 }
@@ -128,7 +131,10 @@ pub extern "C" fn forma_sub_overflow_check(a: i64, b: i64) -> i64 {
     match a.checked_sub(b) {
         Some(result) => result,
         None => {
-            eprintln!("FORMA panic: integer overflow in subtraction: {} - {}", a, b);
+            eprintln!(
+                "FORMA panic: integer overflow in subtraction: {} - {}",
+                a, b
+            );
             process::exit(1);
         }
     }
@@ -140,7 +146,10 @@ pub extern "C" fn forma_mul_overflow_check(a: i64, b: i64) -> i64 {
     match a.checked_mul(b) {
         Some(result) => result,
         None => {
-            eprintln!("FORMA panic: integer overflow in multiplication: {} * {}", a, b);
+            eprintln!(
+                "FORMA panic: integer overflow in multiplication: {} * {}",
+                a, b
+            );
             process::exit(1);
         }
     }

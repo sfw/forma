@@ -9,7 +9,23 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::lexer::{Scanner, Span};
-use crate::parser::{Item, ItemKind, Parser, SourceFile, UseTree};
+use crate::parser::{Item, ItemKind, Parser, SourceFile, UseTree, Visibility};
+
+/// Stable identity derived from a module's canonical source path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ModuleId(pub u64);
+
+impl ModuleId {
+    fn from_path(path: &Path) -> Self {
+        // Fixed FNV-1a keeps IDs stable across sessions and Rust releases.
+        let mut hash = 0xcbf29ce484222325u64;
+        for byte in path.to_string_lossy().as_bytes() {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        Self(hash)
+    }
+}
 
 /// Error during module loading.
 #[derive(Debug, Clone)]
@@ -33,10 +49,13 @@ impl std::fmt::Display for ModuleError {
 impl std::error::Error for ModuleError {}
 
 /// Loaded module information.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LoadedModule {
+    pub id: ModuleId,
     pub path: PathBuf,
+    pub source: String,
     pub items: Vec<Item>,
+    pub exports: Vec<String>,
 }
 
 /// Module loader that handles resolving and loading external modules.
@@ -47,6 +66,8 @@ pub struct ModuleLoader {
     loaded: HashMap<PathBuf, LoadedModule>,
     /// Set of modules currently being loaded (for cycle detection)
     loading: HashSet<PathBuf>,
+    dependency_roots: HashMap<String, PathBuf>,
+    manifest_error: Option<String>,
 }
 
 impl ModuleLoader {
@@ -56,6 +77,8 @@ impl ModuleLoader {
             base_dir: base_dir.into(),
             loaded: HashMap::new(),
             loading: HashSet::new(),
+            dependency_roots: HashMap::new(),
+            manifest_error: None,
         }
     }
 
@@ -65,7 +88,23 @@ impl ModuleLoader {
             .parent()
             .map(|p| p.to_path_buf())
             .unwrap_or_else(|| PathBuf::from("."));
-        Self::new(base_dir)
+        let mut loader = Self::new(base_dir);
+        match crate::package::PackageManifest::discover(source_path) {
+            Ok(Some(manifest)) => {
+                loader.dependency_roots = manifest
+                    .dependencies
+                    .into_iter()
+                    .map(|(name, path)| (name, manifest.root.join(path)))
+                    .collect();
+            }
+            Ok(None) => {}
+            Err(error) => loader.manifest_error = Some(error),
+        }
+        loader
+    }
+
+    pub fn loaded_modules(&self) -> impl Iterator<Item = &LoadedModule> {
+        self.loaded.values()
     }
 
     /// Resolve a module path to a file path.
@@ -119,10 +158,7 @@ impl ModuleLoader {
     fn load_module_file(&mut self, path: &Path) -> Result<LoadedModule, ModuleError> {
         // Check if already loaded
         if let Some(module) = self.loaded.get(path) {
-            return Ok(LoadedModule {
-                path: module.path.clone(),
-                items: module.items.clone(),
-            });
+            return Ok(module.clone());
         }
 
         // Check for cycles
@@ -185,29 +221,72 @@ impl ModuleLoader {
             span: None,
         })?;
 
+        let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let exports = ast.items.iter().filter_map(exported_item_name).collect();
         let module = LoadedModule {
-            path: path.to_path_buf(),
+            id: ModuleId::from_path(&canonical_path),
+            path: canonical_path,
+            source: source.clone(),
             items: ast.items.clone(),
+            exports,
         };
 
         // Cache the result
-        self.loaded.insert(
-            path.to_path_buf(),
-            LoadedModule {
-                path: path.to_path_buf(),
-                items: ast.items,
-            },
-        );
+        self.loaded.insert(path.to_path_buf(), module.clone());
 
         Ok(module)
     }
 
     /// Resolve a module path to a file, trying base_dir, cwd, and std/ directory.
     fn find_module_file(&self, module_path: &[String]) -> Result<PathBuf, ModuleError> {
-        // Try resolved path from base_dir first
-        let file_path = self.resolve_module_path(module_path);
+        self.find_module_file_from(module_path, &self.base_dir)
+    }
+
+    /// Resolve relative to the source containing the import. Package/std
+    /// fallbacks remain rooted at the compiler session's base directory.
+    fn find_module_file_from(
+        &self,
+        module_path: &[String],
+        importer_dir: &Path,
+    ) -> Result<PathBuf, ModuleError> {
+        if let Some((dependency, remainder)) = module_path.split_first()
+            && let Some(root) = self.dependency_roots.get(dependency)
+        {
+            let mut dependency_path = root.join("src");
+            if remainder.is_empty() {
+                dependency_path.push("lib");
+            } else {
+                for segment in remainder {
+                    dependency_path.push(segment);
+                }
+            }
+            dependency_path.set_extension("forma");
+            if dependency_path.exists() {
+                return Ok(dependency_path.canonicalize().unwrap_or(dependency_path));
+            }
+            return Err(ModuleError {
+                message: format!(
+                    "module `{}` was not found in path dependency `{dependency}`",
+                    module_path.join(".")
+                ),
+                path: Some(dependency_path),
+                span: None,
+            });
+        }
+
+        let mut file_path = importer_dir.to_path_buf();
+        for segment in module_path {
+            file_path.push(segment);
+        }
+        file_path.set_extension("forma");
         if file_path.exists() {
-            return Ok(file_path);
+            return Ok(file_path.canonicalize().unwrap_or(file_path));
+        }
+
+        // Package-root resolution supports explicitly qualified paths.
+        let package_path = self.resolve_module_path(module_path);
+        if package_path.exists() {
+            return Ok(package_path.canonicalize().unwrap_or(package_path));
         }
 
         // Try relative to working directory
@@ -215,7 +294,7 @@ impl ModuleLoader {
             .join(module_path.join("/"))
             .with_extension("forma");
         if cwd_path.exists() {
-            return Ok(cwd_path);
+            return Ok(cwd_path.canonicalize().unwrap_or(cwd_path));
         }
 
         // Try std/ directory for stdlib modules (std.core -> std/core.forma)
@@ -226,12 +305,12 @@ impl ModuleLoader {
             }
             std_path.set_extension("forma");
             if std_path.exists() {
-                return Ok(std_path);
+                return Ok(std_path.canonicalize().unwrap_or(std_path));
             }
         }
 
         // Module not found
-        let tried = format!("'{}'", file_path.display());
+        let tried = format!("'{}', '{}'", file_path.display(), package_path.display());
         Err(ModuleError {
             message: format!(
                 "module not found: '{}' (tried {})",
@@ -246,6 +325,13 @@ impl ModuleLoader {
     /// Load all modules referenced by use statements in the given AST.
     /// Returns the combined items from all loaded modules, including transitive imports.
     pub fn load_imports(&mut self, ast: &SourceFile) -> Result<Vec<Item>, ModuleError> {
+        if let Some(error) = self.manifest_error.take() {
+            return Err(ModuleError {
+                message: error,
+                path: None,
+                span: None,
+            });
+        }
         let mut all_imported_items = Vec::new();
 
         for item in &ast.items {
@@ -267,6 +353,25 @@ impl ModuleLoader {
                             e
                         })?;
                 }
+            }
+        }
+
+        let mut names = HashSet::new();
+        for item in &all_imported_items {
+            if let Some(name) = exported_item_name(item)
+                && !names.insert(name.clone())
+            {
+                return Err(ModuleError {
+                    message: format!(
+                        "ambiguous import: multiple modules export `{name}`; rename one export until qualified module namespaces are enabled"
+                    ),
+                    path: None,
+                    span: ast
+                        .items
+                        .iter()
+                        .find(|item| matches!(item.kind, ItemKind::Use(_)))
+                        .map(|item| item.span),
+                });
             }
         }
 
@@ -322,7 +427,8 @@ impl ModuleLoader {
                 let mut paths = Vec::new();
                 Self::extract_use_paths(&use_decl.tree, &[], &mut paths);
                 for module_path in paths {
-                    let dep_path = match self.find_module_file(&module_path) {
+                    let importer_dir = path.parent().unwrap_or(&self.base_dir);
+                    let dep_path = match self.find_module_file_from(&module_path, importer_dir) {
                         Ok(p) => p,
                         Err(e) => {
                             self.loading.remove(&path_buf);
@@ -340,9 +446,11 @@ impl ModuleLoader {
         // Done resolving — remove from loading
         self.loading.remove(&path_buf);
 
-        // Then add this module's non-Use items
+        // Then expose only the module's public surface. Implementations carry
+        // no standalone visibility in the current AST, but must accompany
+        // exported types so their trait and inherent methods remain usable.
         for item in module.items {
-            if !matches!(item.kind, ItemKind::Use(_)) {
+            if exported_item_name(&item).is_some() || matches!(item.kind, ItemKind::Impl(_)) {
                 items.push(item);
             }
         }
@@ -381,6 +489,20 @@ impl ModuleLoader {
     }
 }
 
+fn exported_item_name(item: &Item) -> Option<String> {
+    let (name, visibility) = match &item.kind {
+        ItemKind::Function(value) => (&value.name.name, value.visibility),
+        ItemKind::Struct(value) => (&value.name.name, value.visibility),
+        ItemKind::Enum(value) => (&value.name.name, value.visibility),
+        ItemKind::Trait(value) => (&value.name.name, value.visibility),
+        ItemKind::Module(value) => (&value.name.name, value.visibility),
+        ItemKind::Const(value) => (&value.name.name, value.visibility),
+        ItemKind::TypeAlias(value) => (&value.name.name, value.visibility),
+        ItemKind::Impl(_) | ItemKind::Use(_) => return None,
+    };
+    (visibility == Visibility::Public).then(|| name.clone())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -402,10 +524,10 @@ mod tests {
         let base = dir.path();
 
         // b.forma defines a function
-        write_temp_file(base, "b.forma", "f helper() -> Int = 99\n");
+        write_temp_file(base, "b.forma", "pub f helper() -> Int = 99\n");
 
         // a.forma imports b
-        write_temp_file(base, "a.forma", "us b\nf wrapper() -> Int = helper()\n");
+        write_temp_file(base, "a.forma", "us b\npub f wrapper() -> Int = helper()\n");
 
         // main.forma imports a (should transitively get b's items)
         write_temp_file(base, "main.forma", "us a\nf main() -> Int = wrapper()\n");
@@ -445,6 +567,111 @@ mod tests {
             names.contains(&"main".to_string()),
             "should contain 'main' from main.forma"
         );
+    }
+
+    #[test]
+    fn module_identity_is_stable_and_exports_are_explicit() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        write_temp_file(
+            base,
+            "api.forma",
+            "pub f visible() -> Int = 1\nf hidden() -> Int = 2\n",
+        );
+        let path = base.join("api.forma");
+        let mut first = ModuleLoader::new(base);
+        let first_module = first.load_module_file(&path).unwrap();
+        let mut second = ModuleLoader::new(base);
+        let second_module = second.load_module_file(&path).unwrap();
+        assert_eq!(first_module.id, second_module.id);
+        assert_eq!(first_module.exports, vec!["visible"]);
+    }
+
+    #[test]
+    fn package_path_dependencies_resolve_deterministically() {
+        let directory = tempfile::tempdir().unwrap();
+        let app = directory.path().join("app");
+        let dependency = directory.path().join("utility");
+        std::fs::create_dir_all(app.join("src")).unwrap();
+        std::fs::create_dir_all(dependency.join("src")).unwrap();
+        write_temp_file(
+            &app,
+            "forma.toml",
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n[deps]\nutility = { path = \"../utility\" }\n",
+        );
+        write_temp_file(&dependency, "src/lib.forma", "pub f answer() -> Int = 42\n");
+        write_temp_file(
+            &app,
+            "src/main.forma",
+            "us utility\nf main() -> Int = answer()\n",
+        );
+
+        let main = app.join("src/main.forma");
+        let mut loader = ModuleLoader::from_source_file(&main);
+        let imports = loader
+            .load_imports(
+                &Parser::new(&Scanner::new("us utility\n").scan_all().0)
+                    .parse()
+                    .unwrap(),
+            )
+            .unwrap();
+        assert!(imports.iter().any(
+            |item| matches!(&item.kind, ItemKind::Function(function) if function.name.name == "answer")
+        ));
+    }
+
+    #[test]
+    fn duplicate_unqualified_exports_are_rejected() {
+        let directory = tempfile::tempdir().unwrap();
+        write_temp_file(
+            directory.path(),
+            "a.forma",
+            "pub f duplicate() -> Int = 1\n",
+        );
+        write_temp_file(
+            directory.path(),
+            "b.forma",
+            "pub f duplicate() -> Int = 2\n",
+        );
+        write_temp_file(
+            directory.path(),
+            "main.forma",
+            "us a\nus b\nf main() -> Int = duplicate()\n",
+        );
+        let main = directory.path().join("main.forma");
+        let result = ModuleLoader::from_source_file(&main).load_with_dependencies(&main);
+        let error = result.expect_err("ambiguous flattened exports must not be source-order based");
+        assert!(
+            error
+                .message
+                .contains("multiple modules export `duplicate`")
+        );
+    }
+
+    #[test]
+    fn transitive_imports_resolve_relative_to_the_importer() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        write_temp_file(base, "feature/helper.forma", "pub f helper() -> Int = 7\n");
+        write_temp_file(
+            base,
+            "feature/api.forma",
+            "us helper\npub f api() -> Int = helper()\n",
+        );
+        write_temp_file(
+            base,
+            "main.forma",
+            "us feature.api\nf main() -> Int = api()\n",
+        );
+
+        let main_path = base.join("main.forma");
+        let mut loader = ModuleLoader::from_source_file(&main_path);
+        let ast = loader
+            .load_with_dependencies(&main_path)
+            .expect("nested dependency should resolve beside its importer");
+        assert!(ast.items.iter().any(
+            |item| matches!(&item.kind, ItemKind::Function(function) if function.name.name == "helper")
+        ));
     }
 
     #[test]

@@ -1,0 +1,8 @@
+version = 1
+name = "read_file"
+entrypoint = "tool.forma"
+capabilities = ["read"]
+environment = []
+description = "Read one UTF-8 file confined to the configured workspace."
+input_description = "Workspace-relative file path."
+payload_description = "Must be empty."

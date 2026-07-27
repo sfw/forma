@@ -44,7 +44,7 @@
 # ============================================================
 
 # Print string (wrapper, alias for print)
-f puts(s: Str)
+pub f puts(s: Str) -> ()
     print(s)
 
 # Read file or return default on error

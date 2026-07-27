@@ -1,0 +1,27 @@
+{
+  "id": "project-review",
+  "authority": ["read", "write", "exec"],
+  "nodes": [
+    {"id": "root", "role": "run coordinator", "required_capability": "none", "max_attempts": 1, "required": true},
+    {"id": "inventory", "role": "repository analyst", "required_capability": "read", "max_attempts": 1, "required": true},
+    {"id": "architecture", "role": "architecture reviewer", "required_capability": "read", "max_attempts": 2, "required": true},
+    {"id": "tests", "role": "test reviewer", "required_capability": "read", "max_attempts": 1, "required": true},
+    {"id": "plan", "role": "planning synthesizer", "required_capability": "none", "max_attempts": 1, "required": true},
+    {"id": "implementation", "role": "implementation agent", "required_capability": "write", "max_attempts": 1, "required": true},
+    {"id": "validation", "role": "validation agent", "required_capability": "exec", "max_attempts": 1, "required": true, "self_correcting": true, "repair_attempts_per_strategy": 2, "repair_strategy_changes": 2},
+    {"id": "publish", "role": "publication agent", "required_capability": "none", "max_attempts": 1, "required": false},
+    {"id": "release", "role": "release decision agent", "required_capability": "none", "max_attempts": 1, "required": true}
+  ],
+  "edges": [
+    {"source": "root", "target": "inventory", "condition": "requires_success"},
+    {"source": "inventory", "target": "architecture", "condition": "requires_success"},
+    {"source": "inventory", "target": "tests", "condition": "requires_success"},
+    {"source": "architecture", "target": "plan", "condition": "requires_success"},
+    {"source": "tests", "target": "plan", "condition": "requires_success"},
+    {"source": "plan", "target": "implementation", "condition": "requires_success"},
+    {"source": "implementation", "target": "validation", "condition": "requires_success"},
+    {"source": "validation", "target": "publish", "condition": "requires_success"},
+    {"source": "validation", "target": "release", "condition": "requires_success"},
+    {"source": "publish", "target": "release", "condition": "requires_terminal"}
+  ]
+}

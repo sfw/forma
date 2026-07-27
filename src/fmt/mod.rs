@@ -50,6 +50,80 @@ impl Formatter {
         }
     }
 
+    fn format_visibility(&mut self, visibility: Visibility) {
+        match visibility {
+            Visibility::Private => {}
+            Visibility::Public => self.write("pub "),
+            Visibility::Crate => self.write("pub(crate) "),
+        }
+    }
+
+    fn format_generics(&mut self, generics: Option<&Generics>) {
+        let Some(generics) = generics else {
+            return;
+        };
+        self.write("[");
+        for (index, param) in generics.params.iter().enumerate() {
+            if index > 0 {
+                self.write(", ");
+            }
+            match param {
+                GenericParam::Type(param) => {
+                    self.write(&param.name.name);
+                    self.format_bounds(&param.bounds);
+                }
+                GenericParam::Const(param) => {
+                    self.write(&param.name.name);
+                    self.write(": ");
+                    self.format_type(&param.ty);
+                }
+            }
+        }
+        self.write("]");
+    }
+
+    fn format_bounds(&mut self, bounds: &[TypeBound]) {
+        if bounds.is_empty() {
+            return;
+        }
+        self.write(": ");
+        for (index, bound) in bounds.iter().enumerate() {
+            if index > 0 {
+                self.write(" + ");
+            }
+            self.format_type_path(&bound.path);
+        }
+    }
+
+    fn format_where_clause(&mut self, clause: Option<&WhereClause>) {
+        let Some(clause) = clause else {
+            return;
+        };
+        self.write(" where ");
+        for (index, predicate) in clause.predicates.iter().enumerate() {
+            if index > 0 {
+                self.write(", ");
+            }
+            self.format_type(&predicate.ty);
+            self.format_bounds(&predicate.bounds);
+        }
+    }
+
+    fn format_type_alias(&mut self, alias: &TypeAlias, include_visibility: bool) {
+        self.write_indent();
+        if include_visibility {
+            self.format_visibility(alias.visibility);
+        }
+        self.write("type ");
+        self.write(&alias.name.name);
+        self.format_generics(alias.generics.as_ref());
+        if let Some(ty) = &alias.ty {
+            self.write(" = ");
+            self.format_type(ty);
+        }
+        self.newline();
+    }
+
     fn format_item(&mut self, item: &Item) {
         match &item.kind {
             ItemKind::Function(f) => self.format_function(f),
@@ -57,8 +131,13 @@ impl Formatter {
             ItemKind::Enum(e) => self.format_enum(e),
             ItemKind::Trait(t) => {
                 self.write_indent();
+                self.format_visibility(t.visibility);
+                if t.is_unsafe {
+                    self.write("un ");
+                }
                 self.write("t ");
                 self.write(&t.name.name);
+                self.format_generics(t.generics.as_ref());
                 if !t.supertraits.is_empty() {
                     self.write(": ");
                     for (i, st) in t.supertraits.iter().enumerate() {
@@ -77,12 +156,17 @@ impl Formatter {
             }
             ItemKind::Impl(imp) => {
                 self.write_indent();
+                if imp.is_unsafe {
+                    self.write("un ");
+                }
                 self.write("i ");
+                self.format_generics(imp.generics.as_ref());
                 if let Some(ref trait_ty) = imp.trait_ {
                     self.format_type(trait_ty);
                     self.write(" for ");
                 }
                 self.format_type(&imp.self_type);
+                self.format_where_clause(imp.where_clause.as_ref());
                 self.newline();
                 self.indent += 1;
                 for item in &imp.items {
@@ -91,10 +175,7 @@ impl Formatter {
                 self.indent -= 1;
             }
             ItemKind::TypeAlias(t) => {
-                self.write_indent();
-                self.write("type ");
-                self.write(&t.name.name);
-                self.newline();
+                self.format_type_alias(t, true);
             }
             ItemKind::Use(use_stmt) => {
                 self.write_indent();
@@ -104,13 +185,28 @@ impl Formatter {
             }
             ItemKind::Module(m) => {
                 self.write_indent();
+                self.format_visibility(m.visibility);
                 self.write("md ");
                 self.write(&m.name.name);
-                self.newline();
+                if let Some(items) = &m.items {
+                    self.newline();
+                    self.indent += 1;
+                    for item in items {
+                        self.format_item(item);
+                    }
+                    self.indent -= 1;
+                } else {
+                    self.newline();
+                }
             }
             ItemKind::Const(c) => {
                 self.write_indent();
+                self.format_visibility(c.visibility);
                 self.write(&c.name.name);
+                if let Some(ty) = &c.ty {
+                    self.write(": ");
+                    self.format_type(ty);
+                }
                 self.write(" :: ");
                 self.format_expr(&c.value);
                 self.newline();
@@ -121,16 +217,18 @@ impl Formatter {
     fn format_function(&mut self, f: &Function) {
         self.write_indent();
 
-        if f.visibility == Visibility::Public {
-            self.write("pub ");
-        }
+        self.format_visibility(f.visibility);
 
         if f.is_async {
             self.write("as ");
         }
+        if f.is_unsafe {
+            self.write("un ");
+        }
 
         self.write("f ");
         self.write(&f.name.name);
+        self.format_generics(f.generics.as_ref());
         self.write("(");
 
         for (i, param) in f.params.iter().enumerate() {
@@ -162,6 +260,10 @@ impl Formatter {
             self.write(&param.name.name);
             self.write(": ");
             self.format_type(&param.ty);
+            if let Some(default) = &param.default {
+                self.write(" = ");
+                self.format_expr(default);
+            }
         }
 
         self.write(")");
@@ -192,12 +294,22 @@ impl Formatter {
     }
 
     fn format_struct(&mut self, s: &Struct) {
-        self.write_indent();
-        if s.visibility == Visibility::Public {
-            self.write("pub ");
+        for invariant in &s.invariants {
+            self.write_indent();
+            self.write("@inv(");
+            self.format_expr(&invariant.condition);
+            if let Some(message) = &invariant.message {
+                self.write(", ");
+                self.write(&format!("{message:?}"));
+            }
+            self.write(")");
+            self.newline();
         }
+        self.write_indent();
+        self.format_visibility(s.visibility);
         self.write("s ");
         self.write(&s.name.name);
+        self.format_generics(s.generics.as_ref());
 
         match &s.kind {
             StructKind::Named(fields) => {
@@ -205,9 +317,14 @@ impl Formatter {
                 self.indent += 1;
                 for field in fields {
                     self.write_indent();
+                    self.format_visibility(field.visibility);
                     self.write(&field.name.name);
                     self.write(": ");
                     self.format_type(&field.ty);
+                    if let Some(default) = &field.default {
+                        self.write(" = ");
+                        self.format_expr(default);
+                    }
                     self.newline();
                 }
                 self.indent -= 1;
@@ -231,17 +348,41 @@ impl Formatter {
 
     fn format_enum(&mut self, e: &Enum) {
         self.write_indent();
-        if e.visibility == Visibility::Public {
-            self.write("pub ");
-        }
+        self.format_visibility(e.visibility);
         self.write("e ");
         self.write(&e.name.name);
+        self.format_generics(e.generics.as_ref());
         self.newline();
         self.indent += 1;
 
         for variant in &e.variants {
             self.write_indent();
             self.write(&variant.name.name);
+            match &variant.kind {
+                VariantKind::Unit => {}
+                VariantKind::Tuple(types) => {
+                    self.write("(");
+                    for (index, ty) in types.iter().enumerate() {
+                        if index > 0 {
+                            self.write(", ");
+                        }
+                        self.format_type(ty);
+                    }
+                    self.write(")");
+                }
+                VariantKind::Named(fields) => {
+                    self.write("(");
+                    for (index, field) in fields.iter().enumerate() {
+                        if index > 0 {
+                            self.write(", ");
+                        }
+                        self.write(&field.name.name);
+                        self.write(": ");
+                        self.format_type(&field.ty);
+                    }
+                    self.write(")");
+                }
+            }
             self.newline();
         }
 
@@ -251,12 +392,7 @@ impl Formatter {
     fn format_type(&mut self, ty: &Type) {
         match &ty.kind {
             TypeKind::Path(p) => {
-                for (i, seg) in p.segments.iter().enumerate() {
-                    if i > 0 {
-                        self.write("::");
-                    }
-                    self.write(&seg.name.name);
-                }
+                self.format_type_path(p);
             }
             TypeKind::Tuple(types) => {
                 self.write("(");
@@ -840,24 +976,14 @@ impl Formatter {
     fn format_trait_item(&mut self, item: &TraitItem) {
         match item {
             TraitItem::Function(f) => self.format_function(f),
-            TraitItem::TypeAlias(t) => {
-                self.write_indent();
-                self.write("type ");
-                self.write(&t.name.name);
-                self.newline();
-            }
+            TraitItem::TypeAlias(t) => self.format_type_alias(t, false),
         }
     }
 
     fn format_impl_item(&mut self, item: &ImplItem) {
         match item {
             ImplItem::Function(f) => self.format_function(f),
-            ImplItem::TypeAlias(t) => {
-                self.write_indent();
-                self.write("type ");
-                self.write(&t.name.name);
-                self.newline();
-            }
+            ImplItem::TypeAlias(t) => self.format_type_alias(t, false),
         }
     }
 
@@ -867,6 +993,19 @@ impl Formatter {
                 self.write("::");
             }
             self.write(&seg.name.name);
+            if let Some(args) = &seg.args {
+                self.write("[");
+                for (index, arg) in args.args.iter().enumerate() {
+                    if index > 0 {
+                        self.write(", ");
+                    }
+                    match arg {
+                        GenericArg::Type(ty) => self.format_type(ty),
+                        GenericArg::Expr(expr) => self.format_expr(expr),
+                    }
+                }
+                self.write("]");
+            }
         }
     }
 

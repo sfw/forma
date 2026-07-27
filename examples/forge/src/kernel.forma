@@ -1,0 +1,747 @@
+# Pure Forge workflow transition kernel.
+#
+# Functions in this module transform owned state and declare effects as data.
+# They never read wall time, generate randomness, access storage, or invoke an
+# agent.
+
+us model
+us graph
+
+@post(result >= -1)
+@post(result < nodes.len())
+@post(result >= 0 => exists node in nodes: node.node_id == node_id)
+pub f runtime_index(ref nodes: [NodeRuntime], ref node_id: Str) -> Int
+    i := 0
+    found := -1
+    wh i < vec_len(nodes)
+        if nodes[i].node_id == node_id
+            found = i
+        i = i + 1
+    found
+
+pub f runtime_status(ref state: WorkflowState, ref node_id: Str) -> Str
+    index := runtime_index(ref state.nodes, ref node_id)
+    if index < 0 then "unknown" else str(state.nodes[index].status)
+
+@post(result >= -1)
+pub f runtime_attempt(ref state: WorkflowState, ref node_id: Str) -> Int
+    index := runtime_index(ref state.nodes, ref node_id)
+    if index < 0 then -1 else state.nodes[index].attempt
+
+pub f status_is_terminal(ref status: Str) -> Bool
+    status == "completed" || status == "failed" || status == "cancelled" ||
+        status == "skipped"
+
+@pre(run_id.len() > 0, "workflow run id must not be empty")
+@pre(graph.nodes.len() > 0, "workflow graph must contain a node")
+@post(result.run_id == old(run_id))
+@post(result.status == "running")
+@post(result.nodes.len() == graph.nodes.len())
+@post(result.events.len() == 1)
+@post(result.next_sequence == 1)
+@post(result.logical_time == 0)
+pub f initial_state(ref graph: WorkflowGraph, run_id: Str) -> WorkflowState
+    runtimes := []
+    i := 0
+    wh i < vec_len(graph.nodes)
+        runtimes = vec_push(runtimes, node_runtime(str(graph.nodes[i].id)))
+        i = i + 1
+
+    WorkflowState {
+        run_id: run_id,
+        status: "running",
+        nodes: runtimes,
+        events: [audit_event(0, 0, "", "run_started", graph.id)],
+        next_sequence: 1,
+        logical_time: 0,
+        repair: inactive_repair_session()
+    }
+
+@pre(state.next_sequence == state.events.len(), "event sequence must be contiguous")
+@pre(state.logical_time >= 0, "logical time must be non-negative")
+@post(result.events.len() == old(state.events).len() + 1)
+@post(result.next_sequence == old(state.next_sequence) + 1)
+@post(result.logical_time == old(state.logical_time))
+pub f append_event(
+    state: WorkflowState,
+    node_id: Str,
+    kind: Str,
+    detail: Str
+) -> WorkflowState
+    next := state
+    event := audit_event(
+        next.next_sequence,
+        next.logical_time,
+        node_id,
+        kind,
+        detail
+    )
+    next.events = vec_push(next.events, event)
+    next.next_sequence = next.next_sequence + 1
+    next
+
+@pre(amount >= 0, "logical time cannot move backwards")
+@post(result.logical_time == old(state.logical_time) + amount)
+@post(result.events.len() == old(state.events).len())
+pub f advance_logical_time(state: WorkflowState, amount: Int) -> WorkflowState
+    next := state
+    if amount > 0
+        next.logical_time = next.logical_time + amount
+    next
+
+@post(result.accepted => result.state.repair.status == "verifying")
+@post(result.accepted => result.state.repair.revision == 1)
+@post(result.accepted => result.state.events.len() == old(state.events).len() + 2)
+@post(!result.accepted => result.state.events.len() == old(state.events).len())
+pub f begin_repair_cycle(
+    state: WorkflowState,
+    node_id: Str,
+    artifact: Str
+) -> Transition
+    if state.repair.status != "inactive"
+        rejected_transition(state, "a repair cycle is already active")
+    else
+        id_for_event := str(node_id)
+        artifact_for_event := str(artifact)
+        next := state
+        next.repair = RepairSession {
+            status: "verifying",
+            node_id: node_id,
+            revision: 1,
+            artifact: artifact,
+            strategy: 0,
+            attempts_in_strategy: 0,
+            strategy_changes_used: 0,
+            last_failure_count: -1,
+            last_severity_score: -1,
+            last_failure_fingerprint: "",
+            evidence_artifact: ""
+        }
+        next = append_event(
+            next,
+            str(id_for_event),
+            "repair_cycle_started",
+            artifact_for_event
+        )
+        next = append_event(
+            next,
+            id_for_event,
+            "verification_started",
+            "revision 1"
+        )
+        Transition {
+            state: next,
+            effects: ["verify_revision:1"],
+            accepted: true,
+            error: ""
+        }
+
+pub f verification_made_progress(
+    ref session: RepairSession,
+    ref result: VerificationResult
+) -> Bool
+    session.last_failure_count < 0 ||
+        result.failure_count < session.last_failure_count ||
+        result.severity_score < session.last_severity_score ||
+        result.failure_fingerprint != session.last_failure_fingerprint
+
+@post(result.state.events.len() >= old(state.events).len())
+@post(!result.accepted => result.state.events.len() == old(state.events).len())
+pub f record_verification(
+    ref policy: RepairPolicy,
+    state: WorkflowState,
+    result: VerificationResult
+) -> Transition
+    if state.repair.status != "verifying"
+        rejected_transition(state, "verification result requires a verifying repair cycle")
+    else if policy.attempts_per_strategy < 1 || policy.strategy_changes < 0
+        rejected_transition(state, "repair policy budgets must be finite and positive")
+    else if result.disposition == "passed"
+        next := state
+        next.repair.status = "completed"
+        next.repair.evidence_artifact = result.evidence_artifact
+        next = append_event(
+            next,
+            str(next.repair.node_id),
+            "verification_passed",
+            "revision " + int_to_str(next.repair.revision)
+        )
+        Transition {
+            state: next,
+            effects: ["persist_event"],
+            accepted: true,
+            error: ""
+        }
+    else if result.disposition == "infrastructure_error"
+        next := state
+        next = append_event(
+            next,
+            str(next.repair.node_id),
+            "verification_retry",
+            str(result.evidence_artifact)
+        )
+        Transition {
+            state: next,
+            effects: ["verify_revision:" + int_to_str(next.repair.revision)],
+            accepted: true,
+            error: ""
+        }
+    else if result.disposition == "blocked"
+        next := state
+        next.repair.status = "awaiting_intervention"
+        next.repair.evidence_artifact = result.evidence_artifact
+        next = append_event(
+            next,
+            str(next.repair.node_id),
+            "repair_paused",
+            "verification requires additional context or authority"
+        )
+        Transition {
+            state: next,
+            effects: ["request_intervention"],
+            accepted: true,
+            error: ""
+        }
+    else if result.disposition != "findings"
+        rejected_transition(state, "unknown verification disposition")
+    else
+        progress := verification_made_progress(ref state.repair, ref result)
+        next := state
+        next.repair.last_failure_count = result.failure_count
+        next.repair.last_severity_score = result.severity_score
+        next.repair.last_failure_fingerprint = result.failure_fingerprint
+        next.repair.evidence_artifact = result.evidence_artifact
+
+        if progress && policy.renew_budget_on_progress
+            next.repair.attempts_in_strategy = 0
+
+        stagnant_budget_exhausted := !progress &&
+            next.repair.attempts_in_strategy >= policy.attempts_per_strategy
+        strategy_available := next.repair.strategy_changes_used <
+            policy.strategy_changes
+
+        if stagnant_budget_exhausted && strategy_available
+            next.repair.strategy = next.repair.strategy + 1
+            next.repair.strategy_changes_used = next.repair.strategy_changes_used + 1
+            next.repair.attempts_in_strategy = 0
+            next.repair.status = "repairing"
+            next = append_event(
+                next,
+                str(next.repair.node_id),
+                "repair_strategy_changed",
+                "strategy " + int_to_str(next.repair.strategy)
+            )
+            Transition {
+                state: next,
+                effects: ["diagnose_with_new_strategy"],
+                accepted: true,
+                error: ""
+            }
+        else if stagnant_budget_exhausted && policy.pause_on_stagnation
+            next.repair.status = "awaiting_intervention"
+            next = append_event(
+                next,
+                str(next.repair.node_id),
+                "repair_paused",
+                "autonomous strategies exhausted; progress is preserved"
+            )
+            Transition {
+                state: next,
+                effects: ["request_intervention"],
+                accepted: true,
+                error: ""
+            }
+        else
+            next.repair.status = "repairing"
+            next = append_event(
+                next,
+                str(next.repair.node_id),
+                "repair_requested",
+                str(next.repair.evidence_artifact)
+            )
+            Transition {
+                state: next,
+                effects: ["repair_revision:" + int_to_str(next.repair.revision)],
+                accepted: true,
+                error: ""
+            }
+
+@post(result.accepted => result.state.repair.status == "verifying")
+@post(result.accepted => result.state.repair.revision == old(state.repair.revision) + 1)
+@post(result.accepted => result.state.events.len() == old(state.events).len() + 2)
+@post(!result.accepted => result.state.events.len() == old(state.events).len())
+pub f apply_repair(
+    state: WorkflowState,
+    candidate_artifact: Str
+) -> Transition
+    if state.repair.status != "repairing"
+        rejected_transition(state, "a repair requires an active repair request")
+    else if candidate_artifact == state.repair.artifact
+        rejected_transition(state, "a repair must produce a new immutable artifact")
+    else
+        next := state
+        next.repair.revision = next.repair.revision + 1
+        next.repair.attempts_in_strategy = next.repair.attempts_in_strategy + 1
+        next.repair.artifact = candidate_artifact
+        next.repair.status = "verifying"
+        next = append_event(
+            next,
+            str(next.repair.node_id),
+            "repair_applied",
+            str(next.repair.artifact)
+        )
+        next = append_event(
+            next,
+            str(next.repair.node_id),
+            "verification_started",
+            "revision " + int_to_str(next.repair.revision)
+        )
+        Transition {
+            state: next,
+            effects: ["verify_revision:" + int_to_str(next.repair.revision)],
+            accepted: true,
+            error: ""
+        }
+
+pub f repair_cycle_completed(ref state: WorkflowState) -> Bool
+    state.repair.status == "completed"
+
+pub f repair_cycle_is_resumable(ref state: WorkflowState) -> Bool
+    state.repair.status == "awaiting_intervention"
+
+@post(result.accepted => result.state.repair.status == "repairing")
+@post(result.accepted => result.state.repair.strategy == old(state.repair.strategy) + 1)
+@post(result.state.events.len() >= old(state.events).len())
+pub f resume_repair_cycle(
+    state: WorkflowState,
+    intervention_artifact: Str
+) -> Transition
+    if state.repair.status != "awaiting_intervention"
+        rejected_transition(state, "only a paused repair cycle can resume")
+    else
+        next := state
+        next.repair.status = "repairing"
+        next.repair.strategy = next.repair.strategy + 1
+        next.repair.attempts_in_strategy = 0
+        next.repair.evidence_artifact = intervention_artifact
+        next = append_event(
+            next,
+            str(next.repair.node_id),
+            "repair_resumed",
+            str(next.repair.evidence_artifact)
+        )
+        Transition {
+            state: next,
+            effects: ["repair_with_intervention"],
+            accepted: true,
+            error: ""
+        }
+
+pub f repair_status(ref state: WorkflowState) -> Str
+    str(state.repair.status)
+
+pub f repair_artifact(ref state: WorkflowState) -> Str
+    str(state.repair.artifact)
+
+@pre(attempt >= 0, "runtime attempts must be non-negative")
+@post(result.nodes.len() == old(state.nodes).len())
+@post(result.events.len() == old(state.events).len())
+pub f replace_runtime(
+    state: WorkflowState,
+    node_id: Str,
+    status: Str,
+    attempt: Int,
+    artifact: Str,
+    error: Str
+) -> WorkflowState
+    next := state
+    index := runtime_index(ref next.nodes, ref node_id)
+    if index >= 0
+        replacement := NodeRuntime {
+            node_id: node_id,
+            status: status,
+            attempt: attempt,
+            artifact: artifact,
+            error: error
+        }
+        next.nodes = vec_set(next.nodes, index, replacement)
+    next
+
+pub f source_satisfies(
+    ref state: WorkflowState,
+    ref source: Str,
+    ref condition: Str
+) -> Bool
+    status := runtime_status(ref state, ref source)
+    if condition == "requires_success" || condition == "on_success"
+        status == "completed"
+    else if condition == "requires_terminal"
+        status_is_terminal(ref status)
+    else if condition == "on_failure"
+        status == "failed"
+    else false
+
+pub f node_is_ready(
+    ref graph: WorkflowGraph,
+    ref state: WorkflowState,
+    ref node_id: Str
+) -> Bool
+    if runtime_status(ref state, ref node_id) != "pending" then false
+    else
+        ready := true
+        incoming := 0
+        i := 0
+        wh i < vec_len(graph.edges)
+            if graph.edges[i].target == node_id
+                incoming = incoming + 1
+                if !source_satisfies(
+                    ref state,
+                    ref graph.edges[i].source,
+                    ref graph.edges[i].condition
+                )
+                    ready = false
+            i = i + 1
+        ready
+
+@post(result.len() <= graph.nodes.len())
+@post(forall id in result: id.len() > 0)
+pub f ready_nodes(ref graph: WorkflowGraph, ref state: WorkflowState) -> [Str]
+    ready := []
+    i := 0
+    wh i < vec_len(graph.nodes)
+        if node_is_ready(ref graph, ref state, ref graph.nodes[i].id)
+            ready = vec_push(ready, str(graph.nodes[i].id))
+        i = i + 1
+    ready
+
+pub f start_node(
+    ref graph: WorkflowGraph,
+    state: WorkflowState,
+    node_id: Str
+) -> Transition
+    if !node_is_ready(ref graph, ref state, ref node_id)
+        rejected_transition(state, "node is not ready")
+    else
+        attempt := runtime_attempt(ref state, ref node_id) + 1
+        id_for_event := str(node_id)
+        id_for_effect := str(node_id)
+        next := replace_runtime(state, node_id, "running", attempt, "", "")
+        next = append_event(
+            next,
+            id_for_event,
+            "node_started",
+            "attempt " + int_to_str(attempt)
+        )
+        Transition {
+            state: next,
+            effects: ["invoke_agent:" + id_for_effect],
+            accepted: true,
+            error: ""
+        }
+
+pub f all_required_nodes_completed(
+    ref graph: WorkflowGraph,
+    ref state: WorkflowState
+) -> Bool
+    complete := true
+    i := 0
+    wh i < vec_len(graph.nodes)
+        if graph.nodes[i].required
+            status := runtime_status(ref state, ref graph.nodes[i].id)
+            if status != "completed"
+                complete = false
+        i = i + 1
+    complete
+
+pub f any_required_node_failed(
+    ref graph: WorkflowGraph,
+    ref state: WorkflowState
+) -> Bool
+    failed := false
+    i := 0
+    wh i < vec_len(graph.nodes)
+        if graph.nodes[i].required
+            status := runtime_status(ref state, ref graph.nodes[i].id)
+            if status == "failed" || status == "cancelled"
+                failed = true
+        i = i + 1
+    failed
+
+pub f settle_run(ref graph: WorkflowGraph, state: WorkflowState) -> WorkflowState
+    if any_required_node_failed(ref graph, ref state)
+        next := state
+        next.status = "failed"
+        append_event(next, "", "run_failed", "required work failed")
+    else if all_required_nodes_completed(ref graph, ref state)
+        next := state
+        next.status = "completed"
+        append_event(next, "", "run_completed", "all required work completed")
+    else state
+
+pub f complete_node(
+    ref graph: WorkflowGraph,
+    state: WorkflowState,
+    node_id: Str,
+    artifact: Str
+) -> Transition
+    if runtime_status(ref state, ref node_id) != "running"
+        rejected_transition(state, "only a running node may complete")
+    else
+        attempt := runtime_attempt(ref state, ref node_id)
+        id_for_event := str(node_id)
+        next := replace_runtime(state, node_id, "completed", attempt, artifact, "")
+        next = append_event(next, id_for_event, "node_completed", "artifact accepted")
+        next = settle_run(ref graph, next)
+        Transition {
+            state: next,
+            effects: ["persist_event"],
+            accepted: true,
+            error: ""
+        }
+
+pub f node_max_attempts(ref graph: WorkflowGraph, ref node_id: Str) -> Int
+    index := node_index(ref graph.nodes, ref node_id)
+    if index < 0 then 0 else graph.nodes[index].max_attempts
+
+pub f fail_node(
+    ref graph: WorkflowGraph,
+    state: WorkflowState,
+    node_id: Str,
+    reason: Str
+) -> Transition
+    if runtime_status(ref state, ref node_id) != "running"
+        rejected_transition(state, "only a running node may fail")
+    else
+        attempt := runtime_attempt(ref state, ref node_id)
+        retry := attempt < node_max_attempts(ref graph, ref node_id)
+        id_for_event := str(node_id)
+        detail := str(reason)
+        if retry
+            next := replace_runtime(state, node_id, "pending", attempt, "", reason)
+            next = append_event(next, id_for_event, "retry_scheduled", detail)
+            Transition {
+                state: next,
+                effects: ["persist_event"],
+                accepted: true,
+                error: ""
+            }
+        else
+            next := replace_runtime(state, node_id, "failed", attempt, "", reason)
+            next = append_event(next, id_for_event, "node_failed", detail)
+            next = settle_run(ref graph, next)
+            Transition {
+                state: next,
+                effects: ["persist_event"],
+                accepted: true,
+                error: ""
+            }
+
+pub f deny_capability(
+    ref graph: WorkflowGraph,
+    state: WorkflowState,
+    node_id: Str,
+    capability: Str
+) -> Transition
+    if runtime_status(ref state, ref node_id) != "running"
+        rejected_transition(state, "capability denial requires a running node")
+    else
+        attempt := runtime_attempt(ref state, ref node_id)
+        id_for_event := str(node_id)
+        detail := "denied capability: " + capability
+        next := replace_runtime(state, node_id, "failed", attempt, "", detail)
+        next = append_event(
+            next,
+            id_for_event,
+            "capability_denied",
+            "request exceeded node authority"
+        )
+        next = settle_run(ref graph, next)
+        Transition {
+            state: next,
+            effects: ["persist_event"],
+            accepted: true,
+            error: ""
+        }
+
+pub f event_sequence_is_valid(ref events: [AuditEvent]) -> Bool
+    valid := true
+    i := 0
+    wh i < vec_len(events)
+        if events[i].sequence != i
+            valid = false
+        if i > 0 && events[i].logical_time < events[i - 1].logical_time
+            valid = false
+        i = i + 1
+    valid
+
+@post(result >= 0)
+@post(result <= state.events.len())
+pub f event_count(ref state: WorkflowState, ref kind: Str) -> Int
+    count := 0
+    i := 0
+    wh i < vec_len(state.events)
+        if state.events[i].kind == kind
+            count = count + 1
+        i = i + 1
+    count
+
+@post(result.len() > 0)
+@post(result.contains(state.run_id))
+pub f state_fingerprint(ref state: WorkflowState) -> Str
+    result := state.run_id + "|" + state.status + "|" +
+        int_to_str(state.next_sequence) + "|repair:" + state.repair.status +
+        ":" + int_to_str(state.repair.revision) +
+        ":" + int_to_str(state.repair.strategy)
+    i := 0
+    wh i < vec_len(state.nodes)
+        result = result + "|" + state.nodes[i].node_id + ":" +
+            state.nodes[i].status + ":" + int_to_str(state.nodes[i].attempt)
+        i = i + 1
+    result
+
+@pre(events.len() > 0, "replay requires the run_started event")
+@pre(run_id.len() > 0, "replay run id must not be empty")
+@post(result.run_id == old(run_id))
+@post(result.events.len() == events.len())
+@post(result.next_sequence == result.events.len())
+pub f replay_trace(
+    ref graph: WorkflowGraph,
+    ref events: [AuditEvent],
+    run_id: Str
+) -> WorkflowState
+    replayed := initial_state(ref graph, run_id)
+    i := 1
+    wh i < vec_len(events)
+        replayed.logical_time = events[i].logical_time
+        node_id := str(events[i].node_id)
+        kind := str(events[i].kind)
+        detail := str(events[i].detail)
+
+        if kind == "node_started"
+            attempt := runtime_attempt(ref replayed, ref node_id) + 1
+            replayed = replace_runtime(
+                replayed,
+                str(node_id),
+                "running",
+                attempt,
+                "",
+                ""
+            )
+        else if kind == "retry_scheduled"
+            attempt := runtime_attempt(ref replayed, ref node_id)
+            replayed = replace_runtime(
+                replayed,
+                str(node_id),
+                "pending",
+                attempt,
+                "",
+                str(detail)
+            )
+        else if kind == "node_completed"
+            attempt := runtime_attempt(ref replayed, ref node_id)
+            replayed = replace_runtime(
+                replayed,
+                str(node_id),
+                "completed",
+                attempt,
+                str(detail),
+                ""
+            )
+        else if kind == "node_failed" || kind == "capability_denied"
+            attempt := runtime_attempt(ref replayed, ref node_id)
+            replayed = replace_runtime(
+                replayed,
+                str(node_id),
+                "failed",
+                attempt,
+                "",
+                str(detail)
+            )
+        else if kind == "run_completed"
+            replayed.status = "completed"
+        else if kind == "run_failed"
+            replayed.status = "failed"
+        else if kind == "run_paused" || kind == "node_paused"
+            replayed.status = "awaiting_intervention"
+        else if kind == "run_resumed"
+            replayed.status = "running"
+        else if kind == "repair_cycle_started"
+            replayed.repair.status = "verifying"
+            replayed.repair.node_id = str(node_id)
+            replayed.repair.revision = 1
+            replayed.repair.artifact = str(detail)
+        else if kind == "repair_requested"
+            replayed.repair.status = "repairing"
+            replayed.repair.evidence_artifact = str(detail)
+        else if kind == "repair_strategy_changed"
+            replayed.repair.status = "repairing"
+            replayed.repair.strategy = replayed.repair.strategy + 1
+            replayed.repair.strategy_changes_used = replayed.repair.strategy_changes_used + 1
+            replayed.repair.attempts_in_strategy = 0
+        else if kind == "repair_applied"
+            replayed.repair.status = "verifying"
+            replayed.repair.revision = replayed.repair.revision + 1
+            replayed.repair.attempts_in_strategy = replayed.repair.attempts_in_strategy + 1
+            replayed.repair.artifact = str(detail)
+        else if kind == "verification_passed"
+            replayed.repair.status = "completed"
+        else if kind == "repair_paused"
+            replayed.repair.status = "awaiting_intervention"
+            replayed.status = "awaiting_intervention"
+        else if kind == "repair_resumed"
+            replayed.repair.status = "repairing"
+            replayed.status = "running"
+            replayed.repair.strategy = replayed.repair.strategy + 1
+            replayed.repair.attempts_in_strategy = 0
+            replayed.repair.evidence_artifact = str(detail)
+
+        replayed = append_event(replayed, node_id, kind, detail)
+        i = i + 1
+    replayed
+
+@post(result => left.len() == right.len())
+pub f traces_equal(
+    ref left: [AuditEvent],
+    ref right: [AuditEvent]
+) -> Bool
+    if vec_len(left) != vec_len(right) then false
+    else
+        equal := true
+        i := 0
+        wh i < vec_len(left)
+            if left[i].sequence != right[i].sequence || left[i].logical_time != right[i].logical_time || left[i].node_id != right[i].node_id || left[i].kind != right[i].kind || left[i].detail != right[i].detail
+                equal = false
+            i = i + 1
+        equal
+
+pub f event_position(
+    ref state: WorkflowState,
+    ref node_id: Str,
+    ref kind: Str
+) -> Int
+    position := -1
+    i := 0
+    wh i < vec_len(state.events)
+        if position < 0 && state.events[i].node_id == node_id && state.events[i].kind == kind
+            position = i
+        i = i + 1
+    position
+
+pub f workflow_is_completed(ref state: WorkflowState) -> Bool
+    state.status == "completed"
+
+pub f workflow_is_running(ref state: WorkflowState) -> Bool
+    state.status == "running"
+
+@post(result == state.events.len())
+pub f workflow_event_count(ref state: WorkflowState) -> Int
+    vec_len(state.events)
+
+pub f workflow_event_sequence_is_valid(ref state: WorkflowState) -> Bool
+    event_sequence_is_valid(ref state.events)
+
+pub f replay_matches(ref graph: WorkflowGraph, ref state: WorkflowState) -> Bool
+    run_id := str(state.run_id)
+    replayed := replay_trace(ref graph, ref state.events, run_id)
+    state_fingerprint(ref replayed) == state_fingerprint(ref state) &&
+        traces_equal(ref replayed.events, ref state.events)

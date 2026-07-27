@@ -127,15 +127,15 @@ struct VarInfo {
     /// Is the variable mutable?
     mutable: bool,
     /// Is this a reference type? (TODO: use for reference tracking)
-    #[allow(dead_code)]
     is_ref: bool,
+    /// Reference parameters from which this value may be derived.
+    /// An empty set on a reference value means local/unknown provenance.
+    ref_origins: HashSet<String>,
     /// Where was it defined? (TODO: use for better error messages)
     #[allow(dead_code)]
     def_span: Span,
     /// Is this a parameter?
     is_param: bool,
-    /// Is this a reference parameter (for return checking)?
-    is_ref_param: bool,
 }
 
 /// Borrow checker context.
@@ -146,8 +146,6 @@ pub struct BorrowChecker {
     scope_stack: Vec<HashSet<String>>,
     /// Collected errors
     errors: Vec<BorrowError>,
-    /// Function parameters that are references (for return checking)
-    ref_params: HashSet<String>,
     /// Whether we're in a function that returns a reference
     returns_ref: bool,
 }
@@ -158,7 +156,6 @@ impl BorrowChecker {
             vars: HashMap::new(),
             scope_stack: vec![HashSet::new()],
             errors: Vec::new(),
-            ref_params: HashSet::new(),
             returns_ref: false,
         }
     }
@@ -186,6 +183,34 @@ impl BorrowChecker {
         }
     }
 
+    /// Run only the source-level checks that typed MIR cannot represent.
+    /// Loan timing, moves, and initializedness are deliberately excluded here
+    /// because the MIR analysis performs non-lexical control-flow dataflow.
+    pub fn check_structural(&mut self, file: &SourceFile) -> Result<(), Vec<BorrowError>> {
+        match self.check(file) {
+            Ok(()) => Ok(()),
+            Err(errors) => {
+                let structural: Vec<_> = errors
+                    .into_iter()
+                    .filter(|error| {
+                        matches!(
+                            error.kind,
+                            BorrowErrorKind::MutBorrowOfImmutable { .. }
+                                | BorrowErrorKind::ReferenceInStruct { .. }
+                                | BorrowErrorKind::ReferenceInCollection
+                                | BorrowErrorKind::ReturnLocalReference { .. }
+                        )
+                    })
+                    .collect();
+                if structural.is_empty() {
+                    Ok(())
+                } else {
+                    Err(structural)
+                }
+            }
+        }
+    }
+
     /// Check a single item.
     fn check_item(&mut self, item: &Item) {
         match &item.kind {
@@ -193,7 +218,6 @@ impl BorrowChecker {
                 // Reset state for new function
                 self.vars.clear();
                 self.scope_stack = vec![HashSet::new()];
-                self.ref_params.clear();
 
                 // Check if return type is a reference
                 self.returns_ref = f
@@ -207,19 +231,19 @@ impl BorrowChecker {
                     let is_ref = self.is_ref_type(&param.ty);
                     let name = param.name.name.clone();
 
-                    if is_ref {
-                        self.ref_params.insert(name.clone());
-                    }
-
                     self.vars.insert(
                         name.clone(),
                         VarInfo {
                             state: VarState::Owned,
                             mutable: false, // params are immutable by default
                             is_ref,
+                            ref_origins: if is_ref {
+                                HashSet::from([name.clone()])
+                            } else {
+                                HashSet::new()
+                            },
                             def_span: param.span,
                             is_param: true,
-                            is_ref_param: is_ref,
                         },
                     );
                     self.current_scope_mut().insert(name);
@@ -326,14 +350,22 @@ impl BorrowChecker {
     fn check_stmt(&mut self, stmt: &Stmt) {
         match &stmt.kind {
             StmtKind::Let(l) => {
+                let inferred_origins = self.reference_origins(&l.init);
                 // Check initializer first
                 self.check_expr(&l.init);
 
                 // Check if type is a reference
-                let is_ref = l.ty.as_ref().map(|t| self.is_ref_type(t)).unwrap_or(false);
+                let is_ref = l.ty.as_ref().map(|t| self.is_ref_type(t)).unwrap_or(false)
+                    || inferred_origins.is_some();
 
                 // Bind pattern
-                self.bind_pattern(&l.pattern, l.mutable, is_ref, stmt.span);
+                self.bind_pattern(
+                    &l.pattern,
+                    l.mutable,
+                    is_ref,
+                    inferred_origins.unwrap_or_default(),
+                    stmt.span,
+                );
             }
             StmtKind::Expr(expr) => {
                 self.check_expr(expr);
@@ -553,9 +585,13 @@ impl BorrowChecker {
                             state: VarState::Owned,
                             mutable: false,
                             is_ref,
+                            ref_origins: if is_ref {
+                                HashSet::from([param.name.name.clone()])
+                            } else {
+                                HashSet::new()
+                            },
                             def_span: param.span,
                             is_param: true,
-                            is_ref_param: is_ref,
                         },
                     );
                     self.current_scope_mut().insert(param.name.name.clone());
@@ -658,95 +694,122 @@ impl BorrowChecker {
 
     /// Check that a returned reference is derived from a reference parameter.
     fn check_return_ref(&mut self, expr: &Expr, error_span: Span) {
+        if let Some(origins) = self.reference_origins(expr)
+            && origins.is_empty()
+        {
+            let name = self
+                .get_root_name(expr)
+                .unwrap_or_else(|| "<temporary>".to_string());
+            self.errors.push(
+                BorrowError::new(BorrowErrorKind::ReturnLocalReference { name }, error_span)
+                    .with_help("return value must be derived from a reference parameter"),
+            );
+        }
+        self.check_expr(expr);
+    }
+
+    /// Compute the input-reference provenance of an expression. `None` means
+    /// the expression is not known to be a reference; `Some(empty)` is a
+    /// reference to local or otherwise non-returnable storage.
+    fn reference_origins(&self, expr: &Expr) -> Option<HashSet<String>> {
         match &expr.kind {
-            ExprKind::Ident(ident) => {
-                // Must be a reference parameter
-                if !self.ref_params.contains(&ident.name)
-                    && let Some(info) = self.vars.get(&ident.name)
-                    && !info.is_ref_param
-                {
-                    self.errors.push(
-                        BorrowError::new(
-                            BorrowErrorKind::ReturnLocalReference {
-                                name: ident.name.clone(),
-                            },
-                            error_span,
-                        )
-                        .with_help("return value must be derived from a reference parameter"),
-                    );
-                }
-            }
+            ExprKind::Ident(ident) => self
+                .vars
+                .get(&ident.name)
+                .filter(|info| info.is_ref)
+                .map(|info| info.ref_origins.clone()),
             ExprKind::Unary(UnaryOp::Ref | UnaryOp::RefMut, inner) => {
-                // Check that inner is derived from ref param
-                if let Some(name) = self.get_root_name(inner)
-                    && !self.ref_params.contains(&name)
-                {
-                    self.errors.push(
-                        BorrowError::new(
-                            BorrowErrorKind::ReturnLocalReference { name },
-                            error_span,
-                        )
-                        .with_help("cannot return reference to local variable"),
-                    );
-                }
+                let root = self.get_root_name(inner)?;
+                let origins = self
+                    .vars
+                    .get(&root)
+                    .filter(|info| info.is_ref)
+                    .map(|info| info.ref_origins.clone())
+                    .unwrap_or_default();
+                Some(origins)
             }
-            ExprKind::Field(base, _) | ExprKind::TupleField(base, _) => {
-                // Field of a borrowed value is OK if base is from ref param
-                self.check_return_ref(base, error_span);
-            }
-            ExprKind::Index(base, _) => {
-                self.check_return_ref(base, error_span);
-            }
-            ExprKind::Paren(inner) => {
-                self.check_return_ref(inner, error_span);
-            }
-            ExprKind::Block(block) => {
-                // Check last expression in block
-                if let Some(last) = block.stmts.last()
-                    && let StmtKind::Expr(e) = &last.kind
-                {
-                    self.check_return_ref(e, error_span);
-                }
-            }
+            ExprKind::Unary(UnaryOp::Deref, inner)
+            | ExprKind::Paren(inner)
+            | ExprKind::Field(inner, _)
+            | ExprKind::TupleField(inner, _)
+            | ExprKind::Index(inner, _) => self.reference_origins(inner),
             ExprKind::If(if_expr) => {
-                // Both branches must return valid refs
-                match &if_expr.then_branch {
-                    crate::parser::IfBranch::Expr(e) => self.check_return_ref(e, error_span),
-                    crate::parser::IfBranch::Block(b) => {
-                        if let Some(last) = b.stmts.last()
-                            && let StmtKind::Expr(e) = &last.kind
-                        {
-                            self.check_return_ref(e, error_span);
-                        }
-                    }
+                let mut origins = HashSet::new();
+                let then_origins = match &if_expr.then_branch {
+                    crate::parser::IfBranch::Expr(expr) => self.reference_origins(expr),
+                    crate::parser::IfBranch::Block(block) => self.block_reference_origins(block),
+                }?;
+                if then_origins.is_empty() {
+                    return Some(HashSet::new());
                 }
-                if let Some(else_branch) = &if_expr.else_branch {
-                    match else_branch {
-                        crate::parser::ElseBranch::Expr(e) => self.check_return_ref(e, error_span),
-                        crate::parser::ElseBranch::Block(b) => {
-                            if let Some(last) = b.stmts.last()
-                                && let StmtKind::Expr(e) = &last.kind
-                            {
-                                self.check_return_ref(e, error_span);
-                            }
-                        }
-                        crate::parser::ElseBranch::ElseIf(elif) => {
-                            let elif_expr = Expr::new(ExprKind::If(elif.clone()), elif.span);
-                            self.check_return_ref(&elif_expr, error_span);
-                        }
+                origins.extend(then_origins);
+                let else_origins = match if_expr.else_branch.as_ref()? {
+                    crate::parser::ElseBranch::Expr(expr) => self.reference_origins(expr),
+                    crate::parser::ElseBranch::Block(block) => self.block_reference_origins(block),
+                    crate::parser::ElseBranch::ElseIf(nested) => {
+                        let nested = Expr::new(ExprKind::If(nested.clone()), nested.span);
+                        self.reference_origins(&nested)
                     }
+                }?;
+                if else_origins.is_empty() {
+                    return Some(HashSet::new());
                 }
+                origins.extend(else_origins);
+                Some(origins)
             }
             ExprKind::Match(_, arms) => {
+                let mut origins = HashSet::new();
                 for arm in arms {
-                    self.check_return_ref(&arm.body, error_span);
+                    let arm_origins = self.reference_origins(&arm.body)?;
+                    if arm_origins.is_empty() {
+                        return Some(HashSet::new());
+                    }
+                    origins.extend(arm_origins);
                 }
+                Some(origins)
             }
-            _ => {
-                // Other expressions - just check normally
-                self.check_expr(expr);
+            ExprKind::Block(block) => self.block_reference_origins(block),
+            ExprKind::Call(_, args) => {
+                let mut origins = HashSet::new();
+                let mut saw_reference = false;
+                for arg in args {
+                    if let Some(arg_origins) = self.reference_origins(&arg.value) {
+                        saw_reference = true;
+                        if arg_origins.is_empty() {
+                            return Some(HashSet::new());
+                        }
+                        origins.extend(arg_origins);
+                    }
+                }
+                saw_reference.then_some(origins)
             }
+            ExprKind::MethodCall(receiver, _, args) => {
+                let mut origins = self.reference_origins(receiver).unwrap_or_default();
+                let mut saw_reference = self.reference_origins(receiver).is_some();
+                if saw_reference && origins.is_empty() {
+                    return Some(HashSet::new());
+                }
+                for arg in args {
+                    if let Some(arg_origins) = self.reference_origins(&arg.value) {
+                        saw_reference = true;
+                        if arg_origins.is_empty() {
+                            return Some(HashSet::new());
+                        }
+                        origins.extend(arg_origins);
+                    }
+                }
+                saw_reference.then_some(origins)
+            }
+            _ => None,
         }
+    }
+
+    fn block_reference_origins(&self, block: &Block) -> Option<HashSet<String>> {
+        let last = block.stmts.last()?;
+        let StmtKind::Expr(expr) = &last.kind else {
+            return None;
+        };
+        self.reference_origins(expr)
     }
 
     /// Check use of a variable.
@@ -890,14 +953,18 @@ impl BorrowChecker {
 
     /// Check if an expression produces a reference.
     fn expr_is_ref(&self, expr: &Expr) -> bool {
-        matches!(
-            &expr.kind,
-            ExprKind::Unary(UnaryOp::Ref | UnaryOp::RefMut, _)
-        )
+        self.reference_origins(expr).is_some()
     }
 
     /// Bind a pattern (for let statements).
-    fn bind_pattern(&mut self, pattern: &Pattern, mutable: bool, is_ref: bool, span: Span) {
+    fn bind_pattern(
+        &mut self,
+        pattern: &Pattern,
+        mutable: bool,
+        is_ref: bool,
+        ref_origins: HashSet<String>,
+        span: Span,
+    ) {
         match &pattern.kind {
             PatternKind::Ident(ident, is_mut, _subpattern) => {
                 let var_mutable = mutable || *is_mut;
@@ -907,30 +974,30 @@ impl BorrowChecker {
                         state: VarState::Owned,
                         mutable: var_mutable,
                         is_ref,
+                        ref_origins: ref_origins.clone(),
                         def_span: span,
                         is_param: false,
-                        is_ref_param: false,
                     },
                 );
                 self.current_scope_mut().insert(ident.name.clone());
             }
             PatternKind::Tuple(elems) => {
                 for elem in elems {
-                    self.bind_pattern(elem, mutable, is_ref, span);
+                    self.bind_pattern(elem, mutable, is_ref, ref_origins.clone(), span);
                 }
             }
             PatternKind::List(elems, rest) => {
                 for elem in elems {
-                    self.bind_pattern(elem, mutable, is_ref, span);
+                    self.bind_pattern(elem, mutable, is_ref, ref_origins.clone(), span);
                 }
                 if let Some(r) = rest {
-                    self.bind_pattern(r, mutable, is_ref, span);
+                    self.bind_pattern(r, mutable, is_ref, ref_origins.clone(), span);
                 }
             }
             PatternKind::Struct(_, fields, _) => {
                 for field in fields {
                     if let Some(p) = &field.pattern {
-                        self.bind_pattern(p, mutable, is_ref, span);
+                        self.bind_pattern(p, mutable, is_ref, ref_origins.clone(), span);
                     } else {
                         // Shorthand: field name is the binding
                         self.vars.insert(
@@ -939,9 +1006,9 @@ impl BorrowChecker {
                                 state: VarState::Owned,
                                 mutable,
                                 is_ref,
+                                ref_origins: ref_origins.clone(),
                                 def_span: span,
                                 is_param: false,
-                                is_ref_param: false,
                             },
                         );
                         self.current_scope_mut().insert(field.name.name.clone());
@@ -951,7 +1018,7 @@ impl BorrowChecker {
             PatternKind::Or(patterns) => {
                 // All alternatives should bind the same names
                 if let Some(first) = patterns.first() {
-                    self.bind_pattern(first, mutable, is_ref, span);
+                    self.bind_pattern(first, mutable, is_ref, ref_origins, span);
                 }
             }
             _ => {}
@@ -960,7 +1027,7 @@ impl BorrowChecker {
 
     /// Bind a pattern for match arms (always immutable).
     fn bind_pattern_for_match(&mut self, pattern: &Pattern) {
-        self.bind_pattern(pattern, false, false, pattern.span);
+        self.bind_pattern(pattern, false, false, HashSet::new(), pattern.span);
     }
 
     /// Check if a type is a reference type.

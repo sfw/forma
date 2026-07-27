@@ -1,394 +1,292 @@
-# FORMA
+# Forma
 
 [![CI](https://github.com/sfw/forma/actions/workflows/ci.yml/badge.svg)](https://github.com/sfw/forma/actions/workflows/ci.yml)
 
-**Code that writes itself correctly — and proves it.**
+**A programming-language prototype for code you need to trust—especially when an agent writes it.**
 
----
-This began as a simple experiment into the competency of claude code. As coding quickly shifts to generative AI, there are simple trust and quality concerns that we can engineer out. This project is a discussion starter about how to adapt to this future.
----
+Forma asks a concrete question: if software agents generate and revise code faster
+than people can read it, what should move into the language and compiler so that
+humans can still govern the result?
 
-## The Problem
+Version 0.2 explores one answer: a small language with affine ownership,
+capability-gated effects, machine-readable compiler tooling, contracts, and
+verification reports that distinguish tests from proofs. It is a working research
+prototype, not a production-stable ecosystem.
 
-AI is writing more code than ever. But the toolchain is broken in six places.
+- [Why Forma?](docs/WHY_FORMA.md)
+- [Agentic engineering thesis](docs/AGENTIC_ENGINEERING.md)
+- [Language guide](docs/reference.md)
+- [AI quick reference](docs/ai-reference.md)
+- [Feature profiles](docs/profiles.md)
+- [Installation](INSTALL.md)
 
-AI models **can't write systems code reliably** — [94.8% of AI failures targeting Rust are compilation errors](https://arxiv.org/abs/2411.13990), dominated by dependency resolution (61.9%) and compounded by lifetime/ownership complexity. Models routinely hallucinate APIs and syntax. AI models also **waste tokens** — verbose keywords and type annotations drive up API costs and latency. And even when AI does produce working code, **nobody can review it fast enough** — teams are shipping AI-generated functions they haven't fully read, because code review doesn't scale to hundreds of functions a day.
+## The agent–compiler–human loop
 
-The issue isn't AI capability — it's language design. Rust, C++, and Go were designed for humans with compilers. Not for AI with humans. And none of them give you tools to understand and trust AI-generated code at scale.
-
-## The Solution
-
-**FORMA is the first programming language designed for generative AI — from generation through verification.**
-
-```forma
-f fetch_users(db: Database) -> Result[Vec[User], Str]
-    rows := db_query(db, "SELECT * FROM users")?
-    users := vec_new()
-    for row in rows
-        user := User {
-            id: row_get_int(row, 0),
-            name: row_get_str(row, 1),
-            active: row_get_bool(row, 2)
-        }
-        vec_push(users, user)
-    Ok(users)
+```text
+human intent
+    -> agent writes contracts and code
+    -> grammar constrains syntax
+    -> compiler resolves types, ownership, effects, and profiles
+    -> structured diagnostics guide repair
+    -> bounded verification produces explicit evidence
+    -> human reviews intent, authority, compatibility, and evidence
 ```
 
-Same memory safety as Rust. None of the complexity that trips up AI. Built-in tools to verify what was generated.
+Forma does not assume that generated code is correct. It makes the feedback loop
+more inspectable:
 
-FORMA draws from the best ideas in language design: Rust's ownership model, Python's clean syntax, Dafny's contract verification, and Haskell's type inference.
+- one compiler session supplies facts to checking, execution, tooling, and
+  verification;
+- non-`Copy` values move or are dropped, rather than being duplicated implicitly;
+- effects describe possible authority while runtime capabilities grant it;
+- generated tests, exhaustive finite checking, and formal proof attempts produce
+  different statuses;
+- unsupported behavior remains `UNKNOWN` or `SKIPPED`, never optimistic success;
+- support profiles expose interpreter, native, and verification boundaries.
 
-## Why FORMA Works
+## Quick start
 
-FORMA solves six problems that every other AI coding stack leaves open.
-
-### 1. Memory Safety Without Lifetimes
-
-FORMA uses **second-class references** — references can't be stored in structs or returned from functions. This eliminates lifetime annotations entirely while preserving memory safety.
-
-```forma
-# Rust: fn longest<'a>(x: &'a str, y: &'a str) -> &'a str
-# FORMA: No lifetimes needed
-f longest(x: Str, y: Str) -> Str
-    if len(x) > len(y) then x else y
-```
-
-The compiler guarantees memory safety through scope analysis. AI doesn't need to reason about lifetimes because they don't exist.
-
-### 2. Strong Type Inference + Structured Errors
-
-FORMA uses Hindley-Milner type inference, so AI rarely needs explicit type annotations. When types do mismatch, errors are machine-readable JSON with fix suggestions that AI can parse and self-correct:
-
-```json
-{
-  "error": "type_mismatch",
-  "expected": "Int",
-  "found": "Str",
-  "location": {"line": 5, "column": 12},
-  "suggestion": "Use str_parse_int() to convert Str to Int"
-}
-```
+Forma currently builds from source with Rust 1.85 or newer:
 
 ```bash
-forma check --error-format json myfile.forma
-```
-
-### 3. No API Hallucination
-
-FORMA exports available methods for any type, letting AI tooling constrain generation to real APIs:
-
-```bash
-forma typeof myfile.forma --position "5:10"
-```
-
-AI pipelines can use this to only generate method calls that actually exist.
-
-### 4. No Syntax Errors
-
-FORMA's grammar is designed for **constrained decoding**. AI models can generate only syntactically valid code:
-
-```bash
-# Export grammar for any LLM toolkit
-forma grammar --format ebnf > forma.ebnf
-forma grammar --format json > forma.json
-```
-
-This eliminates syntax errors entirely — not by catching them, but by making them impossible.
-
-### 5. ~35% Fewer Tokens
-
-Every character costs API tokens. FORMA's concise syntax reduces costs and latency:
-
-| Feature | Rust | FORMA |
-|---------|------|-------|
-| Function | `fn` | `f` |
-| Struct | `struct` | `s` |
-| Enum | `enum` | `e` |
-| Match | `match` | `m` |
-| While | `while` | `wh` |
-| Return | `return` | `ret` / `return` |
-| Use/Import | `use` | `us` |
-
-Across typical codebases, FORMA uses ~35% fewer tokens than equivalent Rust. That's lower API costs, faster generation, and more code fitting in context windows.
-
-### 6. Verifiable AI Intent
-
-When AI writes your code, you need to know what it actually does. FORMA includes first-class verification UX so AI-generated code is not only compilable, but auditable:
-
-```bash
-# Explain contract intent in human-readable English
-forma explain myfile.forma --format human
-
-# Machine-readable JSON for CI integration
-forma explain myfile.forma --format json --examples=3 --seed 42
-
-# Run deterministic contract verification over a file or directory tree
-forma verify src --report --format json --examples 20 --seed 42
-```
-
-For example, an AI generates a sort function with contracts. `forma explain` translates:
-
-```
-┌─ verified_sort(items: [Int]) -> [Int]
-│  Requires:
-│    - items is not empty
-│  Guarantees:
-│    - [@sorted] for every i in 0..result.len() - 1, result[i] is at most result[i + 1]
-│    - [@permutation] permutation(items, result)
-└─ Examples:
-     [valid] ([3]) -> [3]
-     [valid] ([0, -6]) -> [-6, 0]
-     [invalid] ([]) -> []
-```
-
-`verify --report` produces a trust report showing PASS/FAIL/WARN/SKIP status for every function's contracts — consumable by CI, QA teams, and code reviewers without reading source. Code review stops being "read 500 lines of sort logic" and becomes "confirm that the contract says what I wanted."
-
-`verify` defaults to side-effect-safe execution (capabilities revoked unless `--allow-side-effects` is explicitly set), making it CI-friendly and reproducible.
-
-## Quick Start
-
-```bash
-# Clone and build
 git clone https://github.com/sfw/forma.git
 cd forma
 cargo build --release
+./target/release/forma --version
+```
 
-# Hello World
-echo 'f main()
-    print("Hello, FORMA!")' > hello.forma
+Create `hello.forma`:
+
+```forma
+f greet(ref name: Str) -> Unit
+    print(f"Hello, {name}!")
+
+f main()
+    name = "Forma"
+    greet(ref name)
+    print(name)
+```
+
+Then check and run it:
+
+```bash
+./target/release/forma check hello.forma
 ./target/release/forma run hello.forma
 ```
 
-See [INSTALL.md](INSTALL.md) for detailed build instructions and dependencies.
+`=` creates an immutable binding. `:=` creates or updates a mutable binding.
+These operators describe mutability; assigning or passing a non-`Copy` value can
+still move it.
 
-## Feature Highlights
+## Language model
 
-### Variables
-
-FORMA uses two assignment operators:
+### Affine ownership
 
 ```forma
-# Immutable binding with =
-x = 42
-name = "Alice"
+f consume(items: Vec[Item]) -> Unit
+    # items is owned here
 
-# Mutable binding with :=
-counter := 0
-counter := counter + 1  # reassignment also uses :=
+f inspect(ref items: Vec[Item]) -> Int
+    items.len()
+
+f update(ref mut items: Vec[Item]) -> Unit
+    # exclusive loan
 ```
 
-Use `=` for values that never change, `:=` for values you'll update.
+- Owned parameters move non-`Copy` arguments.
+- `ref` creates a shared loan; `ref mut` creates an exclusive loan.
+- Loan regions are inferred, so users do not write lifetime parameters.
+- References cannot be stored in ordinary aggregates, captured by escaping
+  closures, or sent to another task.
+- A reference may be returned only when it is derived from a reference parameter.
+- `clone(value)` is explicit duplication; `mv value` may document or force a move.
+- Initialized owned places are destroyed exactly once.
 
-### Pattern Matching
+### Effects and capabilities
 
-```forma
-e Shape
-    Circle(Float)
-    Rectangle(Float, Float)
-    Triangle(Float, Float, Float)
+Effects are inferred through direct calls and describe what a function may try to
+do. Capabilities authorize one execution:
 
-f area(shape: Shape) -> Float
-    m shape
-        Circle(r) -> 3.14159 * r * r
-        Rectangle(w, h) -> w * h
-        Triangle(a, b, c) ->
-            s := (a + b + c) / 2.0
-            sqrt(s * (s - a) * (s - b) * (s - c))
+```bash
+forma run reader.forma --allow-read
+forma run writer.forma --allow-write
+forma run client.forma --allow-network
+forma run tool.forma --allow-exec
+forma run configured.forma --allow-env
+forma run ffi.forma --allow-unsafe
 ```
 
-### Async/Await
+Prefer least privilege. `--allow-all` grants broad host authority and must not be
+used for untrusted code. Capability checks provide interpreter containment; they
+are not a complete hostile-code sandbox. OS process isolation is optional defense
+in depth for untrusted execution.
+
+### Contracts and evidence
 
 ```forma
-as f fetch_data(url: Str) -> Bool
-    m http_get(url)
-        Ok(_) -> true
-        Err(_) -> false
+@pre(n >= 0, "n must be non-negative")
+@post(result >= 1)
+f factorial(n: Int) -> Int
+    if n <= 1 then 1 else n * factorial(n - 1)
+
+@inv(balance >= 0, "balance cannot be negative")
+s Account
+    balance: Int
+```
+
+Struct invariants are type-wide validity rules. The Hosted interpreter checks
+them after construction, at function entry and return, and when an exclusive
+`ref mut` borrow is returned. A function may update related fields in stages,
+but must restore the invariant before the value becomes externally observable.
+
+```bash
+forma explain rules.forma --format human
+forma verify rules.forma --level test --examples 200 --seed 42 --report
+forma verify rules.forma --level exhaustive --max-domain 4096 --report
+forma verify rules.forma --level formal --report
+```
+
+Reports use distinct confidence states: `UNCONTRACTED`, `TESTED`,
+`COUNTEREXAMPLE`, `EXHAUSTIVE`, `PROVED`, `UNKNOWN`, and `SKIPPED`.
+Generated examples never produce `PROVED`. Formal verification is Experimental
+and limited to a documented pure subset. Invariant obligations appear in
+explain/verification output, but struct preservation remains `UNKNOWN` until the
+SMT struct subset is implemented.
+
+### Structured concurrency
+
+```forma
+as f compute(value: Int) -> Int
+    value * value
 
 as f main()
-    # Spawn concurrent tasks
-    task1 := sp fetch_data("https://api.example.com/data1")
-    task2 := sp fetch_data("https://api.example.com/data2")
-
-    # Wait for results
-    result1 := aw task1
-    result2 := aw task2
-    print("Both requests complete!")
+    task = sp compute(12)
+    result = aw task
+    print(result)
 ```
 
-### HTTP Server
+Task captures move into the child, references cannot cross task boundaries, and
+task handles are affine. Channels and mutexes are Hosted library/runtime handles;
+sending a value moves it.
 
-```forma
-f handle_request(req: HttpRequest) -> HttpResponse
-    m req.path
-        "/" -> http_response(200, "Welcome!")
-        "/api/hello" ->
-            name := http_req_param(req, "name")
-            m name
-                Some(n) -> http_response(200, "Hello, " + n + "!")
-                None -> http_response(200, "Hello, World!")
-        _ -> http_response(404, "Not Found")
+## Support profiles
 
-f main()
-    print("Server starting on http://localhost:8080")
-    result := http_serve(8080, handle_request)
-    m result
-        Ok(_) -> 0
-        Err(e) ->
-            print("Error: " + e)
-            1
-```
+“Supported” is not one claim in Forma:
 
-### SQLite Database
+| Profile | Meaning |
+| --- | --- |
+| Core | Portable semantic subset: ownership, scalars, tuples, fixed arrays, structs, selected enums, calls, matches, and loops |
+| Hosted | Managed interpreter features such as dynamic collections, strings, files, databases, networking, processes, tasks, channels, and mutexes |
+| Native | Runtime-backed facilities currently implemented by the LLVM toolchain |
+| Experimental | Weaker compatibility guarantees, including whole-program LLVM parity, SMT verification, and observable user-defined destructor bodies |
 
-```forma
-f main()
-    db := db_open("app.db")!
+Support propagates through direct calls. A wrapper around a Hosted-only operation
+does not become Core merely because its own syntax looks portable. See
+[docs/profiles.md](docs/profiles.md) for the normative profile definitions.
 
-    db_execute(db, "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT)")!
-    db_execute(db, "INSERT INTO users (name) VALUES ('Alice')")!
-
-    rows := db_query(db, "SELECT id, name FROM users")!
-    for row in rows
-        id := row_get_int(row, 0)
-        name := row_get_str(row, 1)
-        print("User " + int_to_str(id) + ": " + name)
-
-    db_close(db)
-```
-
-## Language Features
-
-- **Type inference**: Hindley-Milner style, rarely need type annotations
-- **Generics**: Full parametric polymorphism with monomorphization
-- **Pattern matching**: Exhaustive, with guards
-- **Result types**: No exceptions, explicit error handling with `?` and `!`
-- **Linear types**: Affine and linear ownership tracking
-- **Capability system**: Fine-grained `read/write/network/exec/env/unsafe` permissions (see [Security Note](#security-note))
-- **Contracts**: `@pre`/`@post` with 12 named patterns, `old()`, quantifiers
-- **Verification UX**: `forma explain` and `forma verify --report` for contract trust reports
-- **Modules**: Simple `us std.collections` imports
-- **Async/await**: Native coroutines with spawn
-- **HTTP client & server**: Built-in networking primitives
-- **TCP/UDP sockets**: Full networking stack with TLS support
-- **SQLite**: Embedded database support (rusqlite)
-- **Compression**: gzip and zlib built-in
-- **Standard library**: 298+ builtin functions
-- **FFI**: C interop with `extern` functions and safety layer
-- **LLVM backend**: Native compilation (optional, requires LLVM 18)
-- **Formatter**: `forma fmt` for consistent code style
-- **LSP server**: diagnostics, completions, hover, goto definition, symbols, signature help, formatting, references (single-file)
-- **REPL**: Interactive development with `forma repl`
-- **Grammar export**: EBNF and JSON for constrained AI decoding
-
-## Security Note
-
-FORMA's capability system gates access to the host system. **Do not run untrusted FORMA code with `--allow-all`.** This flag enables file, network, process execution, environment variable, and unsafe memory operations.
-
-Prefer least-privilege flags for the capabilities you actually need:
+## Tooling for agents and people
 
 ```bash
-forma run myfile.forma --allow-read              # file reads only
-forma run myfile.forma --allow-read --allow-write # file I/O only
-forma run myfile.forma --allow-network            # networking only
-```
+# Machine-readable correction loop
+forma check program.forma --error-format json
 
-The `--allow-exec` flag is particularly sensitive — it permits shell command execution via the `exec` builtin. Treat it as equivalent to giving the program full shell access.
-
-When running `forma verify`, capabilities are revoked by default. Use `--allow-side-effects` only when you trust the code being verified.
-
-## CI/CD
-
-| Job | What it checks |
-|-----|---------------|
-| **Test** | `cargo test --all` — 400+ unit and integration tests |
-| **Clippy** | `cargo clippy -- -D warnings` — zero warnings |
-| **Format** | `cargo fmt --all -- --check` — consistent style |
-| **LLVM Feature Check** | Clippy + compile check with `--features llvm` (LLVM 18) |
-| **Runtime Crate Tests** | `cd runtime && cargo test` — runtime FFI coverage |
-| **FORMA Integration Tests** | Runs all `.forma` integration tests in CI, including expected-failure contract fixtures |
-| **Showcase Examples** | Runs all `examples/showcase/*.forma` end-to-end |
-
-## Status
-
-FORMA is in **active development**. The core language and standard library are functional:
-
-- [x] Lexer, parser, type checker
-- [x] Borrow checker (second-class references)
-- [x] MIR interpreter with optimization pass (constant fold, copy propagation, dead block elimination, peephole)
-- [x] Generics with monomorphization
-- [x] Linear types and capability system
-- [x] Module system
-- [x] Standard library (298+ builtins)
-- [x] Grammar export (EBNF, JSON)
-- [x] LLVM native compilation (optional feature)
-- [x] Package manager (basic, path-based dependencies)
-- [x] Async/await with spawn
-- [x] HTTP client & server
-- [x] TCP/UDP sockets and TLS
-- [x] SQLite database
-- [x] Compression (gzip, zlib)
-- [x] LSP server (diagnostics, completions, hover, goto definition, symbols, signature help, formatting, references [single-file])
-- [x] Verification UX (`explain`, `verify --report`)
-- [x] Code formatter
-- [x] REPL
-- [x] 21 showcase examples passing (classic algorithms + verification UX demos)
-- [ ] Full LSP (rename/refactor and cross-file references)
-- [ ] Package registry
-
-## For AI Developers
-
-FORMA provides first-class tooling for the full AI code generation lifecycle — from generation through review.
-
-### Quick LLM Onboarding
-
-Add this to your system prompt:
-
-```
-You are writing code in FORMA, an AI-optimized systems language.
-KEYWORDS: f=function, s=struct, e=enum, t=trait, i=impl, m=match
-VARIABLES: x = 42 (immutable), y := 0 (mutable), y := y + 1 (reassignment uses :=)
-TYPES: Int, Float, Bool, Str, [T]=list, T?=Option, T!E=Result
-CONTRACTS: @pre(condition), @post(condition)
-```
-
-See the [Language Reference](https://sfw.github.io/forma/reference.html) for full LLM onboarding guidance.
-
-### Tooling
-
-```bash
-# Grammar-constrained generation (EBNF or JSON)
+# Grammar-constrained generation
 forma grammar --format ebnf
 forma grammar --format json
 
-# Structured errors for self-correction
-forma check --error-format json myfile.forma
+# Semantic queries
+forma typeof program.forma --position "5:10"
+forma complete program.forma --position "5:10"
 
-# Understand what AI-generated code actually does
-forma explain myfile.forma --format human
-forma explain myfile.forma --format json --examples=3 --seed 42
-
-# Verify AI-generated code at scale — CI-safe, deterministic
-forma verify src --report --format json --examples 20 --seed 42
-
-# Type queries for constrained decoding
-forma typeof myfile.forma --position "5:10"
+# Normal development
+forma fmt program.forma
+forma run program.forma
+forma repl
+forma lsp
 ```
 
-The generation side (grammar export, structured errors, token efficiency) means AI writes correct FORMA code. The verification side (`explain`, `verify`) means humans can actually understand and trust it. Together, they close the loop that every other AI coding stack leaves open: *AI writes it, FORMA proves what it does, you decide if that's what you wanted.*
+The generated artifacts in `docs/grammar.ebnf`, `docs/grammar.json`,
+`docs/grammar-keywords.md`, `docs/editor-grammar.json`, and `docs/builtins.json`
+are machine-readable sources for agents and editor integrations.
 
-## Documentation
+## Packages and editor support
 
-- [Language Reference](docs/reference.md) — Learn FORMA
-- [AI Reference](docs/ai-reference.md) — For LLM system prompts
-- [Why FORMA?](docs/WHY_FORMA.md) — Design rationale and AI failure analysis
+Forma 0.2 supports `forma.toml`, generated `forma.lock` files, and deterministic
+local path dependencies. Registry and Git sources are intentionally rejected for
+now. The VS Code extension metadata lives in `editors/vscode/`; the compiler also
+provides `forma lsp`.
+
+```bash
+forma new demo
+cd demo
+forma run src/main.forma
+```
+
+## Worked agentic system: Forge
+
+[Forge](examples/forge/README.md) is a self-correcting engineering-workflow
+coordinator written in Forma. A connected process DAG drives parallel reviews,
+iterative repair and verification, progress-sensitive strategy changes,
+least-authority model-directed tools, restart-safe resume, SQLite or PostgreSQL
+history and recall, durable compaction, token/deadline budgets, and append-only
+audit events. Its provider path is live; CI checks configuration, protocol
+parsing, memory, real task concurrency, and the pure kernel without scripted
+model responses.
+
+Forge remains in this repository during the 0.2 series so that a realistic
+agentic application continuously pressures the language, compiler, and
+documentation together. Every place it requires Rust is recorded in the
+[Forge Rust gap ledger](planning/design/FORGE_RUST_GAP_LEDGER.md).
+
+## Project status
+
+Implemented foundations include the shared compiler session, typed
+ownership-explicit MIR, ownership and loan analysis, deterministic drop
+elaboration, generated grammar artifacts, effect and capability metadata,
+structured concurrency checks, deterministic local modules/packages, semantic
+tooling, tiered verification, and the published profile model.
+
+Important boundaries remain:
+
+- Forma is 0.x and does not promise source compatibility yet.
+- The interpreter is the primary complete execution environment.
+- LLVM has a documented Core/Native boundary and remains Experimental as a
+  whole until whole-program parity is established.
+- Formal verification covers a limited pure subset.
+- Registry packages, Git dependencies, rename/refactor support, and richer
+  cross-file LSP workflows remain future work.
+- Capability flags are not a substitute for OS isolation of hostile code.
+
+The detailed implementation record is in
+[planning/design/FORMA_0_2_IMPLEMENTATION_STATUS.md](planning/design/FORMA_0_2_IMPLEMENTATION_STATUS.md).
+
+## Documentation map
+
+| Need | Source |
+| --- | --- |
+| Understand the proposal | [docs/AGENTIC_ENGINEERING.md](docs/AGENTIC_ENGINEERING.md) and [docs/WHY_FORMA.md](docs/WHY_FORMA.md) |
+| Learn the language | [docs/reference.md](docs/reference.md) |
+| Give an agent compact instructions | [docs/ai-reference.md](docs/ai-reference.md) |
+| Use Forma through Codex skills | [skills/forma-codex/SKILL.md](skills/forma-codex/SKILL.md) |
+| Check exact grammar | Generated `docs/grammar.*` artifacts |
+| Check exact builtin metadata | Generated [docs/builtins.json](docs/builtins.json) |
+| Browse builtin signatures | Generated [docs/builtins.md](docs/builtins.md) |
+| Understand backend boundaries | [docs/profiles.md](docs/profiles.md) |
+| Install or contribute | [INSTALL.md](INSTALL.md), [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Follow changes | [CHANGELOG.md](CHANGELOG.md) |
+
+Historical files under `planning/research/`, `planning/reviews/`, and
+`planning/sprints/` document how the prototype evolved. They are non-normative
+when they conflict with the 0.2 semantics or current generated artifacts.
+
+## Contributing to the conversation
+
+Forma is intended to be evaluated, challenged, and improved. Useful contributions
+include counterexamples to the language model, agent-generation experiments,
+diagnostic and verification UX work, soundness reviews, profile tests, runnable
+examples, documentation, and compiler implementation work. See
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-Licensed under the [MIT License](LICENSE-MIT).
-
----
-
-<p align="center">
-  <strong>FORMA</strong><br>
-  Code that writes itself correctly — and proves it.
-</p>
+Forma is licensed under the [MIT License](LICENSE-MIT).

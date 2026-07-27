@@ -10,6 +10,9 @@ use regex::Regex;
 use serde_json;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
+use std::io::Read;
+use std::path::{Component, Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::{Arc, LazyLock, Mutex as StdMutex, RwLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -24,8 +27,8 @@ static GLOBAL_RUNTIME: LazyLock<Arc<tokio::runtime::Runtime>> = LazyLock::new(||
 });
 
 use super::mir::{
-    BinOp, BlockId, Constant, Function, Local, Operand, Program, Rvalue, StatementKind, Terminator,
-    UnOp,
+    BinOp, BlockId, Constant, Function, Local, Operand, Place, Program, ProjectionElem, Rvalue,
+    StatementKind, Terminator, UnOp,
 };
 use crate::types::Ty;
 
@@ -43,6 +46,69 @@ const MAX_HTTP_BODY_SIZE: usize = 10 * 1024 * 1024;
 
 /// Default maximum number of HTTP requests before server exits.
 const DEFAULT_MAX_HTTP_REQUESTS: usize = 10_000;
+
+fn result_value(variant: &str, value: Value) -> Value {
+    Value::Enum {
+        type_name: "Result".to_string(),
+        variant: variant.to_string(),
+        fields: vec![value],
+    }
+}
+
+fn resolve_path_within(root: &str, relative: &str) -> Result<PathBuf, String> {
+    let relative_path = Path::new(relative);
+    if relative_path.is_absolute()
+        || relative_path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err("path must be relative and cannot contain parent traversal".to_string());
+    }
+
+    let canonical_root =
+        std::fs::canonicalize(root).map_err(|error| format!("invalid workspace root: {error}"))?;
+    let candidate = canonical_root.join(relative_path);
+    let resolved = if candidate.exists() {
+        std::fs::canonicalize(&candidate)
+            .map_err(|error| format!("cannot resolve workspace path: {error}"))?
+    } else {
+        let parent = candidate
+            .parent()
+            .ok_or_else(|| "workspace path has no parent".to_string())?;
+        let canonical_parent = std::fs::canonicalize(parent)
+            .map_err(|error| format!("cannot resolve workspace parent: {error}"))?;
+        let file_name = candidate
+            .file_name()
+            .ok_or_else(|| "workspace path has no final component".to_string())?;
+        canonical_parent.join(file_name)
+    };
+
+    if !resolved.starts_with(&canonical_root) {
+        return Err("resolved path escapes workspace root".to_string());
+    }
+    Ok(resolved)
+}
+
+fn read_bounded<R: Read>(mut reader: R, max_chars: usize) -> (String, bool) {
+    let mut collected = Vec::with_capacity(max_chars.min(16 * 1024));
+    let mut buffer = [0_u8; 8192];
+    let mut truncated = false;
+    loop {
+        match reader.read(&mut buffer) {
+            Ok(0) | Err(_) => break,
+            Ok(read) => {
+                let remaining = max_chars.saturating_sub(collected.len());
+                let retained = remaining.min(read);
+                collected.extend_from_slice(&buffer[..retained]);
+                truncated |= retained < read;
+            }
+        }
+    }
+    (String::from_utf8_lossy(&collected).into_owned(), truncated)
+}
 
 /// Validate that a size value is non-negative and within the given limit.
 fn validate_size(n: i64, name: &str, max: usize) -> Result<usize, InterpError> {
@@ -68,6 +134,212 @@ fn validate_port(n: i64, name: &str) -> Result<u16, InterpError> {
         });
     }
     Ok(n as u16)
+}
+
+fn postgres_parameters(values: &[Value]) -> Vec<Box<dyn postgres::types::ToSql + Sync>> {
+    values
+        .iter()
+        .map(|value| -> Box<dyn postgres::types::ToSql + Sync> {
+            match value {
+                Value::Int(value) => Box::new(*value),
+                Value::Float(value) => Box::new(*value),
+                Value::Bool(value) => Box::new(*value),
+                Value::Str(value) => Box::new(value.clone()),
+                Value::Json(value) => Box::new(value.clone()),
+                Value::Array(values)
+                    if values
+                        .iter()
+                        .all(|value| matches!(value, Value::Int(n) if (0..=255).contains(n))) =>
+                {
+                    Box::new(
+                        values
+                            .iter()
+                            .filter_map(|value| value.as_int().map(|value| value as u8))
+                            .collect::<Vec<u8>>(),
+                    )
+                }
+                Value::Unit => Box::new(Option::<String>::None),
+                value => Box::new(value.to_string()),
+            }
+        })
+        .collect()
+}
+
+/// Convert Forma's backend-neutral `?` prepared-statement placeholders to
+/// PostgreSQL's `$n` form. Question marks inside quoted SQL and comments are
+/// preserved. `??` outside those regions escapes a literal question mark,
+/// which keeps PostgreSQL JSON operators available without making application
+/// SQL backend-specific.
+fn postgres_parameter_sql(sql: &str) -> String {
+    #[derive(Clone, Copy)]
+    enum Region {
+        Sql,
+        SingleQuote,
+        DoubleQuote,
+        LineComment,
+        BlockComment,
+    }
+
+    let chars = sql.chars().collect::<Vec<_>>();
+    let mut output = String::with_capacity(sql.len());
+    let mut region = Region::Sql;
+    let mut index = 0;
+    let mut parameter = 1;
+    while index < chars.len() {
+        let current = chars[index];
+        let next = chars.get(index + 1).copied();
+        match region {
+            Region::Sql => match (current, next) {
+                ('\'', _) => {
+                    output.push(current);
+                    region = Region::SingleQuote;
+                }
+                ('"', _) => {
+                    output.push(current);
+                    region = Region::DoubleQuote;
+                }
+                ('-', Some('-')) => {
+                    output.push_str("--");
+                    index += 1;
+                    region = Region::LineComment;
+                }
+                ('/', Some('*')) => {
+                    output.push_str("/*");
+                    index += 1;
+                    region = Region::BlockComment;
+                }
+                ('?', Some('?')) => {
+                    output.push('?');
+                    index += 1;
+                }
+                ('?', _) => {
+                    output.push('$');
+                    output.push_str(&parameter.to_string());
+                    parameter += 1;
+                }
+                _ => output.push(current),
+            },
+            Region::SingleQuote => {
+                output.push(current);
+                if current == '\'' {
+                    if next == Some('\'') {
+                        output.push('\'');
+                        index += 1;
+                    } else {
+                        region = Region::Sql;
+                    }
+                }
+            }
+            Region::DoubleQuote => {
+                output.push(current);
+                if current == '"' {
+                    if next == Some('"') {
+                        output.push('"');
+                        index += 1;
+                    } else {
+                        region = Region::Sql;
+                    }
+                }
+            }
+            Region::LineComment => {
+                output.push(current);
+                if current == '\n' {
+                    region = Region::Sql;
+                }
+            }
+            Region::BlockComment => {
+                output.push(current);
+                if current == '*' && next == Some('/') {
+                    output.push('/');
+                    index += 1;
+                    region = Region::Sql;
+                }
+            }
+        }
+        index += 1;
+    }
+    output
+}
+
+fn postgres_row_value(row: &postgres::Row, index: usize) -> Result<Value, postgres::Error> {
+    use postgres::types::Type;
+
+    let column_type = row.columns()[index].type_();
+    if *column_type == Type::BOOL {
+        Ok(row
+            .try_get::<_, Option<bool>>(index)?
+            .map(Value::Bool)
+            .unwrap_or(Value::Unit))
+    } else if *column_type == Type::INT2 {
+        Ok(row
+            .try_get::<_, Option<i16>>(index)?
+            .map(|value| Value::Int(value as i64))
+            .unwrap_or(Value::Unit))
+    } else if *column_type == Type::INT4 {
+        Ok(row
+            .try_get::<_, Option<i32>>(index)?
+            .map(|value| Value::Int(value as i64))
+            .unwrap_or(Value::Unit))
+    } else if *column_type == Type::INT8 {
+        Ok(row
+            .try_get::<_, Option<i64>>(index)?
+            .map(Value::Int)
+            .unwrap_or(Value::Unit))
+    } else if *column_type == Type::FLOAT4 {
+        Ok(row
+            .try_get::<_, Option<f32>>(index)?
+            .map(|value| Value::Float(value as f64))
+            .unwrap_or(Value::Unit))
+    } else if *column_type == Type::FLOAT8 {
+        Ok(row
+            .try_get::<_, Option<f64>>(index)?
+            .map(Value::Float)
+            .unwrap_or(Value::Unit))
+    } else if matches!(
+        *column_type,
+        Type::TEXT | Type::VARCHAR | Type::BPCHAR | Type::NAME
+    ) {
+        Ok(row
+            .try_get::<_, Option<String>>(index)?
+            .map(Value::Str)
+            .unwrap_or(Value::Unit))
+    } else if *column_type == Type::BYTEA {
+        Ok(row
+            .try_get::<_, Option<Vec<u8>>>(index)?
+            .map(|bytes| {
+                Value::Array(
+                    bytes
+                        .into_iter()
+                        .map(|byte| Value::Int(byte as i64))
+                        .collect(),
+                )
+            })
+            .unwrap_or(Value::Unit))
+    } else if matches!(*column_type, Type::JSON | Type::JSONB) {
+        Ok(row
+            .try_get::<_, Option<serde_json::Value>>(index)?
+            .map(Value::Json)
+            .unwrap_or(Value::Unit))
+    } else {
+        // PostgreSQL can render most scalar values as text without losing their
+        // diagnostic value. Callers that need a stronger Forma type can cast in
+        // SQL until a dedicated mapping is added.
+        Ok(row
+            .try_get::<_, Option<String>>(index)?
+            .map(Value::Str)
+            .unwrap_or(Value::Unit))
+    }
+}
+
+fn postgres_rows(rows: Vec<postgres::Row>) -> Result<Vec<Value>, postgres::Error> {
+    rows.into_iter()
+        .map(|row| {
+            let columns = (0..row.len())
+                .map(|index| postgres_row_value(&row, index))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Value::DbRow(columns))
+        })
+        .collect()
 }
 
 /// Runtime value.
@@ -154,14 +426,98 @@ pub enum Value {
     CSize(usize),
     /// TLS stream for encrypted connections
     TlsStream(u64),
-    /// SQLite database connection
+    /// Backend-neutral database connection
     Database(u64),
-    /// SQLite prepared statement
+    /// Backend-neutral prepared statement
     Statement(u64),
     /// Database row
     DbRow(Vec<Value>),
     /// Tokio task handle ID (references spawned_tasks map)
     TokioTask(u64),
+}
+
+type ChannelState = (Vec<Value>, usize, bool);
+type SharedChannels = Arc<StdMutex<HashMap<u64, ChannelState>>>;
+type SharedMutexes = Arc<StdMutex<HashMap<u64, (Value, bool)>>>;
+
+#[derive(Debug)]
+enum ResolvedProjection {
+    Field(String),
+    TupleField(usize),
+    Index(usize),
+    Deref,
+}
+
+fn replace_projected_with_unit(
+    value: &mut Value,
+    projection: &[ResolvedProjection],
+    place: &Place,
+) -> Result<Value, InterpError> {
+    let Some((head, tail)) = projection.split_first() else {
+        return Ok(std::mem::replace(value, Value::Unit));
+    };
+    let child = match (head, value) {
+        (ResolvedProjection::Field(name), Value::Struct(_, fields)) => {
+            fields.get_mut(name).ok_or_else(|| InterpError {
+                message: format!("unknown field `{name}` in projected drop {place}"),
+            })?
+        }
+        (ResolvedProjection::TupleField(index), Value::Tuple(fields))
+        | (ResolvedProjection::TupleField(index), Value::Enum { fields, .. }) => {
+            fields.get_mut(*index).ok_or_else(|| InterpError {
+                message: format!("tuple projection {index} out of bounds in {place}"),
+            })?
+        }
+        (ResolvedProjection::Index(index), Value::Array(values)) => {
+            values.get_mut(*index).ok_or_else(|| InterpError {
+                message: format!("index {index} out of bounds in {place}"),
+            })?
+        }
+        (ResolvedProjection::Deref, Value::Ref(value)) => value.as_mut(),
+        _ => {
+            return Err(InterpError {
+                message: format!("invalid projected drop {place}"),
+            });
+        }
+    };
+    replace_projected_with_unit(child, tail, place)
+}
+
+fn assign_projected(
+    value: &mut Value,
+    projection: &[ResolvedProjection],
+    replacement: Value,
+    place: &Place,
+) -> Result<(), InterpError> {
+    let Some((head, tail)) = projection.split_first() else {
+        *value = replacement;
+        return Ok(());
+    };
+    let child = match (head, value) {
+        (ResolvedProjection::Field(name), Value::Struct(_, fields)) => {
+            fields.get_mut(name).ok_or_else(|| InterpError {
+                message: format!("unknown field `{name}` in assignment to {place}"),
+            })?
+        }
+        (ResolvedProjection::TupleField(index), Value::Tuple(fields))
+        | (ResolvedProjection::TupleField(index), Value::Enum { fields, .. }) => {
+            fields.get_mut(*index).ok_or_else(|| InterpError {
+                message: format!("tuple projection {index} out of bounds in {place}"),
+            })?
+        }
+        (ResolvedProjection::Index(index), Value::Array(values)) => {
+            values.get_mut(*index).ok_or_else(|| InterpError {
+                message: format!("index {index} out of bounds in {place}"),
+            })?
+        }
+        (ResolvedProjection::Deref, Value::Ref(value)) => value.as_mut(),
+        _ => {
+            return Err(InterpError {
+                message: format!("invalid projected assignment {place}"),
+            });
+        }
+    };
+    assign_projected(child, tail, replacement, place)
 }
 
 impl Value {
@@ -355,6 +711,8 @@ pub struct InterpError {
 }
 
 impl InterpError {
+    const EXIT_PREFIX: &'static str = "__forma_exit_requested:";
+
     /// Create an InterpError from a RuntimeError.
     pub fn from_runtime(err: RuntimeError) -> Self {
         Self {
@@ -378,6 +736,21 @@ impl InterpError {
             capability: capability.to_string(),
             operation: operation.to_string(),
         })
+    }
+
+    /// An interpreted `exit` is a contained control signal. Only the CLI host
+    /// may turn it into a process exit; verifiers and embedded users receive an
+    /// ordinary error and therefore cannot be terminated by guest code.
+    pub fn exit_requested(code: i32) -> Self {
+        Self {
+            message: format!("{}{code}", Self::EXIT_PREFIX),
+        }
+    }
+
+    pub fn requested_exit_code(&self) -> Option<i32> {
+        self.message
+            .strip_prefix(Self::EXIT_PREFIX)
+            .and_then(|code| code.parse().ok())
     }
 }
 
@@ -444,11 +817,11 @@ pub struct Interpreter {
     /// Active deadline for the currently executing run.
     run_deadline: Option<Instant>,
     /// Channel state: maps channel ID to (queue, capacity, closed)
-    channels: std::collections::HashMap<u64, (Vec<Value>, usize, bool)>,
+    channels: SharedChannels,
     /// Next channel ID
     next_channel_id: u64,
     /// Mutex state: maps mutex ID to (value, locked)
-    mutexes: std::collections::HashMap<u64, (Value, bool)>,
+    mutexes: SharedMutexes,
     /// Next mutex ID
     next_mutex_id: u64,
     /// TCP streams: maps stream ID to TcpStream
@@ -467,8 +840,11 @@ pub struct Interpreter {
     tls_streams: std::collections::HashMap<u64, native_tls::TlsStream<std::net::TcpStream>>,
     /// Next TLS stream ID
     next_tls_stream_id: u64,
-    /// SQLite databases: maps db ID to Connection
+    /// Local SQLite databases: maps db ID to Connection.
     databases: std::collections::HashMap<u64, rusqlite::Connection>,
+    /// Remote PostgreSQL databases. Connection URLs are supplied at runtime,
+    /// normally through `env_get`, and are never retained separately.
+    postgres_databases: std::collections::HashMap<u64, postgres::Client>,
     /// Next database ID
     next_db_id: u64,
     /// SQLite prepared statements: maps stmt ID to (db_id, SQL)
@@ -489,6 +865,8 @@ pub struct Interpreter {
     env_vars: Arc<RwLock<HashMap<String, String>>>,
     /// Granted capabilities for FFI operations
     capabilities: HashSet<String>,
+    /// Explicit subset of parent authority inherited by spawned tasks.
+    task_capabilities: HashSet<String>,
     /// Whether to check @pre/@post contracts at runtime (default: true)
     check_contracts: bool,
 }
@@ -502,9 +880,9 @@ impl Interpreter {
             step_counter: 0,
             run_timeout_ms: None,
             run_deadline: None,
-            channels: std::collections::HashMap::new(),
+            channels: Arc::new(StdMutex::new(std::collections::HashMap::new())),
             next_channel_id: 0,
-            mutexes: std::collections::HashMap::new(),
+            mutexes: Arc::new(StdMutex::new(std::collections::HashMap::new())),
             next_mutex_id: 0,
             tcp_streams: std::collections::HashMap::new(),
             next_tcp_stream_id: 0,
@@ -515,6 +893,7 @@ impl Interpreter {
             tls_streams: std::collections::HashMap::new(),
             next_tls_stream_id: 0,
             databases: std::collections::HashMap::new(),
+            postgres_databases: std::collections::HashMap::new(),
             next_db_id: 0,
             statements: std::collections::HashMap::new(),
             next_stmt_id: 0,
@@ -525,6 +904,7 @@ impl Interpreter {
             next_task_id: 0,
             env_vars: Arc::new(RwLock::new(HashMap::new())),
             capabilities: HashSet::new(),
+            task_capabilities: HashSet::new(),
             check_contracts: true,
         })
     }
@@ -560,6 +940,20 @@ impl Interpreter {
     /// Revoke all capabilities from this interpreter.
     pub fn revoke_all_capabilities(&mut self) {
         self.capabilities.clear();
+        self.task_capabilities.clear();
+    }
+
+    /// Select which already-granted capabilities child tasks may inherit.
+    pub fn set_task_capabilities<I, S>(&mut self, capabilities: I)
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.task_capabilities = capabilities
+            .into_iter()
+            .map(Into::into)
+            .filter(|capability| self.has_capability(capability))
+            .collect();
     }
 
     /// Enable or disable @pre/@post contract checking.
@@ -604,9 +998,9 @@ impl Interpreter {
             step_counter: 0,
             run_timeout_ms: None,
             run_deadline: None,
-            channels: std::collections::HashMap::new(),
+            channels: Arc::new(StdMutex::new(std::collections::HashMap::new())),
             next_channel_id: 0,
-            mutexes: std::collections::HashMap::new(),
+            mutexes: Arc::new(StdMutex::new(std::collections::HashMap::new())),
             next_mutex_id: 0,
             tcp_streams: std::collections::HashMap::new(),
             next_tcp_stream_id: 0,
@@ -617,6 +1011,7 @@ impl Interpreter {
             tls_streams: std::collections::HashMap::new(),
             next_tls_stream_id: 0,
             databases: std::collections::HashMap::new(),
+            postgres_databases: std::collections::HashMap::new(),
             next_db_id: 0,
             statements: std::collections::HashMap::new(),
             next_stmt_id: 0,
@@ -627,6 +1022,7 @@ impl Interpreter {
             next_task_id: 0,
             env_vars: Arc::new(RwLock::new(HashMap::new())),
             capabilities: HashSet::new(),
+            task_capabilities: HashSet::new(),
             check_contracts: true,
         })
     }
@@ -643,6 +1039,33 @@ impl Interpreter {
         self.call_stack.last_mut().ok_or_else(|| InterpError {
             message: "internal error: empty call stack".to_string(),
         })
+    }
+
+    fn cleanup_top_frame(&mut self) -> Result<(), InterpError> {
+        let Some(mut frame) = self.call_stack.pop() else {
+            return Ok(());
+        };
+        let mut locals: Vec<_> = frame.locals.drain().collect();
+        locals.sort_by_key(|(local, _)| std::cmp::Reverse(local.0));
+        let mut first_error = None;
+        for (_, value) in locals {
+            if let Err(error) = self.destroy_value(value)
+                && first_error.is_none()
+            {
+                first_error = Some(error);
+            }
+        }
+        if let Some(error) = first_error {
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    fn unwind_with(&mut self, mut error: InterpError) -> InterpError {
+        if let Err(cleanup) = self.cleanup_top_frame() {
+            error.message = format!("{}; cleanup failed: {}", error.message, cleanup.message);
+        }
+        error
     }
 
     /// Run the program starting from the given function.
@@ -673,8 +1096,13 @@ impl Interpreter {
         let result = self.execute(&func);
         self.step_counter = 0;
         self.run_deadline = None;
-        self.call_stack.pop();
-        result
+        match result {
+            Ok(value) => {
+                self.call_stack.pop();
+                Ok(value)
+            }
+            Err(error) => Err(self.unwind_with(error)),
+        }
     }
 
     /// Call a function with the given arguments (internal helper for builtins)
@@ -694,6 +1122,11 @@ impl Interpreter {
         args: Vec<Value>,
         ref_bindings: Vec<Option<RefBinding>>,
     ) -> Result<Value, InterpError> {
+        if self.check_contracts {
+            for value in &args {
+                self.check_value_invariants(value, &format!("entry to `{}`", func.name))?;
+            }
+        }
         let mut frame = Frame::new(func.name.clone(), func.entry_block);
 
         // Initialize parameters
@@ -718,32 +1151,31 @@ impl Interpreter {
                     match self.eval_contract_expr(condition) {
                         Ok(Value::Bool(true)) => {}
                         Ok(Value::Bool(false)) => {
-                            self.call_stack.pop();
                             let msg = contract.message.as_deref().unwrap_or("precondition failed");
                             let pattern = contract
                                 .pattern_name
                                 .as_ref()
                                 .map(|p| format!(" [@{}]", p))
                                 .unwrap_or_default();
-                            return Err(InterpError {
+                            let error = InterpError {
                                 message: format!(
-                                    "Contract violation{} in '{}': {} (condition: {})",
+                                    "Contract violation (precondition){} in '{}': {} (condition: {})",
                                     pattern, func.name, msg, contract.expr_string
                                 ),
-                            });
+                            };
+                            return Err(self.unwind_with(error));
                         }
                         Ok(other) => {
-                            self.call_stack.pop();
-                            return Err(InterpError {
+                            let error = InterpError {
                                 message: format!(
                                     "Precondition must evaluate to Bool, got {:?}",
                                     other
                                 ),
-                            });
+                            };
+                            return Err(self.unwind_with(error));
                         }
                         Err(e) => {
-                            self.call_stack.pop();
-                            return Err(e);
+                            return Err(self.unwind_with(e));
                         }
                     }
                 }
@@ -767,8 +1199,7 @@ impl Interpreter {
                 let value = match self.eval_contract_expr(old_expr) {
                     Ok(v) => v,
                     Err(e) => {
-                        self.call_stack.pop();
-                        return Err(e);
+                        return Err(self.unwind_with(e));
                     }
                 };
                 self.current_frame_mut()?
@@ -777,7 +1208,10 @@ impl Interpreter {
             }
         }
 
-        let result = self.execute(func)?;
+        let result = match self.execute(func) {
+            Ok(result) => result,
+            Err(error) => return Err(self.unwind_with(error)),
+        };
 
         // Check postconditions (with 'result' available)
         if self.check_contracts {
@@ -791,7 +1225,6 @@ impl Interpreter {
                     match self.eval_contract_expr(condition) {
                         Ok(Value::Bool(true)) => {}
                         Ok(Value::Bool(false)) => {
-                            self.call_stack.pop();
                             let msg = contract
                                 .message
                                 .as_deref()
@@ -801,33 +1234,92 @@ impl Interpreter {
                                 .as_ref()
                                 .map(|p| format!(" [@{}]", p))
                                 .unwrap_or_default();
-                            return Err(InterpError {
+                            let error = InterpError {
                                 message: format!(
-                                    "Contract violation{} in '{}': {} (condition: {})",
+                                    "Contract violation (postcondition){} in '{}': {} (condition: {})",
                                     pattern, func.name, msg, contract.expr_string
                                 ),
-                            });
+                            };
+                            return Err(self.unwind_with(error));
                         }
                         Ok(other) => {
-                            self.call_stack.pop();
-                            return Err(InterpError {
+                            let error = InterpError {
                                 message: format!(
                                     "Postcondition must evaluate to Bool, got {:?}",
                                     other
                                 ),
-                            });
+                            };
+                            return Err(self.unwind_with(error));
                         }
                         Err(e) => {
-                            self.call_stack.pop();
-                            return Err(e);
+                            return Err(self.unwind_with(e));
                         }
                     }
                 }
             }
         }
 
+        if self.check_contracts {
+            self.check_value_invariants(&result, &format!("return from `{}`", func.name))?;
+            let mutable_values = func
+                .params
+                .iter()
+                .zip(func.param_pass_modes.iter())
+                .filter(|(_, mode)| **mode == super::mir::PassMode::RefMut)
+                .map(|((local, _), _)| self.resolve_local(local))
+                .collect::<Result<Vec<_>, _>>()?;
+            for value in &mutable_values {
+                self.check_value_invariants(
+                    value,
+                    &format!("mutable borrow returned from `{}`", func.name),
+                )?;
+            }
+        }
+
         self.call_stack.pop();
         Ok(result)
+    }
+
+    fn check_value_invariants(&mut self, value: &Value, boundary: &str) -> Result<(), InterpError> {
+        let Value::Struct(type_name, fields) = value else {
+            return Ok(());
+        };
+        let Some(invariants) = self.program.struct_invariants.get(type_name).cloned() else {
+            return Ok(());
+        };
+        let mut frame = Frame::new(format!("invariant::{type_name}"), BlockId(0));
+        frame.contract_bindings = fields.clone();
+        self.call_stack.push(frame);
+
+        let result = (|| {
+            for invariant in &invariants {
+                let Some(condition) = invariant.condition.as_deref() else {
+                    continue;
+                };
+                match self.eval_contract_expr(condition)? {
+                    Value::Bool(true) => {}
+                    Value::Bool(false) => {
+                        let message = invariant.message.as_deref().unwrap_or("invariant failed");
+                        return Err(InterpError {
+                            message: format!(
+                                "Invariant violation in `{type_name}` at {boundary}: {message} (condition: {})",
+                                invariant.expr_string
+                            ),
+                        });
+                    }
+                    other => {
+                        return Err(InterpError {
+                            message: format!(
+                                "Invariant for `{type_name}` must evaluate to Bool, got {other:?}"
+                            ),
+                        });
+                    }
+                }
+            }
+            Ok(())
+        })();
+        self.call_stack.pop();
+        result
     }
 
     /// Evaluate an AST expression for contract checking
@@ -1818,6 +2310,10 @@ impl Interpreter {
                             frame.locals.insert(*local, value);
                         }
                     }
+                    StatementKind::AssignPlace(place, rvalue) => {
+                        let value = self.eval_rvalue(rvalue, func)?;
+                        self.assign_place(place, value)?;
+                    }
                     StatementKind::IndexAssign(local, index_op, value_op) => {
                         let index = self.eval_operand(index_op)?;
                         let value = self.eval_operand(value_op)?;
@@ -1886,6 +2382,12 @@ impl Interpreter {
                             }
                         }
                     }
+                    StatementKind::Drop(local) => {
+                        if let Some(value) = self.current_frame_mut()?.locals.remove(local) {
+                            self.destroy_value(value)?;
+                        }
+                    }
+                    StatementKind::DropPlace(place) => self.drop_place(place)?,
                     StatementKind::Nop => {}
                 }
             }
@@ -1995,7 +2497,8 @@ impl Interpreter {
                                 // Get the caller local for this argument
                                 if let Operand::Local(caller_local)
                                 | Operand::Copy(caller_local)
-                                | Operand::Move(caller_local) = arg
+                                | Operand::Move(caller_local)
+                                | Operand::Borrow(caller_local, _) = arg
                                 {
                                     // Resolve transitive refs: if caller_local is itself a ref binding, follow it
                                     let caller_frame = &self.call_stack[caller_frame_idx];
@@ -2102,7 +2605,8 @@ impl Interpreter {
                                         {
                                             if let Operand::Local(caller_local)
                                             | Operand::Copy(caller_local)
-                                            | Operand::Move(caller_local) = arg
+                                            | Operand::Move(caller_local)
+                                            | Operand::Borrow(caller_local, _) = arg
                                             {
                                                 let caller_frame =
                                                     &self.call_stack[caller_frame_idx];
@@ -2164,6 +2668,20 @@ impl Interpreter {
 
                     // Clone what we need for spawning
                     let spawned_tasks = Arc::clone(&self.spawned_tasks);
+                    let remaining_steps = self.max_steps.saturating_sub(self.step_counter).max(1);
+                    let remaining_timeout_ms = self.run_deadline.map(|deadline| {
+                        deadline
+                            .saturating_duration_since(Instant::now())
+                            .as_millis()
+                            .min(u128::from(u64::MAX)) as u64
+                    });
+                    let child_capabilities: HashSet<String> = self
+                        .task_capabilities
+                        .intersection(&self.capabilities)
+                        .cloned()
+                        .collect();
+                    let shared_channels = Arc::clone(&self.channels);
+                    let shared_mutexes = Arc::clone(&self.mutexes);
 
                     let handle = match value {
                         // If it's a closure, spawn with deferred execution
@@ -2174,6 +2692,9 @@ impl Interpreter {
                             let program = Arc::clone(&self.program);
                             let func_name_clone = func_name.clone();
                             let captures_clone = captures.clone();
+                            let child_capabilities = child_capabilities.clone();
+                            let shared_channels = Arc::clone(&shared_channels);
+                            let shared_mutexes = Arc::clone(&shared_mutexes);
 
                             // Use spawn_blocking for CPU-bound closure execution
                             self.runtime.spawn(async move {
@@ -2184,6 +2705,11 @@ impl Interpreter {
                                         Ok(i) => i,
                                         Err(_) => return Value::Unit,
                                     };
+                                    task_interp.max_steps = remaining_steps;
+                                    task_interp.run_timeout_ms = remaining_timeout_ms;
+                                    task_interp.capabilities = child_capabilities;
+                                    task_interp.channels = shared_channels;
+                                    task_interp.mutexes = shared_mutexes;
 
                                     // Get the closure's implementation function
                                     let func =
@@ -2306,6 +2832,11 @@ impl Interpreter {
         fn_name: &str,
         args: &[Value],
     ) -> Result<Option<Value>, InterpError> {
+        if let Some(spec) = crate::builtins::get(fn_name)
+            && let Some(capability) = spec.capability
+        {
+            self.require_capability(capability.as_str(), fn_name)?;
+        }
         // Macro to validate builtin argument counts
         macro_rules! validate_args {
             ($args:expr, $count:expr, $name:expr) => {
@@ -2336,6 +2867,36 @@ impl Interpreter {
                 }
                 println!();
                 Ok(Some(Value::Unit))
+            }
+            "debug" | "info" | "error" => {
+                validate_args!(args, 1, fn_name);
+                let message = args
+                    .iter()
+                    .map(|value| match value {
+                        Value::Str(text) => text.clone(),
+                        other => format!("{other}"),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                eprintln!("[{}] {}", fn_name.to_uppercase(), message);
+                Ok(Some(Value::Unit))
+            }
+            "i32" => {
+                validate_args!(args, 1, "i32");
+                let value = args[0].as_int().ok_or_else(|| InterpError {
+                    message: "i32: expected Int".to_string(),
+                })?;
+                let narrowed = i32::try_from(value).map_err(|_| InterpError {
+                    message: format!("i32: {value} is outside the i32 range"),
+                })?;
+                Ok(Some(Value::Int(i64::from(narrowed))))
+            }
+            "i64" => {
+                validate_args!(args, 1, "i64");
+                let value = args[0].as_int().ok_or_else(|| InterpError {
+                    message: "i64: expected Int".to_string(),
+                })?;
+                Ok(Some(Value::Int(value)))
             }
 
             // str(value) -> Str - convert any value to a string
@@ -3951,8 +4512,21 @@ impl Interpreter {
 
             // ===== CLI support =====
             "args" => {
+                // FORGE-RUST-GAP: FRG-006
+                self.require_capability("env", "args")?;
                 // args() -> [Str] - command line arguments
-                let args: Vec<Value> = std::env::args().map(Value::Str).collect();
+                let overlay = self.env_vars.read().map_err(|_| InterpError {
+                    message: "args: environment overlay lock poisoned".to_string(),
+                })?;
+                let count = overlay
+                    .get("ARGC")
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .unwrap_or(0);
+                let args: Vec<Value> = (0..count)
+                    .filter_map(|index| overlay.get(&format!("ARGV_{index}")))
+                    .cloned()
+                    .map(Value::Str)
+                    .collect();
                 Ok(Some(Value::Array(args)))
             }
             "env_get" => {
@@ -4000,7 +4574,7 @@ impl Interpreter {
                         });
                     }
                 };
-                std::process::exit(code);
+                Err(InterpError::exit_requested(code))
             }
             "eprintln" => {
                 // eprintln(msg: Str) - print to stderr
@@ -4622,7 +5196,12 @@ impl Interpreter {
                 };
                 let id = self.next_channel_id;
                 self.next_channel_id += 1;
-                self.channels.insert(id, (Vec::new(), capacity, false));
+                self.channels
+                    .lock()
+                    .map_err(|_| InterpError {
+                        message: "channel state mutex poisoned".to_string(),
+                    })?
+                    .insert(id, (Vec::new(), capacity, false));
                 Ok(Some(Value::Tuple(vec![
                     Value::Sender(id),
                     Value::Receiver(id),
@@ -4642,7 +5221,10 @@ impl Interpreter {
                 };
                 let value = args[1].clone();
 
-                if let Some((queue, capacity, closed)) = self.channels.get_mut(&id) {
+                let mut channels = self.channels.lock().map_err(|_| InterpError {
+                    message: "channel state mutex poisoned".to_string(),
+                })?;
+                if let Some((queue, capacity, closed)) = channels.get_mut(&id) {
                     if *closed {
                         return Ok(Some(Value::Enum {
                             type_name: "Result".to_string(),
@@ -4684,7 +5266,10 @@ impl Interpreter {
                     }
                 };
 
-                if let Some((queue, _, closed)) = self.channels.get_mut(&id) {
+                let mut channels = self.channels.lock().map_err(|_| InterpError {
+                    message: "channel state mutex poisoned".to_string(),
+                })?;
+                if let Some((queue, _, closed)) = channels.get_mut(&id) {
                     if queue.is_empty() {
                         if *closed {
                             return Ok(Some(Value::Enum {
@@ -4727,7 +5312,10 @@ impl Interpreter {
                 };
                 let value = args[1].clone();
 
-                if let Some((queue, capacity, closed)) = self.channels.get_mut(&id) {
+                let mut channels = self.channels.lock().map_err(|_| InterpError {
+                    message: "channel state mutex poisoned".to_string(),
+                })?;
+                if let Some((queue, capacity, closed)) = channels.get_mut(&id) {
                     if *closed || (queue.len() >= *capacity && *capacity > 0) {
                         return Ok(Some(Value::Bool(false)));
                     }
@@ -4750,7 +5338,10 @@ impl Interpreter {
                     }
                 };
 
-                if let Some((queue, _, _)) = self.channels.get_mut(&id) {
+                let mut channels = self.channels.lock().map_err(|_| InterpError {
+                    message: "channel state mutex poisoned".to_string(),
+                })?;
+                if let Some((queue, _, _)) = channels.get_mut(&id) {
                     if queue.is_empty() {
                         return Ok(Some(Value::Enum {
                             type_name: "Option".to_string(),
@@ -4785,7 +5376,10 @@ impl Interpreter {
                     }
                 };
 
-                if let Some((_, _, closed)) = self.channels.get_mut(&id) {
+                let mut channels = self.channels.lock().map_err(|_| InterpError {
+                    message: "channel state mutex poisoned".to_string(),
+                })?;
+                if let Some((_, _, closed)) = channels.get_mut(&id) {
                     *closed = true;
                 }
                 Ok(Some(Value::Unit))
@@ -4798,7 +5392,12 @@ impl Interpreter {
                 let value = args[0].clone();
                 let id = self.next_mutex_id;
                 self.next_mutex_id += 1;
-                self.mutexes.insert(id, (value, false));
+                self.mutexes
+                    .lock()
+                    .map_err(|_| InterpError {
+                        message: "mutex state mutex poisoned".to_string(),
+                    })?
+                    .insert(id, (value, false));
                 Ok(Some(Value::Mutex(id)))
             }
 
@@ -4814,7 +5413,10 @@ impl Interpreter {
                     }
                 };
 
-                if let Some((_, locked)) = self.mutexes.get_mut(&id) {
+                let mut mutexes = self.mutexes.lock().map_err(|_| InterpError {
+                    message: "mutex state mutex poisoned".to_string(),
+                })?;
+                if let Some((_, locked)) = mutexes.get_mut(&id) {
                     if *locked {
                         return Err(InterpError {
                             message: "mutex_lock: mutex already locked (deadlock in sync mode)"
@@ -4842,7 +5444,10 @@ impl Interpreter {
                     }
                 };
 
-                if let Some((_, locked)) = self.mutexes.get_mut(&id) {
+                let mut mutexes = self.mutexes.lock().map_err(|_| InterpError {
+                    message: "mutex state mutex poisoned".to_string(),
+                })?;
+                if let Some((_, locked)) = mutexes.get_mut(&id) {
                     if *locked {
                         return Ok(Some(Value::Enum {
                             type_name: "Option".to_string(),
@@ -4877,7 +5482,10 @@ impl Interpreter {
                     }
                 };
 
-                if let Some((_, locked)) = self.mutexes.get_mut(&id) {
+                let mut mutexes = self.mutexes.lock().map_err(|_| InterpError {
+                    message: "mutex state mutex poisoned".to_string(),
+                })?;
+                if let Some((_, locked)) = mutexes.get_mut(&id) {
                     *locked = false;
                 }
                 Ok(Some(Value::Unit))
@@ -4895,7 +5503,10 @@ impl Interpreter {
                     }
                 };
 
-                if let Some((value, _)) = self.mutexes.get(&id) {
+                let mutexes = self.mutexes.lock().map_err(|_| InterpError {
+                    message: "mutex state mutex poisoned".to_string(),
+                })?;
+                if let Some((value, _)) = mutexes.get(&id) {
                     Ok(Some(value.clone()))
                 } else {
                     Err(InterpError {
@@ -4917,7 +5528,10 @@ impl Interpreter {
                 };
                 let new_value = args[1].clone();
 
-                if let Some((value, _)) = self.mutexes.get_mut(&id) {
+                let mut mutexes = self.mutexes.lock().map_err(|_| InterpError {
+                    message: "mutex state mutex poisoned".to_string(),
+                })?;
+                if let Some((value, _)) = mutexes.get_mut(&id) {
                     *value = new_value;
                     Ok(Some(Value::Unit))
                 } else {
@@ -5021,6 +5635,7 @@ impl Interpreter {
                 Ok(Some(Value::Str(dt.to_rfc3339())))
             }
             "time_format_rfc2822" => {
+                validate_args!(args, 1, "time_format_rfc2822");
                 // time_format_rfc2822(timestamp) -> Str
                 let ts = match &args[0] {
                     Value::Int(n) => *n,
@@ -5818,6 +6433,195 @@ impl Interpreter {
                     })),
                 }
             }
+            "process_run" => {
+                validate_args!(args, 7, "process_run");
+                self.require_capability("exec", "process_run")?;
+                let Value::Str(program) = &args[0] else {
+                    return Err(InterpError {
+                        message: "process_run: program must be Str".to_string(),
+                    });
+                };
+                let Value::Array(raw_args) = &args[1] else {
+                    return Err(InterpError {
+                        message: "process_run: args must be [Str]".to_string(),
+                    });
+                };
+                let Value::Str(cwd) = &args[2] else {
+                    return Err(InterpError {
+                        message: "process_run: cwd must be Str".to_string(),
+                    });
+                };
+                let Value::Map(environment) = &args[3] else {
+                    return Err(InterpError {
+                        message: "process_run: environment must be {Str: Str}".to_string(),
+                    });
+                };
+                let Value::Array(raw_allowed) = &args[4] else {
+                    return Err(InterpError {
+                        message: "process_run: allowed_programs must be [Str]".to_string(),
+                    });
+                };
+                let Value::Int(timeout_ms) = &args[5] else {
+                    return Err(InterpError {
+                        message: "process_run: timeout_ms must be Int".to_string(),
+                    });
+                };
+                let Value::Int(max_output_chars) = &args[6] else {
+                    return Err(InterpError {
+                        message: "process_run: max_output_chars must be Int".to_string(),
+                    });
+                };
+                if !(1..=3_600_000).contains(timeout_ms) {
+                    return Ok(Some(result_value(
+                        "Err",
+                        Value::Str(
+                            "process_run: timeout_ms must be between 1 and 3600000".to_string(),
+                        ),
+                    )));
+                }
+                if !(1..=16_777_216).contains(max_output_chars) {
+                    return Ok(Some(result_value(
+                        "Err",
+                        Value::Str(
+                            "process_run: max_output_chars must be between 1 and 16777216"
+                                .to_string(),
+                        ),
+                    )));
+                }
+                let process_args = raw_args
+                    .iter()
+                    .map(|value| match value {
+                        Value::Str(value) => Ok(value.clone()),
+                        _ => Err("process_run: every argument must be Str".to_string()),
+                    })
+                    .collect::<Result<Vec<_>, _>>();
+                let allowed = raw_allowed
+                    .iter()
+                    .map(|value| match value {
+                        Value::Str(value) => Ok(value.clone()),
+                        _ => Err("process_run: every allowed program must be Str".to_string()),
+                    })
+                    .collect::<Result<Vec<_>, _>>();
+                let (process_args, allowed) = match (process_args, allowed) {
+                    (Ok(process_args), Ok(allowed)) => (process_args, allowed),
+                    (Err(error), _) | (_, Err(error)) => {
+                        return Ok(Some(result_value("Err", Value::Str(error))));
+                    }
+                };
+                if !allowed.iter().any(|allowed| allowed == program) {
+                    return Ok(Some(result_value(
+                        "Err",
+                        Value::Str(format!(
+                            "process_run: program `{program}` is not in the allowlist"
+                        )),
+                    )));
+                }
+                let canonical_cwd = match std::fs::canonicalize(cwd) {
+                    Ok(path) if path.is_dir() => path,
+                    Ok(_) => {
+                        return Ok(Some(result_value(
+                            "Err",
+                            Value::Str("process_run: cwd is not a directory".to_string()),
+                        )));
+                    }
+                    Err(error) => {
+                        return Ok(Some(result_value(
+                            "Err",
+                            Value::Str(format!("process_run: invalid cwd: {error}")),
+                        )));
+                    }
+                };
+                let mut command = Command::new(program);
+                command
+                    .args(process_args)
+                    .current_dir(canonical_cwd)
+                    .env_clear()
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped());
+                if let Ok(path) = std::env::var("PATH") {
+                    command.env("PATH", path);
+                }
+                for (name, value) in environment {
+                    let Value::Str(value) = value else {
+                        return Ok(Some(result_value(
+                            "Err",
+                            Value::Str(
+                                "process_run: every environment value must be Str".to_string(),
+                            ),
+                        )));
+                    };
+                    command.env(name, value);
+                }
+                #[cfg(unix)]
+                {
+                    use std::os::unix::process::CommandExt;
+                    command.process_group(0);
+                }
+                let mut child = match command.spawn() {
+                    Ok(child) => child,
+                    Err(error) => {
+                        return Ok(Some(result_value(
+                            "Err",
+                            Value::Str(format!("process_run: cannot start program: {error}")),
+                        )));
+                    }
+                };
+                let stdout = child.stdout.take().expect("piped stdout");
+                let stderr = child.stderr.take().expect("piped stderr");
+                let output_limit = *max_output_chars as usize;
+                let stdout_reader = thread::spawn(move || read_bounded(stdout, output_limit));
+                let stderr_reader = thread::spawn(move || read_bounded(stderr, output_limit));
+                let deadline = Instant::now() + Duration::from_millis(*timeout_ms as u64);
+                let (exit_code, timed_out) = loop {
+                    match child.try_wait() {
+                        Ok(Some(status)) => break (status.code().unwrap_or(-1) as i64, false),
+                        Ok(None) if Instant::now() < deadline => {
+                            thread::sleep(Duration::from_millis(10));
+                        }
+                        Ok(None) => {
+                            #[cfg(unix)]
+                            unsafe {
+                                libc::kill(-(child.id() as i32), libc::SIGKILL);
+                            }
+                            #[cfg(not(unix))]
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            break (124, true);
+                        }
+                        Err(error) => {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            return Ok(Some(result_value(
+                                "Err",
+                                Value::Str(format!("process_run: cannot monitor program: {error}")),
+                            )));
+                        }
+                    }
+                };
+                let (mut stdout, stdout_truncated) = stdout_reader
+                    .join()
+                    .unwrap_or_else(|_| (String::new(), false));
+                let (mut stderr, stderr_truncated) = stderr_reader
+                    .join()
+                    .unwrap_or_else(|_| (String::new(), false));
+                if stdout_truncated {
+                    stdout.push_str("\n[stdout truncated]");
+                }
+                if stderr_truncated {
+                    stderr.push_str("\n[stderr truncated]");
+                }
+                if timed_out {
+                    stderr.push_str("\n[process timed out and was terminated]");
+                }
+                Ok(Some(result_value(
+                    "Ok",
+                    Value::Tuple(vec![
+                        Value::Str(stdout),
+                        Value::Str(stderr),
+                        Value::Int(exit_code),
+                    ]),
+                )))
+            }
             "env_set" => {
                 validate_args!(args, 2, "env_set");
                 self.require_capability("env", "env_set")?;
@@ -6081,6 +6885,19 @@ impl Interpreter {
                     }
                 };
                 Ok(Some(Value::Bool(std::path::Path::new(&path).is_relative())))
+            }
+            "path_resolve_within" => {
+                validate_args!(args, 2, "path_resolve_within");
+                self.require_capability("read", "path_resolve_within")?;
+                let (Value::Str(root), Value::Str(relative)) = (&args[0], &args[1]) else {
+                    return Err(InterpError {
+                        message: "path_resolve_within: root and path must be Str".to_string(),
+                    });
+                };
+                Ok(Some(match resolve_path_within(root, relative) {
+                    Ok(path) => result_value("Ok", Value::Str(path.to_string_lossy().into_owned())),
+                    Err(error) => result_value("Err", Value::Str(error)),
+                }))
             }
             "path_absolute" => {
                 validate_args!(args, 1, "path_absolute");
@@ -6537,6 +7354,300 @@ impl Interpreter {
                         type_name: "Result".to_string(),
                         variant: "Err".to_string(),
                         fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+            "http_request_json" => {
+                // FORGE-RUST-GAP: FRG-004
+                validate_args!(args, 4, "http_request_json");
+                self.require_capability("network", "http_request_json")?;
+                let method = match &args[0] {
+                    Value::Str(value) => match reqwest::Method::from_bytes(value.as_bytes()) {
+                        Ok(method) => method,
+                        Err(error) => {
+                            return Ok(Some(Value::Enum {
+                                type_name: "Result".to_string(),
+                                variant: "Err".to_string(),
+                                fields: vec![Value::Str(format!(
+                                    "http_request_json: invalid method: {}",
+                                    error
+                                ))],
+                            }));
+                        }
+                    },
+                    _ => {
+                        return Err(InterpError {
+                            message: "http_request_json: method must be Str".to_string(),
+                        });
+                    }
+                };
+                let url = match &args[1] {
+                    Value::Str(value) => value.clone(),
+                    _ => {
+                        return Err(InterpError {
+                            message: "http_request_json: url must be Str".to_string(),
+                        });
+                    }
+                };
+                let json = match &args[2] {
+                    Value::Json(value) => value.clone(),
+                    _ => {
+                        return Err(InterpError {
+                            message: "http_request_json: body must be Json".to_string(),
+                        });
+                    }
+                };
+                let request_headers = match &args[3] {
+                    Value::Map(values) => {
+                        let mut headers = reqwest::header::HeaderMap::new();
+                        for (name, value) in values {
+                            let Value::Str(value) = value else {
+                                return Err(InterpError {
+                                    message: "http_request_json: header values must be Str"
+                                        .to_string(),
+                                });
+                            };
+                            let name =
+                                match reqwest::header::HeaderName::from_bytes(name.as_bytes()) {
+                                    Ok(name) => name,
+                                    Err(error) => {
+                                        return Ok(Some(Value::Enum {
+                                            type_name: "Result".to_string(),
+                                            variant: "Err".to_string(),
+                                            fields: vec![Value::Str(format!(
+                                                "http_request_json: invalid header name: {}",
+                                                error
+                                            ))],
+                                        }));
+                                    }
+                                };
+                            let value = match reqwest::header::HeaderValue::from_str(value) {
+                                Ok(value) => value,
+                                Err(error) => {
+                                    return Ok(Some(Value::Enum {
+                                        type_name: "Result".to_string(),
+                                        variant: "Err".to_string(),
+                                        fields: vec![Value::Str(format!(
+                                            "http_request_json: invalid header value: {}",
+                                            error
+                                        ))],
+                                    }));
+                                }
+                            };
+                            headers.insert(name, value);
+                        }
+                        headers
+                    }
+                    _ => {
+                        return Err(InterpError {
+                            message: "http_request_json: headers must be {Str: Str}".to_string(),
+                        });
+                    }
+                };
+                let client = reqwest::blocking::Client::builder()
+                    .build()
+                    .map_err(|error| InterpError {
+                        message: format!(
+                            "http_request_json: failed to create HTTP client: {}",
+                            error
+                        ),
+                    })?;
+                match client
+                    .request(method, &url)
+                    .headers(request_headers)
+                    .json(&json)
+                    .send()
+                {
+                    Ok(response) => {
+                        let status = response.status().as_u16() as i64;
+                        let headers: HashMap<String, Value> = response
+                            .headers()
+                            .iter()
+                            .filter_map(|(name, value)| {
+                                value
+                                    .to_str()
+                                    .ok()
+                                    .map(|value| (name.to_string(), Value::Str(value.to_string())))
+                            })
+                            .collect();
+                        let body = response.text().unwrap_or_default();
+                        Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Ok".to_string(),
+                            fields: vec![Value::Tuple(vec![
+                                Value::Int(status),
+                                Value::Str(body),
+                                Value::Map(headers),
+                            ])],
+                        }))
+                    }
+                    Err(error) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(error.to_string())],
+                    })),
+                }
+            }
+            "http_request" => {
+                validate_args!(args, 6, "http_request");
+                self.require_capability("network", "http_request")?;
+                let method = match &args[0] {
+                    Value::Str(value) => match reqwest::Method::from_bytes(value.as_bytes()) {
+                        Ok(method) => method,
+                        Err(error) => {
+                            return Ok(Some(Value::Enum {
+                                type_name: "Result".to_string(),
+                                variant: "Err".to_string(),
+                                fields: vec![Value::Str(format!(
+                                    "http_request: invalid method: {error}"
+                                ))],
+                            }));
+                        }
+                    },
+                    _ => {
+                        return Err(InterpError {
+                            message: "http_request: method must be Str".to_string(),
+                        });
+                    }
+                };
+                let url = match &args[1] {
+                    Value::Str(value) => value,
+                    _ => {
+                        return Err(InterpError {
+                            message: "http_request: url must be Str".to_string(),
+                        });
+                    }
+                };
+                let body = match &args[2] {
+                    Value::Str(value) => value,
+                    _ => {
+                        return Err(InterpError {
+                            message: "http_request: body must be Str".to_string(),
+                        });
+                    }
+                };
+                let mut request_headers = reqwest::header::HeaderMap::new();
+                match &args[3] {
+                    Value::Map(values) => {
+                        for (name, value) in values {
+                            let Value::Str(value) = value else {
+                                return Err(InterpError {
+                                    message: "http_request: header values must be Str".to_string(),
+                                });
+                            };
+                            let name =
+                                match reqwest::header::HeaderName::from_bytes(name.as_bytes()) {
+                                    Ok(name) => name,
+                                    Err(error) => {
+                                        return Ok(Some(Value::Enum {
+                                            type_name: "Result".to_string(),
+                                            variant: "Err".to_string(),
+                                            fields: vec![Value::Str(format!(
+                                                "http_request: invalid header name: {error}"
+                                            ))],
+                                        }));
+                                    }
+                                };
+                            let value = match reqwest::header::HeaderValue::from_str(value) {
+                                Ok(value) => value,
+                                Err(error) => {
+                                    return Ok(Some(Value::Enum {
+                                        type_name: "Result".to_string(),
+                                        variant: "Err".to_string(),
+                                        fields: vec![Value::Str(format!(
+                                            "http_request: invalid header value: {error}"
+                                        ))],
+                                    }));
+                                }
+                            };
+                            request_headers.insert(name, value);
+                        }
+                    }
+                    _ => {
+                        return Err(InterpError {
+                            message: "http_request: headers must be {Str: Str}".to_string(),
+                        });
+                    }
+                }
+                let timeout_ms = match &args[4] {
+                    Value::Int(value) if *value > 0 => *value as u64,
+                    Value::Int(_) => {
+                        return Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Err".to_string(),
+                            fields: vec![Value::Str(
+                                "http_request: timeout_ms must be positive".to_string(),
+                            )],
+                        }));
+                    }
+                    _ => {
+                        return Err(InterpError {
+                            message: "http_request: timeout_ms must be Int".to_string(),
+                        });
+                    }
+                };
+                let follow_redirects = match &args[5] {
+                    Value::Bool(value) => *value,
+                    _ => {
+                        return Err(InterpError {
+                            message: "http_request: follow_redirects must be Bool".to_string(),
+                        });
+                    }
+                };
+                let redirect_policy = if follow_redirects {
+                    reqwest::redirect::Policy::limited(10)
+                } else {
+                    reqwest::redirect::Policy::none()
+                };
+                let client = match reqwest::blocking::Client::builder()
+                    .timeout(std::time::Duration::from_millis(timeout_ms))
+                    .redirect(redirect_policy)
+                    .build()
+                {
+                    Ok(client) => client,
+                    Err(error) => {
+                        return Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Err".to_string(),
+                            fields: vec![Value::Str(format!(
+                                "http_request: failed to create HTTP client: {error}"
+                            ))],
+                        }));
+                    }
+                };
+                match client
+                    .request(method, url)
+                    .headers(request_headers)
+                    .body(body.clone())
+                    .send()
+                {
+                    Ok(response) => {
+                        let status = response.status().as_u16() as i64;
+                        let headers = response
+                            .headers()
+                            .iter()
+                            .filter_map(|(name, value)| {
+                                value
+                                    .to_str()
+                                    .ok()
+                                    .map(|value| (name.to_string(), Value::Str(value.to_string())))
+                            })
+                            .collect();
+                        let body = response.text().unwrap_or_default();
+                        Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Ok".to_string(),
+                            fields: vec![Value::Tuple(vec![
+                                Value::Int(status),
+                                Value::Str(body),
+                                Value::Map(headers),
+                            ])],
+                        }))
+                    }
+                    Err(error) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(error.to_string())],
                     })),
                 }
             }
@@ -8385,6 +9496,7 @@ impl Interpreter {
 
             // C type conversions
             "to_cint" => {
+                validate_args!(args, 1, "to_cint");
                 // to_cint(n: Int) -> CInt
                 let n = match &args[0] {
                     Value::Int(n) => *n as i32,
@@ -8397,6 +9509,7 @@ impl Interpreter {
                 Ok(Some(Value::CInt(n)))
             }
             "from_cint" => {
+                validate_args!(args, 1, "from_cint");
                 // from_cint(n: CInt) -> Int
                 let n = match &args[0] {
                     Value::CInt(n) => *n as i64,
@@ -8409,6 +9522,7 @@ impl Interpreter {
                 Ok(Some(Value::Int(n)))
             }
             "to_cuint" => {
+                validate_args!(args, 1, "to_cuint");
                 // to_cuint(n: Int) -> CUInt
                 let n = match &args[0] {
                     Value::Int(n) => *n as u32,
@@ -8421,6 +9535,7 @@ impl Interpreter {
                 Ok(Some(Value::CUInt(n)))
             }
             "from_cuint" => {
+                validate_args!(args, 1, "from_cuint");
                 // from_cuint(n: CUInt) -> Int
                 let n = match &args[0] {
                     Value::CUInt(n) => *n as i64,
@@ -8433,6 +9548,7 @@ impl Interpreter {
                 Ok(Some(Value::Int(n)))
             }
             "to_clong" => {
+                validate_args!(args, 1, "to_clong");
                 // to_clong(n: Int) -> CLong
                 let n = match &args[0] {
                     Value::Int(n) => *n,
@@ -8445,6 +9561,7 @@ impl Interpreter {
                 Ok(Some(Value::CLong(n)))
             }
             "from_clong" => {
+                validate_args!(args, 1, "from_clong");
                 // from_clong(n: CLong) -> Int
                 let n = match &args[0] {
                     Value::CLong(n) => *n,
@@ -8457,6 +9574,7 @@ impl Interpreter {
                 Ok(Some(Value::Int(n)))
             }
             "to_culong" => {
+                validate_args!(args, 1, "to_culong");
                 // to_culong(n: Int) -> CULong
                 let n = match &args[0] {
                     Value::Int(n) => *n as u64,
@@ -8469,6 +9587,7 @@ impl Interpreter {
                 Ok(Some(Value::CULong(n)))
             }
             "from_culong" => {
+                validate_args!(args, 1, "from_culong");
                 // from_culong(n: CULong) -> Int
                 let n = match &args[0] {
                     Value::CULong(n) => *n as i64,
@@ -8481,6 +9600,7 @@ impl Interpreter {
                 Ok(Some(Value::Int(n)))
             }
             "to_cfloat" => {
+                validate_args!(args, 1, "to_cfloat");
                 // to_cfloat(n: Float) -> CFloat
                 let n = match &args[0] {
                     Value::Float(n) => *n as f32,
@@ -8493,6 +9613,7 @@ impl Interpreter {
                 Ok(Some(Value::CFloat(n)))
             }
             "from_cfloat" => {
+                validate_args!(args, 1, "from_cfloat");
                 // from_cfloat(n: CFloat) -> Float
                 let n = match &args[0] {
                     Value::CFloat(n) => *n as f64,
@@ -8505,6 +9626,7 @@ impl Interpreter {
                 Ok(Some(Value::Float(n)))
             }
             "to_cdouble" => {
+                validate_args!(args, 1, "to_cdouble");
                 // to_cdouble(n: Float) -> CDouble
                 let n = match &args[0] {
                     Value::Float(n) => *n,
@@ -8517,6 +9639,7 @@ impl Interpreter {
                 Ok(Some(Value::CDouble(n)))
             }
             "from_cdouble" => {
+                validate_args!(args, 1, "from_cdouble");
                 // from_cdouble(n: CDouble) -> Float
                 let n = match &args[0] {
                     Value::CDouble(n) => *n,
@@ -8529,6 +9652,7 @@ impl Interpreter {
                 Ok(Some(Value::Float(n)))
             }
             "to_csize" => {
+                validate_args!(args, 1, "to_csize");
                 // to_csize(n: Int) -> CSize
                 let n = match &args[0] {
                     Value::Int(n) => *n as usize,
@@ -8541,6 +9665,7 @@ impl Interpreter {
                 Ok(Some(Value::CSize(n)))
             }
             "from_csize" => {
+                validate_args!(args, 1, "from_csize");
                 // from_csize(n: CSize) -> Int
                 let n = match &args[0] {
                     Value::CSize(n) => *n as i64,
@@ -8607,6 +9732,57 @@ impl Interpreter {
                         type_name: "Result".to_string(),
                         variant: "Err".to_string(),
                         fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+            "toml_parse" => {
+                validate_args!(args, 1, "toml_parse");
+                let source = match &args[0] {
+                    Value::Str(source) => source,
+                    _ => {
+                        return Err(InterpError {
+                            message: "toml_parse: expected Str".to_string(),
+                        });
+                    }
+                };
+                let parsed = toml::from_str::<toml::Value>(source)
+                    .map_err(|error| error.to_string())
+                    .and_then(|value| {
+                        serde_json::to_value(value).map_err(|error| error.to_string())
+                    });
+                match parsed {
+                    Ok(value) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Ok".to_string(),
+                        fields: vec![Value::Json(value)],
+                    })),
+                    Err(error) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(error)],
+                    })),
+                }
+            }
+            "toml_stringify" => {
+                validate_args!(args, 1, "toml_stringify");
+                let value = match &args[0] {
+                    Value::Json(value) => value,
+                    _ => {
+                        return Err(InterpError {
+                            message: "toml_stringify: expected Json".to_string(),
+                        });
+                    }
+                };
+                match toml::to_string_pretty(value) {
+                    Ok(source) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Ok".to_string(),
+                        fields: vec![Value::Str(source)],
+                    })),
+                    Err(error) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(error.to_string())],
                     })),
                 }
             }
@@ -9947,7 +11123,7 @@ impl Interpreter {
                 }
             }
 
-            // ===== SQLite database operations =====
+            // ===== SQLite and PostgreSQL database operations =====
             "db_open" => {
                 validate_args!(args, 1, "db_open");
                 self.require_capability("write", "db_open")?;
@@ -9963,6 +11139,15 @@ impl Interpreter {
 
                 match rusqlite::Connection::open(&path) {
                     Ok(conn) => {
+                        if let Err(error) = conn.busy_timeout(Duration::from_secs(5)) {
+                            return Ok(Some(Value::Enum {
+                                type_name: "Result".to_string(),
+                                variant: "Err".to_string(),
+                                fields: vec![Value::Str(format!(
+                                    "db_open: failed to configure busy timeout: {error}"
+                                ))],
+                            }));
+                        }
                         let id = self.next_db_id;
                         self.next_db_id += 1;
                         self.databases.insert(id, conn);
@@ -9983,6 +11168,15 @@ impl Interpreter {
                 // db_open_memory() -> Result[Database, Str]
                 match rusqlite::Connection::open_in_memory() {
                     Ok(conn) => {
+                        if let Err(error) = conn.busy_timeout(Duration::from_secs(5)) {
+                            return Ok(Some(Value::Enum {
+                                type_name: "Result".to_string(),
+                                variant: "Err".to_string(),
+                                fields: vec![Value::Str(format!(
+                                    "db_open_memory: failed to configure busy timeout: {error}"
+                                ))],
+                            }));
+                        }
                         let id = self.next_db_id;
                         self.next_db_id += 1;
                         self.databases.insert(id, conn);
@@ -9996,6 +11190,47 @@ impl Interpreter {
                         type_name: "Result".to_string(),
                         variant: "Err".to_string(),
                         fields: vec![Value::Str(e.to_string())],
+                    })),
+                }
+            }
+            "db_connect_postgres" => {
+                validate_args!(args, 1, "db_connect_postgres");
+                self.require_capability("network", "db_connect_postgres")?;
+                let connection_url = match &args[0] {
+                    Value::Str(value) => value,
+                    _ => {
+                        return Err(InterpError {
+                            message: "db_connect_postgres: expected Str connection URL".to_string(),
+                        });
+                    }
+                };
+                let connector = match native_tls::TlsConnector::builder().build() {
+                    Ok(connector) => postgres_native_tls::MakeTlsConnector::new(connector),
+                    Err(error) => {
+                        return Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Err".to_string(),
+                            fields: vec![Value::Str(format!(
+                                "db_connect_postgres: TLS setup failed: {error}"
+                            ))],
+                        }));
+                    }
+                };
+                match postgres::Client::connect(connection_url, connector) {
+                    Ok(connection) => {
+                        let id = self.next_db_id;
+                        self.next_db_id += 1;
+                        self.postgres_databases.insert(id, connection);
+                        Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Ok".to_string(),
+                            fields: vec![Value::Database(id)],
+                        }))
+                    }
+                    Err(error) => Ok(Some(Value::Enum {
+                        type_name: "Result".to_string(),
+                        variant: "Err".to_string(),
+                        fields: vec![Value::Str(error.to_string())],
                     })),
                 }
             }
@@ -10018,6 +11253,21 @@ impl Interpreter {
                         });
                     }
                 };
+
+                if let Some(connection) = self.postgres_databases.get_mut(&id) {
+                    return match connection.execute(&sql, &[]) {
+                        Ok(count) => Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Ok".to_string(),
+                            fields: vec![Value::Int(count as i64)],
+                        })),
+                        Err(error) => Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Err".to_string(),
+                            fields: vec![Value::Str(error.to_string())],
+                        })),
+                    };
+                }
 
                 let conn = match self.databases.get(&id) {
                     Some(c) => c,
@@ -10060,6 +11310,21 @@ impl Interpreter {
                         });
                     }
                 };
+
+                if let Some(connection) = self.postgres_databases.get_mut(&id) {
+                    return match connection.query(&sql, &[]).and_then(postgres_rows) {
+                        Ok(rows) => Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Ok".to_string(),
+                            fields: vec![Value::Array(rows)],
+                        })),
+                        Err(error) => Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Err".to_string(),
+                            fields: vec![Value::Str(error.to_string())],
+                        })),
+                    };
+                }
 
                 let conn = match self.databases.get(&id) {
                     Some(c) => c,
@@ -10144,6 +11409,41 @@ impl Interpreter {
                     }
                 };
 
+                if let Some(connection) = self.postgres_databases.get_mut(&id) {
+                    return match connection.query_opt(&sql, &[]) {
+                        Ok(Some(row)) => match postgres_rows(vec![row]) {
+                            Ok(mut rows) => Ok(Some(Value::Enum {
+                                type_name: "Result".to_string(),
+                                variant: "Ok".to_string(),
+                                fields: vec![Value::Enum {
+                                    type_name: "Option".to_string(),
+                                    variant: "Some".to_string(),
+                                    fields: vec![rows.remove(0)],
+                                }],
+                            })),
+                            Err(error) => Ok(Some(Value::Enum {
+                                type_name: "Result".to_string(),
+                                variant: "Err".to_string(),
+                                fields: vec![Value::Str(error.to_string())],
+                            })),
+                        },
+                        Ok(None) => Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Ok".to_string(),
+                            fields: vec![Value::Enum {
+                                type_name: "Option".to_string(),
+                                variant: "None".to_string(),
+                                fields: vec![],
+                            }],
+                        })),
+                        Err(error) => Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Err".to_string(),
+                            fields: vec![Value::Str(error.to_string())],
+                        })),
+                    };
+                }
+
                 let conn = match self.databases.get(&id) {
                     Some(c) => c,
                     None => {
@@ -10221,6 +11521,9 @@ impl Interpreter {
                     }
                 };
                 self.databases.remove(&id);
+                self.postgres_databases.remove(&id);
+                self.statements
+                    .retain(|_, (database_id, _)| *database_id != id);
                 Ok(Some(Value::Unit))
             }
             "db_prepare" => {
@@ -10243,8 +11546,10 @@ impl Interpreter {
                     }
                 };
 
-                // Verify the database exists
-                if !self.databases.contains_key(&db_id) {
+                // Verify the database exists.
+                if !self.databases.contains_key(&db_id)
+                    && !self.postgres_databases.contains_key(&db_id)
+                {
                     return Ok(Some(Value::Enum {
                         type_name: "Result".to_string(),
                         variant: "Err".to_string(),
@@ -10253,11 +11558,22 @@ impl Interpreter {
                 }
 
                 // Validate the SQL syntax by preparing it
-                let conn = self.databases.get(&db_id).ok_or_else(|| InterpError {
-                    message: format!("Invalid database handle: {}", db_id),
-                })?;
-                match conn.prepare(&sql) {
-                    Ok(_) => {
+                let valid = if let Some(connection) = self.postgres_databases.get_mut(&db_id) {
+                    let postgres_sql = postgres_parameter_sql(&sql);
+                    connection
+                        .prepare(&postgres_sql)
+                        .map(|_| ())
+                        .map_err(|error| error.to_string())
+                } else if let Some(connection) = self.databases.get(&db_id) {
+                    connection
+                        .prepare(&sql)
+                        .map(|_| ())
+                        .map_err(|error| error.to_string())
+                } else {
+                    Err(format!("invalid database handle: {db_id}"))
+                };
+                match valid {
+                    Ok(()) => {
                         // Store the prepared statement info
                         let stmt_id = self.next_stmt_id;
                         self.next_stmt_id += 1;
@@ -10268,10 +11584,10 @@ impl Interpreter {
                             fields: vec![Value::Statement(stmt_id)],
                         }))
                     }
-                    Err(e) => Ok(Some(Value::Enum {
+                    Err(error) => Ok(Some(Value::Enum {
                         type_name: "Result".to_string(),
                         variant: "Err".to_string(),
-                        fields: vec![Value::Str(e.to_string())],
+                        fields: vec![Value::Str(error)],
                     })),
                 }
             }
@@ -10306,6 +11622,27 @@ impl Interpreter {
                         }));
                     }
                 };
+
+                if let Some(connection) = self.postgres_databases.get_mut(&db_id) {
+                    let parameters = postgres_parameters(&params);
+                    let postgres_sql = postgres_parameter_sql(&sql);
+                    let parameter_refs = parameters
+                        .iter()
+                        .map(|value| value.as_ref())
+                        .collect::<Vec<_>>();
+                    return match connection.execute(&postgres_sql, &parameter_refs) {
+                        Ok(count) => Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Ok".to_string(),
+                            fields: vec![Value::Int(count as i64)],
+                        })),
+                        Err(error) => Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Err".to_string(),
+                            fields: vec![Value::Str(error.to_string())],
+                        })),
+                    };
+                }
 
                 let conn = match self.databases.get(&db_id) {
                     Some(c) => c,
@@ -10392,6 +11729,30 @@ impl Interpreter {
                         }));
                     }
                 };
+
+                if let Some(connection) = self.postgres_databases.get_mut(&db_id) {
+                    let parameters = postgres_parameters(&params);
+                    let postgres_sql = postgres_parameter_sql(&sql);
+                    let parameter_refs = parameters
+                        .iter()
+                        .map(|value| value.as_ref())
+                        .collect::<Vec<_>>();
+                    return match connection
+                        .query(&postgres_sql, &parameter_refs)
+                        .and_then(postgres_rows)
+                    {
+                        Ok(rows) => Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Ok".to_string(),
+                            fields: vec![Value::Array(rows)],
+                        })),
+                        Err(error) => Ok(Some(Value::Enum {
+                            type_name: "Result".to_string(),
+                            variant: "Err".to_string(),
+                            fields: vec![Value::Str(error.to_string())],
+                        })),
+                    };
+                }
 
                 let conn = match self.databases.get(&db_id) {
                     Some(c) => c,
@@ -11054,6 +12415,10 @@ impl Interpreter {
                 let val = self.resolve_local(local)?;
                 Ok(Value::Ref(Box::new(val)))
             }
+            Rvalue::RefPlace(place, _mutability) => {
+                let val = self.eval_place(place)?;
+                Ok(Value::Ref(Box::new(val)))
+            }
 
             Rvalue::Deref(op) => {
                 let val = self.eval_operand(op)?;
@@ -11087,7 +12452,11 @@ impl Interpreter {
                     let val = self.eval_operand(op)?;
                     map.insert(field_name.clone(), val);
                 }
-                Ok(Value::Struct(name.clone(), map))
+                let value = Value::Struct(name.clone(), map);
+                if self.check_contracts {
+                    self.check_value_invariants(&value, "struct construction")?;
+                }
+                Ok(value)
             }
 
             Rvalue::Enum {
@@ -11249,7 +12618,10 @@ impl Interpreter {
         match op {
             Operand::Constant(c) => Ok(self.const_to_value(c)),
 
-            Operand::Local(local) | Operand::Copy(local) | Operand::Move(local) => {
+            Operand::Local(local)
+            | Operand::Copy(local)
+            | Operand::Move(local)
+            | Operand::Borrow(local, _) => {
                 let frame = self.current_frame()?;
                 // Check ref_bindings first
                 if let Some(ref_binding) = frame.ref_bindings.get(local) {
@@ -11277,7 +12649,275 @@ impl Interpreter {
                     message: format!("undefined local: {}", local),
                 })
             }
+            Operand::CopyPlace(place)
+            | Operand::MovePlace(place)
+            | Operand::BorrowPlace(place, _) => self.eval_place(place),
         }
+    }
+
+    fn eval_place(&self, place: &Place) -> Result<Value, InterpError> {
+        let mut value = self.resolve_local(&place.local)?;
+        for projection in &place.projection {
+            value = match projection {
+                ProjectionElem::Field(name) => match value {
+                    Value::Struct(_, fields) => {
+                        fields.get(name).cloned().ok_or_else(|| InterpError {
+                            message: format!("unknown field `{name}` in place {place}"),
+                        })?
+                    }
+                    _ => {
+                        return Err(InterpError {
+                            message: format!("field projection on non-struct place {place}"),
+                        });
+                    }
+                },
+                ProjectionElem::TupleField(index) => match value {
+                    Value::Tuple(fields) => {
+                        fields.get(*index).cloned().ok_or_else(|| InterpError {
+                            message: format!("tuple projection {index} out of bounds in {place}"),
+                        })?
+                    }
+                    Value::Enum { fields, .. } => {
+                        fields.get(*index).cloned().ok_or_else(|| InterpError {
+                            message: format!("enum projection {index} out of bounds in {place}"),
+                        })?
+                    }
+                    _ => {
+                        return Err(InterpError {
+                            message: format!("tuple projection on non-tuple place {place}"),
+                        });
+                    }
+                },
+                ProjectionElem::Index(index_local) => {
+                    let index = match self.resolve_local(index_local)? {
+                        Value::Int(index) if index >= 0 => index as usize,
+                        _ => {
+                            return Err(InterpError {
+                                message: format!("non-integer index projection in {place}"),
+                            });
+                        }
+                    };
+                    match value {
+                        Value::Array(values) => {
+                            values.get(index).cloned().ok_or_else(|| InterpError {
+                                message: format!("index {index} out of bounds in {place}"),
+                            })?
+                        }
+                        _ => {
+                            return Err(InterpError {
+                                message: format!("index projection on non-array place {place}"),
+                            });
+                        }
+                    }
+                }
+                ProjectionElem::Deref => match value {
+                    Value::Ref(value) => *value,
+                    _ => {
+                        return Err(InterpError {
+                            message: format!("dereference of non-reference place {place}"),
+                        });
+                    }
+                },
+            };
+        }
+        Ok(value)
+    }
+
+    fn drop_place(&mut self, place: &Place) -> Result<(), InterpError> {
+        if place.projection.is_empty() {
+            if let Some(value) = self.current_frame_mut()?.locals.remove(&place.local) {
+                self.destroy_value(value)?;
+            }
+            return Ok(());
+        }
+
+        // Projected drops use a tombstone value. Static ownership analysis
+        // prevents subsequent reads of the moved/dropped projection.
+        let mut resolved = Vec::with_capacity(place.projection.len());
+        for projection in &place.projection {
+            resolved.push(match projection {
+                ProjectionElem::Index(local) => {
+                    let Value::Int(index) = self.resolve_local(local)? else {
+                        return Err(InterpError {
+                            message: format!("non-integer index projection in {place}"),
+                        });
+                    };
+                    if index < 0 {
+                        return Err(InterpError {
+                            message: format!("negative index projection in {place}"),
+                        });
+                    }
+                    ResolvedProjection::Index(index as usize)
+                }
+                ProjectionElem::Field(name) => ResolvedProjection::Field(name.clone()),
+                ProjectionElem::TupleField(index) => ResolvedProjection::TupleField(*index),
+                ProjectionElem::Deref => ResolvedProjection::Deref,
+            });
+        }
+        let value = self
+            .current_frame_mut()?
+            .locals
+            .get_mut(&place.local)
+            .ok_or_else(|| InterpError {
+                message: format!("undefined local in projected drop: {}", place.local),
+            })?;
+        let removed = replace_projected_with_unit(value, &resolved, place)?;
+        self.destroy_value(removed)
+    }
+
+    /// Run interpreter drop glue. Aggregate children are destroyed in reverse
+    /// declaration order, and affine runtime handles release their resource at
+    /// the owning place's scope exit rather than at interpreter shutdown.
+    fn destroy_value(&mut self, value: Value) -> Result<(), InterpError> {
+        match value {
+            Value::Tuple(values)
+            | Value::Array(values)
+            | Value::DbRow(values)
+            | Value::Enum { fields: values, .. } => {
+                for value in values.into_iter().rev() {
+                    self.destroy_value(value)?;
+                }
+            }
+            Value::Struct(type_name, mut fields) => {
+                if let Some(layout) = self.program.struct_fields.get(&type_name) {
+                    let names: Vec<_> = layout.iter().map(|(name, _)| name.clone()).collect();
+                    for name in names.into_iter().rev() {
+                        if let Some(value) = fields.remove(&name) {
+                            self.destroy_value(value)?;
+                        }
+                    }
+                }
+                // Defensive cleanup for values created by dynamic/legacy paths.
+                let mut remaining: Vec<_> = fields.into_iter().collect();
+                remaining.sort_by(|left, right| left.0.cmp(&right.0));
+                for (_, value) in remaining.into_iter().rev() {
+                    self.destroy_value(value)?;
+                }
+            }
+            Value::Map(values) => {
+                let mut entries: Vec<_> = values.into_iter().collect();
+                entries.sort_by(|left, right| left.0.cmp(&right.0));
+                for (_, value) in entries.into_iter().rev() {
+                    self.destroy_value(value)?;
+                }
+            }
+            Value::Closure { captures, .. } => {
+                for value in captures.into_iter().rev() {
+                    self.destroy_value(value)?;
+                }
+            }
+            Value::Task(value) | Value::Future(value) => {
+                self.destroy_value(*value)?;
+            }
+            Value::TokioTask(id) => {
+                if let Some(task) = self
+                    .spawned_tasks
+                    .lock()
+                    .map_err(|_| InterpError {
+                        message: "Task registry mutex poisoned".to_string(),
+                    })?
+                    .remove(&id)
+                {
+                    task.abort();
+                }
+            }
+            Value::Sender(id) | Value::Channel(id) => {
+                if let Some((_, _, closed)) = self
+                    .channels
+                    .lock()
+                    .map_err(|_| InterpError {
+                        message: "channel state mutex poisoned".to_string(),
+                    })?
+                    .get_mut(&id)
+                {
+                    *closed = true;
+                }
+            }
+            Value::Receiver(id) => {
+                self.channels
+                    .lock()
+                    .map_err(|_| InterpError {
+                        message: "channel state mutex poisoned".to_string(),
+                    })?
+                    .remove(&id);
+            }
+            Value::Mutex(id) | Value::MutexGuard(id) => {
+                self.mutexes
+                    .lock()
+                    .map_err(|_| InterpError {
+                        message: "mutex state mutex poisoned".to_string(),
+                    })?
+                    .remove(&id);
+            }
+            Value::TcpStream(id) => {
+                self.tcp_streams.remove(&id);
+            }
+            Value::TcpListener(id) => {
+                self.tcp_listeners.remove(&id);
+            }
+            Value::UdpSocket(id) => {
+                self.udp_sockets.remove(&id);
+            }
+            Value::TlsStream(id) => {
+                self.tls_streams.remove(&id);
+            }
+            Value::Database(id) => {
+                self.databases.remove(&id);
+                self.statements.retain(|_, (database, _)| *database != id);
+            }
+            Value::Statement(id) => {
+                self.statements.remove(&id);
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn assign_place(&mut self, place: &Place, replacement: Value) -> Result<(), InterpError> {
+        let mut resolved = Vec::with_capacity(place.projection.len());
+        for projection in &place.projection {
+            resolved.push(match projection {
+                ProjectionElem::Index(local) => {
+                    let Value::Int(index) = self.resolve_local(local)? else {
+                        return Err(InterpError {
+                            message: format!("non-integer index projection in {place}"),
+                        });
+                    };
+                    if index < 0 {
+                        return Err(InterpError {
+                            message: format!("negative index projection in {place}"),
+                        });
+                    }
+                    ResolvedProjection::Index(index as usize)
+                }
+                ProjectionElem::Field(name) => ResolvedProjection::Field(name.clone()),
+                ProjectionElem::TupleField(index) => ResolvedProjection::TupleField(*index),
+                ProjectionElem::Deref => ResolvedProjection::Deref,
+            });
+        }
+        let ref_binding = self
+            .current_frame()?
+            .ref_bindings
+            .get(&place.local)
+            .cloned();
+        let (frame_index, local) = if let Some(binding) = ref_binding {
+            if !binding.mutable {
+                return Err(InterpError {
+                    message: format!("cannot assign through immutable reference: {place}"),
+                });
+            }
+            (binding.frame_index, binding.local)
+        } else {
+            (self.call_stack.len() - 1, place.local)
+        };
+        let value = self
+            .call_stack
+            .get_mut(frame_index)
+            .and_then(|frame| frame.locals.get_mut(&local))
+            .ok_or_else(|| InterpError {
+                message: format!("undefined local in projected assignment: {local}"),
+            })?;
+        assign_projected(value, &resolved, replacement, place)
     }
 
     /// Resolve a local through ref_bindings, returning the value.
@@ -11475,6 +13115,18 @@ impl Interpreter {
             _ => Err(InterpError {
                 message: format!("unsupported unary operation: {:?} on {:?}", op, val),
             }),
+        }
+    }
+}
+
+impl Drop for Interpreter {
+    fn drop(&mut self) {
+        // A task registry is a structured task scope. Any handle that was not
+        // awaited/consumed before the interpreter leaves scope is cancelled.
+        if let Ok(mut tasks) = self.spawned_tasks.lock() {
+            for (_, task) in tasks.drain() {
+                task.abort();
+            }
         }
     }
 }
@@ -11971,6 +13623,621 @@ f main() -> Int = unwrap(safe_add_one(Some(41)))
     }
 
     #[test]
+    fn every_registry_gated_builtin_is_denied_before_dispatch() {
+        let program = Program::new();
+        let mut interp = Interpreter::new(program).unwrap();
+        for builtin in crate::builtins::BUILTINS {
+            let error = interp
+                .call_builtin(builtin.name, &[])
+                .expect_err("registry gate must run before argument validation");
+            assert!(
+                error.message.contains("capability"),
+                "{} bypassed its registry gate: {}",
+                builtin.name,
+                error.message
+            );
+        }
+    }
+
+    #[test]
+    fn every_registry_gate_allows_its_declared_capability() {
+        for builtin in crate::builtins::BUILTINS {
+            let mut interp = Interpreter::new(Program::new()).unwrap();
+            interp.grant_capability(
+                builtin
+                    .capability
+                    .expect("effectful registry entry must have a capability")
+                    .as_str(),
+            );
+            match interp.call_builtin(builtin.name, &[]) {
+                Ok(None) => panic!("{} has registry metadata but no dispatch", builtin.name),
+                Err(error) => {
+                    assert!(
+                        !error.message.contains("capability"),
+                        "{} remained gated after granting authority: {}",
+                        builtin.name,
+                        error.message
+                    );
+                }
+                Ok(Some(_)) => {}
+            }
+        }
+    }
+
+    #[test]
+    fn every_ungated_registry_builtin_reaches_dispatch() {
+        let mut interp = Interpreter::new(Program::new()).unwrap();
+        for builtin in crate::builtins::EFFECT_BUILTINS
+            .iter()
+            .chain(crate::builtins::PURE_BUILTINS)
+        {
+            assert!(
+                !matches!(interp.call_builtin(builtin.name, &[]), Ok(None)),
+                "{} has registry metadata but no dispatch",
+                builtin.name
+            );
+        }
+    }
+
+    #[test]
+    fn long_tail_registered_builtins_have_behavior_or_error_evidence() {
+        macro_rules! builtin_behavior {
+            ($interp:expr, $name:literal, $args:expr, value) => {{
+                let args: Vec<Value> = $args;
+                match $interp.call_builtin($name, args.as_slice()) {
+                    Ok(Some(value)) => value,
+                    Ok(None) => panic!("{} was not handled by builtin dispatch", $name),
+                    Err(error) => panic!("{} unexpectedly failed: {}", $name, error.message),
+                }
+            }};
+            ($interp:expr, $name:literal, $args:expr, error_path) => {{
+                let args: Vec<Value> = $args;
+                match $interp.call_builtin($name, args.as_slice()) {
+                    Err(_) => {}
+                    Ok(Some(Value::Enum { variant, .. })) if variant == "Err" => {}
+                    Ok(Some(other)) => {
+                        panic!("{} unexpectedly succeeded with {other:?}", $name)
+                    }
+                    Ok(None) => panic!("{} was not handled by builtin dispatch", $name),
+                }
+            }};
+        }
+
+        let mut interp = Interpreter::new(Program::new()).unwrap();
+        for capability in ["read", "write", "network", "unsafe"] {
+            interp.grant_capability(capability);
+        }
+
+        assert_eq!(
+            builtin_behavior!(
+                interp,
+                "base64_encode_bytes",
+                vec![Value::Array(vec![Value::Int(104), Value::Int(105),])],
+                value
+            ),
+            Value::Str("aGk=".to_string())
+        );
+        builtin_behavior!(
+            interp,
+            "base64_decode_bytes",
+            vec![Value::Str("aGk=".to_string())],
+            value
+        );
+        assert_eq!(
+            builtin_behavior!(interp, "log10", vec![Value::Float(100.0)], value),
+            Value::Float(2.0)
+        );
+        builtin_behavior!(
+            interp,
+            "path_resolve_within",
+            vec![
+                Value::Str(".".to_string()),
+                Value::Str("../escape".to_string()),
+            ],
+            error_path
+        );
+        builtin_behavior!(
+            interp,
+            "sha256_bytes",
+            vec![Value::Array(vec![Value::Int(1), Value::Int(2)])],
+            value
+        );
+        assert_eq!(
+            builtin_behavior!(interp, "to_cuint", vec![Value::Int(7)], value),
+            Value::CUInt(7)
+        );
+        assert_eq!(
+            builtin_behavior!(interp, "from_cuint", vec![Value::CUInt(7)], value),
+            Value::Int(7)
+        );
+        assert_eq!(
+            builtin_behavior!(interp, "to_clong", vec![Value::Int(-7)], value),
+            Value::CLong(-7)
+        );
+        assert_eq!(
+            builtin_behavior!(interp, "from_clong", vec![Value::CLong(-7)], value),
+            Value::Int(-7)
+        );
+        assert_eq!(
+            builtin_behavior!(interp, "to_culong", vec![Value::Int(7)], value),
+            Value::CULong(7)
+        );
+        assert_eq!(
+            builtin_behavior!(interp, "from_culong", vec![Value::CULong(7)], value),
+            Value::Int(7)
+        );
+        assert_eq!(
+            builtin_behavior!(
+                interp,
+                "row_get_bool",
+                vec![Value::DbRow(vec![Value::Int(1)]), Value::Int(0)],
+                value
+            ),
+            Value::Bool(true)
+        );
+
+        for name in ["debug", "info", "error"] {
+            let result = match name {
+                "debug" => builtin_behavior!(
+                    interp,
+                    "debug",
+                    vec![Value::Str("coverage".to_string())],
+                    value
+                ),
+                "info" => builtin_behavior!(
+                    interp,
+                    "info",
+                    vec![Value::Str("coverage".to_string())],
+                    value
+                ),
+                "error" => builtin_behavior!(
+                    interp,
+                    "error",
+                    vec![Value::Str("coverage".to_string())],
+                    value
+                ),
+                _ => unreachable!(),
+            };
+            assert_eq!(result, Value::Unit);
+        }
+        builtin_behavior!(
+            interp,
+            "panic",
+            vec![Value::Str("expected".to_string())],
+            error_path
+        );
+        match builtin_behavior!(interp, "random", vec![], value) {
+            Value::Float(value) => assert!((0.0..1.0).contains(&value)),
+            other => panic!("random returned {other:?}"),
+        }
+        match builtin_behavior!(
+            interp,
+            "random_shuffle",
+            vec![Value::Array(vec![
+                Value::Int(1),
+                Value::Int(2),
+                Value::Int(3),
+            ])],
+            value
+        ) {
+            Value::Array(mut values) => {
+                values.sort_by_key(|value| value.as_int().unwrap_or_default());
+                assert_eq!(values, vec![Value::Int(1), Value::Int(2), Value::Int(3)]);
+            }
+            other => panic!("random_shuffle returned {other:?}"),
+        }
+
+        let task_id = 9001;
+        let handle = interp.runtime.spawn(async { Value::Int(11) });
+        interp.spawned_tasks.lock().unwrap().insert(task_id, handle);
+        assert_eq!(
+            builtin_behavior!(
+                interp,
+                "await_any",
+                vec![Value::Array(vec![Value::TokioTask(task_id)])],
+                value
+            ),
+            Value::Int(11)
+        );
+
+        let task_id = 9002;
+        let handle = interp.runtime.spawn(async { Value::Int(12) });
+        interp.spawned_tasks.lock().unwrap().insert(task_id, handle);
+        match builtin_behavior!(
+            interp,
+            "timeout",
+            vec![Value::TokioTask(task_id), Value::Int(1000)],
+            value
+        ) {
+            Value::Enum {
+                variant, fields, ..
+            } => {
+                assert_eq!(variant, "Some");
+                assert_eq!(fields, vec![Value::Int(12)]);
+            }
+            other => panic!("timeout returned {other:?}"),
+        }
+
+        let channel = interp
+            .call_builtin("channel_new", &[Value::Int(1)])
+            .unwrap();
+        let sender = match channel {
+            Some(Value::Tuple(values)) => values[0].clone(),
+            other => panic!("channel_new returned {other:?}"),
+        };
+        assert_eq!(
+            builtin_behavior!(
+                interp,
+                "channel_try_send",
+                vec![sender, Value::Int(9)],
+                value
+            ),
+            Value::Bool(true)
+        );
+
+        let temp = tempfile::tempdir().unwrap();
+        let removable = temp.path().join("remove-me");
+        std::fs::create_dir(&removable).unwrap();
+        match builtin_behavior!(
+            interp,
+            "dir_remove",
+            vec![Value::Str(removable.display().to_string())],
+            value
+        ) {
+            Value::Enum {
+                variant, fields, ..
+            } => {
+                assert_eq!(variant, "Ok");
+                assert_eq!(fields, vec![Value::Unit]);
+            }
+            other => panic!("dir_remove returned {other:?}"),
+        }
+        builtin_behavior!(
+            interp,
+            "chdir",
+            vec![Value::Str(
+                temp.path().join("missing").display().to_string()
+            )],
+            error_path
+        );
+
+        let response_file = temp.path().join("response.txt");
+        std::fs::write(&response_file, "hello").unwrap();
+        builtin_behavior!(
+            interp,
+            "http_file_response",
+            vec![Value::Str(response_file.display().to_string())],
+            value
+        );
+        let mut headers = HashMap::new();
+        headers.insert(
+            "Content-Type".to_string(),
+            Value::Str("text/plain".to_string()),
+        );
+        builtin_behavior!(
+            interp,
+            "http_response_with_headers",
+            vec![
+                Value::Int(200),
+                Value::Str("ok".to_string()),
+                Value::Map(headers.clone()),
+            ],
+            value
+        );
+        let mut request_fields = HashMap::new();
+        request_fields.insert("headers".to_string(), Value::Map(headers));
+        builtin_behavior!(
+            interp,
+            "http_req_header",
+            vec![
+                Value::Struct("HttpRequest".to_string(), request_fields),
+                Value::Str("content-type".to_string()),
+            ],
+            value
+        );
+
+        builtin_behavior!(
+            interp,
+            "mem_copy",
+            vec![Value::RawPtr(0), Value::RawPtr(0), Value::Int(0)],
+            value
+        );
+        builtin_behavior!(
+            interp,
+            "mem_set",
+            vec![Value::RawPtr(0), Value::Int(0), Value::Int(0)],
+            value
+        );
+
+        builtin_behavior!(
+            interp,
+            "dns_reverse_lookup",
+            vec![Value::Str("not-an-ip".to_string())],
+            error_path
+        );
+        builtin_behavior!(interp, "http_get", vec![Value::Unit], error_path);
+        builtin_behavior!(
+            interp,
+            "http_post",
+            vec![Value::Unit, Value::Unit],
+            error_path
+        );
+        builtin_behavior!(
+            interp,
+            "http_post_json",
+            vec![Value::Unit, Value::Unit],
+            error_path
+        );
+        builtin_behavior!(
+            interp,
+            "http_request_json",
+            vec![Value::Unit, Value::Unit, Value::Unit, Value::Unit],
+            error_path
+        );
+        builtin_behavior!(
+            interp,
+            "http_put",
+            vec![Value::Unit, Value::Unit],
+            error_path
+        );
+        builtin_behavior!(interp, "http_delete", vec![Value::Unit], error_path);
+        builtin_behavior!(
+            interp,
+            "http_serve",
+            vec![Value::Int(-1), Value::Unit],
+            error_path
+        );
+
+        builtin_behavior!(
+            interp,
+            "tcp_accept",
+            vec![Value::TcpListener(u64::MAX)],
+            error_path
+        );
+        builtin_behavior!(interp, "tcp_close", vec![Value::TcpStream(u64::MAX)], value);
+        builtin_behavior!(
+            interp,
+            "tcp_local_addr",
+            vec![Value::TcpStream(u64::MAX)],
+            value
+        );
+        builtin_behavior!(
+            interp,
+            "tcp_peer_addr",
+            vec![Value::TcpStream(u64::MAX)],
+            value
+        );
+        builtin_behavior!(
+            interp,
+            "tcp_read",
+            vec![Value::TcpStream(u64::MAX), Value::Int(1)],
+            error_path
+        );
+        builtin_behavior!(
+            interp,
+            "tcp_read_exact",
+            vec![Value::TcpStream(u64::MAX), Value::Int(1)],
+            error_path
+        );
+        builtin_behavior!(
+            interp,
+            "tcp_read_line",
+            vec![Value::TcpStream(u64::MAX)],
+            error_path
+        );
+        builtin_behavior!(
+            interp,
+            "tcp_set_timeout",
+            vec![Value::TcpStream(u64::MAX), Value::Int(1)],
+            value
+        );
+        builtin_behavior!(
+            interp,
+            "tcp_write",
+            vec![Value::TcpStream(u64::MAX), Value::Str("x".to_string()),],
+            error_path
+        );
+        builtin_behavior!(
+            interp,
+            "tcp_write_all",
+            vec![Value::TcpStream(u64::MAX), Value::Str("x".to_string()),],
+            error_path
+        );
+
+        builtin_behavior!(
+            interp,
+            "tls_connect",
+            vec![Value::Unit, Value::Int(443)],
+            error_path
+        );
+        builtin_behavior!(
+            interp,
+            "tls_read",
+            vec![Value::TlsStream(u64::MAX), Value::Int(1)],
+            error_path
+        );
+        builtin_behavior!(
+            interp,
+            "tls_write",
+            vec![Value::TlsStream(u64::MAX), Value::Str("x".to_string()),],
+            error_path
+        );
+        builtin_behavior!(interp, "tls_close", vec![Value::TlsStream(u64::MAX)], value);
+
+        builtin_behavior!(
+            interp,
+            "udp_connect",
+            vec![
+                Value::UdpSocket(u64::MAX),
+                Value::Str("127.0.0.1".to_string()),
+                Value::Int(9),
+            ],
+            error_path
+        );
+        builtin_behavior!(
+            interp,
+            "udp_recv",
+            vec![Value::UdpSocket(u64::MAX), Value::Int(1)],
+            error_path
+        );
+        builtin_behavior!(
+            interp,
+            "udp_recv_from",
+            vec![Value::UdpSocket(u64::MAX), Value::Int(1)],
+            error_path
+        );
+        builtin_behavior!(
+            interp,
+            "udp_send",
+            vec![Value::UdpSocket(u64::MAX), Value::Str("x".to_string()),],
+            error_path
+        );
+        builtin_behavior!(
+            interp,
+            "udp_send_to",
+            vec![
+                Value::UdpSocket(u64::MAX),
+                Value::Str("x".to_string()),
+                Value::Str("127.0.0.1".to_string()),
+                Value::Int(9),
+            ],
+            error_path
+        );
+    }
+
+    #[test]
+    fn task_authority_is_an_explicit_subset_of_parent_authority() {
+        let program = Program::new();
+        let mut interp = Interpreter::new(program).unwrap();
+        interp.grant_capability("read");
+        interp.grant_capability("write");
+        interp.set_task_capabilities(["read", "network"]);
+
+        assert_eq!(
+            interp.task_capabilities,
+            HashSet::from(["read".to_string()])
+        );
+        let task = Interpreter::new_for_task(Arc::clone(&interp.program)).unwrap();
+        assert!(task.capabilities.is_empty());
+    }
+
+    #[test]
+    fn dropping_affine_runtime_handles_releases_the_resource_immediately() {
+        let mut interp = Interpreter::new(Program::new()).unwrap();
+        let handle = interp.runtime.spawn(async {
+            std::future::pending::<()>().await;
+            Value::Unit
+        });
+        interp.spawned_tasks.lock().unwrap().insert(7, handle);
+        interp
+            .channels
+            .lock()
+            .unwrap()
+            .insert(8, (Vec::new(), 1, false));
+        interp
+            .mutexes
+            .lock()
+            .unwrap()
+            .insert(9, (Value::Int(1), false));
+
+        interp.destroy_value(Value::TokioTask(7)).unwrap();
+        interp.destroy_value(Value::Sender(8)).unwrap();
+        interp.destroy_value(Value::Mutex(9)).unwrap();
+
+        assert!(!interp.spawned_tasks.lock().unwrap().contains_key(&7));
+        assert!(interp.channels.lock().unwrap().get(&8).unwrap().2);
+        assert!(!interp.mutexes.lock().unwrap().contains_key(&9));
+    }
+
+    #[test]
+    fn runtime_errors_unwind_owned_frame_resources() {
+        let mut interp = Interpreter::new(Program::new()).unwrap();
+        let task = interp.runtime.spawn(async {
+            std::future::pending::<()>().await;
+            Value::Unit
+        });
+        interp.spawned_tasks.lock().unwrap().insert(11, task);
+        interp
+            .databases
+            .insert(12, rusqlite::Connection::open_in_memory().unwrap());
+        interp.statements.insert(13, (12, "select 1".into()));
+
+        let mut frame = Frame::new("failing".into(), BlockId(0));
+        frame.locals.insert(Local(0), Value::TokioTask(11));
+        frame.locals.insert(Local(1), Value::Database(12));
+        interp.call_stack.push(frame);
+        let error = interp.unwind_with(InterpError {
+            message: "boom".into(),
+        });
+
+        assert_eq!(error.message, "boom");
+        assert!(interp.call_stack.is_empty());
+        assert!(!interp.spawned_tasks.lock().unwrap().contains_key(&11));
+        assert!(!interp.databases.contains_key(&12));
+        assert!(!interp.statements.contains_key(&13));
+    }
+
+    #[test]
+    fn guest_exit_is_contained_by_the_interpreter() {
+        let mut interp = Interpreter::new(Program::new()).unwrap();
+        interp.grant_capability("exec");
+        let error = interp
+            .call_builtin("exit", &[Value::Int(23)])
+            .expect_err("exit must be returned to the embedding host");
+        assert_eq!(error.requested_exit_code(), Some(23));
+    }
+
+    #[test]
+    fn program_args_come_from_the_interpreter_overlay() {
+        // FORGE-RUST-GAP: FRG-006
+        let mut interp = Interpreter::new(Program::new()).unwrap();
+        interp.grant_capability("env");
+        interp.set_env("ARGC", "2");
+        interp.set_env("ARGV_0", "check");
+        interp.set_env("ARGV_1", "forge.settings.json");
+
+        let result = interp.call_builtin("args", &[]).unwrap();
+        assert_eq!(
+            result,
+            Some(Value::Array(vec![
+                Value::Str("check".to_string()),
+                Value::Str("forge.settings.json".to_string()),
+            ]))
+        );
+    }
+
+    #[test]
+    fn authenticated_json_request_rejects_invalid_method_before_io() {
+        // FORGE-RUST-GAP: FRG-004
+        let mut interp = Interpreter::new(Program::new()).unwrap();
+        interp.grant_capability("network");
+        let result = interp
+            .call_builtin(
+                "http_request_json",
+                &[
+                    Value::Str("not a method".to_string()),
+                    Value::Str("https://example.com".to_string()),
+                    Value::Json(serde_json::json!({})),
+                    Value::Map(HashMap::from([(
+                        "authorization".to_string(),
+                        Value::Str("Bearer redacted".to_string()),
+                    )])),
+                ],
+            )
+            .unwrap()
+            .expect("builtin returns a Result value");
+        assert!(matches!(
+            result,
+            Value::Enum {
+                variant,
+                fields,
+                ..
+            } if variant == "Err"
+                && matches!(&fields[..], [Value::Str(message)] if message.contains("invalid method"))
+        ));
+    }
+
+    #[test]
     fn test_capability_denial_network_ops() {
         let program = Program::new();
         let mut interp = Interpreter::new(program).unwrap();
@@ -11987,6 +14254,15 @@ f main() -> Int = unwrap(safe_add_one(Some(41)))
             ("http_put", vec![url.clone(), body.clone()]),
             ("http_delete", vec![url.clone()]),
             ("http_post_json", vec![url.clone(), json.clone()]),
+            (
+                "http_request_json",
+                vec![
+                    Value::Str("POST".to_string()),
+                    url.clone(),
+                    json.clone(),
+                    Value::Map(HashMap::new()),
+                ],
+            ),
             ("http_serve", vec![port.clone(), Value::Unit]),
             ("tcp_connect", vec![host.clone(), port.clone()]),
             ("tcp_listen", vec![host.clone(), port.clone()]),
@@ -12036,6 +14312,123 @@ f main() -> Int = unwrap(safe_add_one(Some(41)))
         // exec with capability granted should attempt to run (not denied)
         let result = interp.call_builtin("exec", &[Value::Str("echo hello".to_string())]);
         assert!(result.is_ok(), "exec should succeed with capability");
+    }
+
+    #[test]
+    fn path_resolve_within_rejects_symlink_escape() {
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret.txt"), "secret").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(outside.path(), workspace.path().join("escape")).unwrap();
+
+        let mut interp = Interpreter::new(Program::new()).unwrap();
+        interp.grant_capability("read");
+        #[cfg(unix)]
+        let result = interp
+            .call_builtin(
+                "path_resolve_within",
+                &[
+                    Value::Str(workspace.path().display().to_string()),
+                    Value::Str("escape/secret.txt".to_string()),
+                ],
+            )
+            .unwrap()
+            .unwrap();
+        #[cfg(unix)]
+        assert!(matches!(
+            result,
+            Value::Enum { variant, .. } if variant == "Err"
+        ));
+    }
+
+    #[test]
+    fn process_run_enforces_allowlist_timeout_output_and_empty_environment() {
+        let workspace = tempfile::tempdir().unwrap();
+        let mut interp = Interpreter::new(Program::new()).unwrap();
+        interp.grant_capability("exec");
+
+        let denied = interp
+            .call_builtin(
+                "process_run",
+                &[
+                    Value::Str("/bin/echo".to_string()),
+                    Value::Array(vec![Value::Str("hello".to_string())]),
+                    Value::Str(workspace.path().display().to_string()),
+                    Value::Map(HashMap::new()),
+                    Value::Array(vec![]),
+                    Value::Int(1000),
+                    Value::Int(1024),
+                ],
+            )
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            denied,
+            Value::Enum { variant, .. } if variant == "Err"
+        ));
+
+        let completed = interp
+            .call_builtin(
+                "process_run",
+                &[
+                    Value::Str("/bin/sh".to_string()),
+                    Value::Array(vec![
+                        Value::Str("-c".to_string()),
+                        Value::Str(
+                            "printf 123456789; if [ -z \"$OPENAI_API_KEY\" ]; then printf clean >&2; fi"
+                                .to_string(),
+                        ),
+                    ]),
+                    Value::Str(workspace.path().display().to_string()),
+                    Value::Map(HashMap::new()),
+                    Value::Array(vec![Value::Str("/bin/sh".to_string())]),
+                    Value::Int(1000),
+                    Value::Int(4),
+                ],
+            )
+            .unwrap()
+            .unwrap();
+        let Value::Enum {
+            variant, fields, ..
+        } = completed
+        else {
+            panic!("expected Result");
+        };
+        assert_eq!(variant, "Ok");
+        let Value::Tuple(output) = &fields[0] else {
+            panic!("expected process tuple");
+        };
+        assert!(
+            matches!(&output[0], Value::Str(value) if value.starts_with("1234") && value.contains("truncated"))
+        );
+        assert!(matches!(&output[1], Value::Str(value) if value.starts_with("clea")));
+
+        let timed_out = interp
+            .call_builtin(
+                "process_run",
+                &[
+                    Value::Str("/bin/sh".to_string()),
+                    Value::Array(vec![
+                        Value::Str("-c".to_string()),
+                        Value::Str("sleep 2".to_string()),
+                    ]),
+                    Value::Str(workspace.path().display().to_string()),
+                    Value::Map(HashMap::new()),
+                    Value::Array(vec![Value::Str("/bin/sh".to_string())]),
+                    Value::Int(20),
+                    Value::Int(1024),
+                ],
+            )
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            timed_out,
+            Value::Enum { fields, .. }
+                if matches!(&fields[0], Value::Tuple(output)
+                    if output[2] == Value::Int(124)
+                        && matches!(&output[1], Value::Str(error) if error.contains("timed out")))
+        ));
     }
 
     #[test]
@@ -12387,6 +14780,84 @@ f main() -> Int = checked(-1)
         let result = interp.run("main", &[]);
         assert!(result.is_ok(), "with contracts disabled, should succeed");
         assert_eq!(result.unwrap(), Value::Int(-1));
+    }
+
+    #[test]
+    fn struct_invariant_accepts_valid_construction() {
+        let result = run_source(
+            r#"
+@inv(balance >= 0, "balance must be non-negative")
+s Account
+    balance: Int
+
+f main() -> Int
+    account := Account { balance: 10 }
+    account.balance
+"#,
+        )
+        .unwrap();
+        assert_eq!(result, Value::Int(10));
+    }
+
+    #[test]
+    fn struct_invariant_rejects_invalid_construction() {
+        let error = run_source(
+            r#"
+@inv(balance >= 0, "balance must be non-negative")
+s Account
+    balance: Int
+
+f main() -> Int
+    account := Account { balance: -1 }
+    account.balance
+"#,
+        )
+        .unwrap_err();
+        assert!(error.contains("Invariant violation in `Account`"));
+        assert!(error.contains("balance must be non-negative"));
+        assert!(error.contains("struct construction"));
+    }
+
+    #[test]
+    fn struct_invariant_is_reestablished_when_mutable_borrow_returns() {
+        let error = run_source(
+            r#"
+@inv(balance >= 0, "balance must be non-negative")
+s Account
+    balance: Int
+
+f corrupt(ref mut account: Account)
+    account.balance = -1
+
+f main() -> Int
+    account := Account { balance: 10 }
+    corrupt(ref mut account)
+    account.balance
+"#,
+        )
+        .unwrap_err();
+        assert!(error.contains("mutable borrow returned"), "{error}");
+        assert!(error.contains("balance must be non-negative"));
+    }
+
+    #[test]
+    fn disabling_contracts_also_disables_struct_invariants() {
+        let source = r#"
+@inv(balance >= 0)
+s Account
+    balance: Int
+
+f main() -> Int
+    account := Account { balance: -1 }
+    account.balance
+"#;
+        let scanner = Scanner::new(source);
+        let (tokens, _) = scanner.scan_all();
+        let ast = Parser::new(&tokens).parse().unwrap();
+        let program = Lowerer::new().lower(&ast).unwrap();
+        let mut interp = Interpreter::new(program).unwrap();
+        interp.set_check_contracts(false);
+        assert_eq!(interp.run("main", &[]).unwrap(), Value::Int(-1));
     }
 
     #[test]
@@ -13191,6 +15662,30 @@ f main() -> Int = append_x("forma").len()
     // =========================================================================
 
     #[test]
+    fn spawn_defers_calls_and_runs_them_concurrently() {
+        let started = Instant::now();
+        let result = run_source(
+            r#"
+f delayed(value: Int) -> Int
+    ignored := aw sleep_async(200)
+    value
+
+f main() -> Int
+    first := sp delayed(20)
+    second := sp delayed(22)
+    (aw first) + (aw second)
+"#,
+        )
+        .unwrap();
+        assert_eq!(result, Value::Int(42));
+        assert!(
+            started.elapsed() < Duration::from_millis(350),
+            "two 200ms spawned calls should overlap, elapsed {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
     fn test_channel_send_recv() {
         let program = Program::new();
         let mut interp = Interpreter::new(program).unwrap();
@@ -13229,6 +15724,35 @@ f main() -> Int = append_x("forma").len()
             }
             _ => panic!("expected Ok Result from channel_recv"),
         }
+    }
+
+    #[test]
+    fn task_interpreters_share_channel_resources_explicitly() {
+        let mut parent = Interpreter::new(Program::new()).unwrap();
+        let channel = parent
+            .call_builtin("channel_new", &[Value::Int(1)])
+            .unwrap()
+            .unwrap();
+        let Value::Tuple(handles) = channel else {
+            panic!("channel_new must return handles");
+        };
+        let sender = handles[0].clone();
+        let receiver = handles[1].clone();
+
+        let mut child = Interpreter::new_for_task(Arc::clone(&parent.program)).unwrap();
+        child.channels = Arc::clone(&parent.channels);
+        child
+            .call_builtin("channel_send", &[sender, Value::Int(42)])
+            .unwrap();
+        let received = parent
+            .call_builtin("channel_recv", &[receiver])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            received,
+            Value::Enum { variant, fields, .. }
+                if variant == "Ok" && fields == vec![Value::Int(42)]
+        ));
     }
 
     #[test]
@@ -14114,5 +16638,82 @@ f main() -> Int
             Value::Enum { variant, .. } => assert_eq!(variant, "None"),
             _ => panic!("expected None"),
         }
+    }
+
+    #[test]
+    fn toml_configuration_round_trips_through_json_value() {
+        let mut interp = Interpreter::new(Program::new()).unwrap();
+        let parsed = interp
+            .call_builtin(
+                "toml_parse",
+                &[Value::Str(
+                    "name = \"forge\"\n[provider]\napi_key_env = \"OPENAI_API_KEY\"\n".to_string(),
+                )],
+            )
+            .unwrap()
+            .unwrap();
+        let Value::Enum {
+            variant, fields, ..
+        } = parsed
+        else {
+            panic!("toml_parse should return Result");
+        };
+        assert_eq!(variant, "Ok");
+        let document = fields.into_iter().next().unwrap();
+        let rendered = interp
+            .call_builtin("toml_stringify", &[document])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(rendered, Value::Enum { variant, fields, .. }
+                if variant == "Ok"
+                    && matches!(&fields[0], Value::Str(source)
+                        if source.contains("OPENAI_API_KEY"))));
+    }
+
+    #[test]
+    fn authenticated_http_and_postgres_require_network_authority() {
+        let mut interp = Interpreter::new(Program::new()).unwrap();
+        let headers = Value::Map(HashMap::from([(
+            "authorization".to_string(),
+            Value::Str("Bearer redacted".to_string()),
+        )]));
+        let http = interp.call_builtin(
+            "http_request",
+            &[
+                Value::Str("GET".to_string()),
+                Value::Str("https://example.invalid".to_string()),
+                Value::Str(String::new()),
+                headers,
+                Value::Int(1000),
+                Value::Bool(false),
+            ],
+        );
+        assert!(http.is_err());
+
+        let postgres = interp.call_builtin(
+            "db_connect_postgres",
+            &[Value::Str(
+                "postgresql://user:secret@example.invalid/app?sslmode=require".to_string(),
+            )],
+        );
+        assert!(postgres.is_err());
+    }
+
+    #[test]
+    fn postgres_placeholders_are_backend_neutral_and_quote_aware() {
+        assert_eq!(
+            postgres_parameter_sql(
+                "SELECT '?' AS literal, \"?\" FROM runs WHERE id = ? AND goal = ? -- ?\n/* ? */"
+            ),
+            "SELECT '?' AS literal, \"?\" FROM runs WHERE id = $1 AND goal = $2 -- ?\n/* ? */"
+        );
+        assert_eq!(
+            postgres_parameter_sql("SELECT payload ?? 'key' FROM events WHERE run_id = ?"),
+            "SELECT payload ? 'key' FROM events WHERE run_id = $1"
+        );
+        assert_eq!(
+            postgres_parameter_sql("SELECT 'it''s ?' WHERE value = ?"),
+            "SELECT 'it''s ?' WHERE value = $1"
+        );
     }
 }

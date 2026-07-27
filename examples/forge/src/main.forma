@@ -1,0 +1,202 @@
+# Forge: a live, model-driven engineering workflow coordinator.
+
+us model
+us codec
+us settings
+us memory
+us workspace
+us agentic
+
+f usage() -> Int
+    print("Forma Forge")
+    print("Usage:")
+    print("  forma run --allow-read main.forma check [settings.toml]")
+    print("  forma run --allow-read --allow-write --allow-network --allow-env --allow-exec main.forma run [settings.toml] <goal>")
+    print("  forma run --allow-read --allow-write --allow-network --allow-env --allow-exec main.forma resume [settings.toml] <run-id>")
+    2
+
+f ensure_database_parent(ref path: Str) -> Bool
+    m path_parent(path)
+        None -> true
+        Some(parent) ->
+            m dir_create_all(parent)
+                Ok(_) -> true
+                Err(_) -> false
+
+f open_history(ref settings: ForgeSettings) -> Database!Str
+    if settings.database_url_env.len() > 0
+        m env_get(settings.database_url_env)
+            None ->
+                Err(
+                    "missing PostgreSQL URL environment variable: " +
+                        settings.database_url_env
+                )
+            Some(url) -> db_connect_postgres(url)
+    else db_open(settings.database_path)
+
+f check_configuration(settings_path: Str) -> Int
+    m file_read(settings_path)
+        Err(error) ->
+            print("Settings read failed: " + error)
+            1
+        Ok(source) ->
+            m load_settings(source)
+                Err(error) ->
+                    print("Settings invalid: " + error)
+                    1
+                Ok(settings) ->
+                    m file_read(settings.graph_path)
+                        Err(error) ->
+                            print("Graph read failed: " + error)
+                            1
+                        Ok(graph_source) ->
+                            m workflow_graph_from_json(str(graph_source))
+                                Err(error) ->
+                                    print("Graph invalid: " + error)
+                                    1
+                                Ok(graph) ->
+                                    print("Forge configuration valid")
+                                    print("Provider: " + settings.provider_kind)
+                                    print("Model: " + settings.default_model)
+                                    print("Graph: " + graph.id)
+                                    if settings.database_url_env.len() > 0
+                                        print(
+                                            "PostgreSQL history URL env: " +
+                                                settings.database_url_env
+                                        )
+                                    else
+                                        print("SQLite history: " + settings.database_path)
+                                    0
+
+f execute_live(settings_path: Str, goal: Str, resume_run_id: Str) -> Int
+    m file_read(settings_path)
+        Err(error) ->
+            print("Settings read failed: " + error)
+            1
+        Ok(source) ->
+            m load_settings(source)
+                Err(error) ->
+                    print("Settings invalid: " + error)
+                    1
+                Ok(settings) ->
+                    m env_get(settings.api_key_env)
+                        None ->
+                            print(
+                                "Missing API key environment variable: " +
+                                    settings.api_key_env
+                            )
+                            1
+                        Some(api_key) ->
+                            m file_read(settings.graph_path)
+                                Err(error) ->
+                                    print("Graph read failed: " + error)
+                                    1
+                                Ok(graph_source) ->
+                                    m workflow_graph_from_json(str(graph_source))
+                                        Err(error) ->
+                                            print("Graph invalid: " + error)
+                                            1
+                                        Ok(graph) ->
+                                            parent_ready := if settings.database_url_env.len() > 0
+                                                true
+                                            else
+                                                ensure_database_parent(
+                                                    ref settings.database_path
+                                                )
+                                            m open_history(ref settings)
+                                                Err(error) ->
+                                                    print(
+                                                        "History database open failed: " +
+                                                            error
+                                                    )
+                                                    1
+                                                Ok(db) ->
+                                                    remote_history := settings.database_url_env.len() > 0
+                                                    m initialize_memory(
+                                                        ref db,
+                                                        remote_history
+                                                    )
+                                                        Some(error) ->
+                                                            print(
+                                                                "History schema failed: " +
+                                                                    error
+                                                            )
+                                                            db_close(db)
+                                                            1
+                                                        None ->
+                                                            print(
+                                                                "Collecting bounded workspace context..."
+                                                            )
+                                                            context := workspace_context(
+                                                                ref settings
+                                                            )
+                                                            if resume_run_id.len() > 0
+                                                                print("Resuming durable agentic workflow...")
+                                                                m resume_live_workflow(
+                                                                    ref settings,
+                                                                    ref graph,
+                                                                    ref db,
+                                                                    resume_run_id,
+                                                                    context,
+                                                                    api_key,
+                                                                    str(source),
+                                                                    str(graph_source)
+                                                                )
+                                                                    Err(error) ->
+                                                                        print("Resume failed: " + error)
+                                                                        db_close(db)
+                                                                        1
+                                                                    Ok(state) ->
+                                                                        finish_live_run(
+                                                                            ref db,
+                                                                            ref state
+                                                                        )
+                                                            else
+                                                                print("Starting live agentic workflow...")
+                                                                m run_live_workflow(
+                                                                    ref settings,
+                                                                    ref graph,
+                                                                    ref db,
+                                                                    goal,
+                                                                    context,
+                                                                    api_key,
+                                                                    str(source),
+                                                                    str(graph_source)
+                                                                )
+                                                                    Err(error) ->
+                                                                        print("Run start failed: " + error)
+                                                                        db_close(db)
+                                                                        1
+                                                                    Ok(state) ->
+                                                                        finish_live_run(
+                                                                            ref db,
+                                                                            ref state
+                                                                        )
+
+f finish_live_run(ref db: Database, ref state: WorkflowState) -> Int
+    status := workflow_status(ref state)
+    print("Run: " + run_identifier(ref state))
+    print("Final state: " + status)
+    print("Audit events: " + int_to_str(state.events.len()))
+    db_close(db)
+    if status == "completed" then 0 else 2
+
+f main() -> Int
+    arguments := args()
+    command := m vec_get(arguments, 0)
+        Some(value) -> value
+        None -> ""
+    settings_path := m vec_get(arguments, 1)
+        Some(value) -> value
+        None -> "examples/forge/forge.settings.toml"
+    if command == "check"
+        check_configuration(settings_path)
+    else if command == "run"
+        m vec_get(arguments, 2)
+            Some(goal) -> execute_live(settings_path, goal, "")
+            None -> usage()
+    else if command == "resume"
+        m vec_get(arguments, 2)
+            Some(run_id) -> execute_live(settings_path, "", run_id)
+            None -> usage()
+    else usage()

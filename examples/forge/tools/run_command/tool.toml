@@ -1,0 +1,8 @@
+version = 1
+name = "run_command"
+entrypoint = "tool.forma"
+capabilities = ["exec"]
+environment = []
+description = "Run an allowlisted executable directly in the workspace."
+input_description = "Exact executable name from tools.allowed_commands."
+payload_description = "JSON array of string arguments; shell syntax is rejected."

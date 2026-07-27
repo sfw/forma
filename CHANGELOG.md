@@ -1,323 +1,90 @@
-# FORMA Changelog
-
-All notable changes to FORMA are documented in this file.
-
----
-
-## [Unreleased]
-
-### Verification + Explain UX
-
-- Added `forma explain` for contract intent output in `human`, `json`, and `markdown` formats.
-- Added deterministic example generation controls for explain (`--examples`, `--seed`, `--max-examples`).
-- Added `forma verify --report` for trust reporting over a file or directory.
-- Added verification controls (`--examples`, `--seed`, `--max-steps`, `--timeout`, `--allow-side-effects`) and `PASS/SKIP/WARN/FAIL` status output.
-- Added safe-by-default verify execution (capabilities revoked unless side effects are explicitly enabled).
-- Improved contract explanation with richer English translations (quantifiers, `old()`, membership, implications, conjunctions).
-- Added box-drawing output format for human-readable `explain`.
-- Added `@pure` contract pattern (postcondition marker for side-effect-free functions).
-- Fixed `max_steps` default regression (reduced from 100M to 10M; verify/explain set their own limits).
-- Replaced pointer-based `old()` expression keys with span-based keys for stability.
-
-### CLI Error-Consistency Hardening
-
-- `forma check` now loads imports before reporting success/failure, preventing false success on missing modules.
-- `forma build --error-format json` now emits JSON for lex/module/type failures consistently.
-- Added regression fixtures/tests for missing-import handling across `run`, `check`, and `build`.
-
-### LSP Improvements
-
-- Added `textDocument/formatting`.
-- Added `textDocument/documentSymbol`.
-- Added `textDocument/signatureHelp`.
-- Added `textDocument/references` (single-file scope).
-- Improved hover with inferred type information for user-defined symbols.
-
-### Public Repo Hardening
-
-- Replaced deprecated `apt-key` with scoped `/usr/share/keyrings` keyring for LLVM apt repo.
-- Switched LLVM apt source from `http` to `https`.
-- Pinned all GitHub Actions to immutable SHA hashes (actions/checkout, dtolnay/rust-toolchain, Swatinem/rust-cache, actions/upload-artifact).
-- Added top-level `permissions: contents: read` to CI workflow.
-- Added security warnings for `--allow-all` and capability flags to README, reference.md, and ai-reference.md.
-- Replaced predictable `/tmp/forma_*` paths with `mktemp` and `trap` cleanup in contract test script.
-
-### MIR Optimization Pass (Phase 1)
-
-- Added `src/mir/optimize.rs` with four optimization passes: constant folding, copy propagation, dead block elimination, and peephole optimizations.
-- Optimization runs by default between MIR lowering and interpretation/codegen; disable with `--no-optimize`.
-- Passes run in fixed-point rounds (max 3) so one pass can unlock another.
-- Constant folding evaluates compile-time arithmetic, comparisons, and boolean logic; simplifies constant-condition `If`/`Switch` to `Goto`.
-- Copy propagation eliminates redundant compiler temporaries with chain resolution.
-- Dead block elimination removes unreachable blocks with BlockId remapping; includes jump threading for empty goto chains.
-- Peephole optimizations: nop removal, identity ops (`x+0`, `x*1`), `x*0` folding, double negation elimination, redundant return-temp elimination.
-- Added MIR validity checker (`validate_mir()`) for post-optimization invariant checking.
-- Added `--no-optimize` CLI flag to `run`, `build`, and `compile` commands.
-- 24 unit tests covering all optimization passes and safety guards.
-- 3 CLI integration tests verifying output equivalence with and without optimization.
-- `.forma` correctness test (`test_optimization.forma`) and benchmark script (`scripts/bench_optimize.sh`).
-
-### Contract Patterns Expansion
-
-- Expanded named contract patterns from 12 to 35 across 6 categories (numeric, collection, set, sequence, ordering, state).
-- Added 8 runtime contract helpers (`set_equals`, `is_prefix`, `is_suffix`, `is_reversed`, `is_rotated`, `is_partitioned`, `stable`, `value_le`).
-- Added `pattern_to_english()` for human-readable pattern descriptions in explain output.
-- Fixed `@rotated` panic on negative k values (uses `rem_euclid`).
-- Fixed `@stable` correctness: now enforces permutation check + nondecreasing key order + stable relative ordering.
-- Fixed `is_partitioned` negative index guard.
-
-### Test + Coverage Improvements
-
-- Added CLI JSON failure-matrix tests for `run/check/build` across lex/parse/module/type failures.
-- Added capability matrix integration tests.
-- Expanded builtin coverage and added coverage enforcement support in CI.
-- Removed global `reset_type_var_counter()` calls from tests to fix parallel test flakes.
-
----
-
-## [1.3.0] - January 26, 2026
-
-### 🛡️ Production-Grade Stability Release
-
-FORMA v1.3 achieves near-zero panic points in production code through systematic safety improvements.
-
-**251 Rust tests passing** | All std/*.forma and examples/*.forma verified
-
-#### Stability Improvements (Sprint 17-19)
-
-| Category | Changes |
-|----------|---------|
-| **Builtin Validation** | All 83 builtins validate argument counts |
-| **Type Inference Safety** | Reserved type var IDs, no silent fresh_var fallbacks |
-| **MIR Lowerer** | Safe error handling, no unwrap panics |
-| **Parser** | All unreachable!() replaced with proper errors |
-| **LLVM Codegen** | Safe type coercion helpers |
-| **JSON Output** | Safe serialization with print_json helper |
-
-#### Panic Points Eliminated: ~45
-
----
-
-## [1.2.0] - January 26, 2026
-
-### 🚀 Feature Complete Release
-
-FORMA v1.2 completes all planned v1.x features, achieving full async parallelism and LLVM closure support.
-
-**250 Rust tests passing** | All std/*.forma and examples/*.forma verified
-
-#### New in v1.2 (Sprint 16)
-
-| Feature | Description |
-|---------|-------------|
-| **True Async Parallelism** | Tokio runtime integration - `sp` (spawn) now runs truly parallel |
-| **LLVM Indirect Closures** | Fat pointer closures work in compiled code |
-| **Loop Labels** | `'label: for` with `break 'label` and `continue 'label` |
-| **Proper Tuple Iteration** | `EnumeratedInt` struct replaces encoding hack |
-| **Multiline Expressions** | Improved newline handling for chained operators |
-| **Grammar Export** | Complete EBNF with shorthand keywords and indentation rules |
-
----
-
-## [1.0.0] - January 26, 2026
-
-### 🎉 Initial Release
-
-FORMA v1.0 is the first public release of the AI-optimized programming language.
-
-**288 tests passing** (250 Rust + 38 FORMA integration)
-
-### Core Design Pillars
-
-1. **AI Code Generation First** - No lifetimes, predictable patterns, minimal annotations
-2. **Memory Safety Without Lifetimes** - Second-class references, no stored references
-3. **Token Efficiency** - Short keywords (`f`, `s`, `e`, `t`, `i`, `m`), concise syntax
-4. **Machine-Readable Tooling** - Grammar export, structured JSON errors, type queries
-5. **Strong Type Inference** - Hindley-Milner style, AI rarely needs explicit types
-
-### Language Features
-
-- Full type inference with Hindley-Milner algorithm
-- Structs (`s Point { x: Int, y: Int }`)
-- Enums with associated data (`e Option[T] { Some(T), None }`)
-- Traits and implementations (`t Printable`, `i Printable for Point`)
-- Pattern matching with `m` (match) expressions
-- Struct update syntax (`{ ..base, field: value }`)
-- Async/await with spawn (`sp`) and `await_all`
-- Contracts with `@pre()` and `@post()` conditions
-- Generic types and functions with trait bounds
-- Integer types: i8-i128, u8-u128, isize, usize
-- Float types: f32, f64
-- String interpolation with f-strings (`f"Hello {name}"`)
-- Contextual keywords (f, s, e, t, i, m work as identifiers in appropriate contexts)
-- Closures (`|x| x + 1`)
-- Option (`T?` shorthand) and Result types
-
-### Type System
-
-- Hindley-Milner type inference
-- Generic types (`Vec[T]`, `Map[K, V]`)
-- Trait bounds on generics
-- Method and field type checking
-- Struct pattern field validation
-- **Enum pattern validation at compile time** (Sprint 15.5)
-- **Trait implementation checking** - validates required methods (Sprint 15.4)
-- Option/Result unification
-
-### Standard Library (`std/`)
-
-| Module | Description |
-|--------|-------------|
-| `std/core.forma` | Math utilities (min, max, abs, clamp, pow, gcd, lcm) |
-| `std/vec.forma` | Vector operations (push, pop, map, filter, fold, zip) |
-| `std/string.forma` | String manipulation (split, trim, replace, contains) |
-| `std/json.forma` | JSON parsing, creation, path access |
-| `std/io.forma` | File I/O operations |
-| `std/iter.forma` | Iterator utilities (enumerate, take, skip) |
-| `std/math.forma` | Mathematical functions (sqrt, sin, cos, log) |
-| `std/datetime.forma` | Date/time and duration functions |
-| `std/prelude.forma` | Auto-imported essentials |
-
-### Tooling
-
-| Command | Description |
-|---------|-------------|
-| `forma run <file>` | Execute FORMA programs |
-| `forma check <file>` | Type check without running |
-| `forma fmt <file>` | Code formatter (complete construct support) |
-| `forma repl` | Interactive REPL with `:type`, `:ast`, `:help` |
-| `forma grammar` | Export EBNF/JSON grammar for external tools |
-| `forma lsp` | Language Server Protocol support |
-
-### LSP Features
-- Hover information with type display
-- Code completion
-- **Go-to-definition** (Sprint 15.3)
-- Diagnostics with error reporting
-
-### Error Handling
-- **Multi-error reporting** - Parser reports ALL errors, not just first (Sprint 15.1)
-- Machine-readable JSON error format
-- Clear error messages with source locations
-- Suggestions for common mistakes
-
-### REPL Features
-- `:type <expr>` - **Shows actual inferred type** (Sprint 15.2)
-- `:ast <expr>` - Show parsed AST
-- `:help` - Command help
-- `:quit` - Exit REPL
-
-### Compiler Infrastructure
-
-- Lexer with indentation-based scoping (INDENT/DEDENT tokens)
-- Parser with error recovery
-- Type checker with full Hindley-Milner inference
-- MIR (Mid-level IR) lowering
-- Interpreter with 298+ builtins
-- LLVM codegen (experimental - closures pending)
-
----
-
-## Development Sprints
-
-### Sprint 16 - v1.1 + v1.2 Features (Complete)
-| Task | Feature |
-|------|---------|
-| 16.1 | True Async with Tokio (Arc<Runtime>, JoinHandle, block_on) |
-| 16.2 | LLVM Indirect Closure Calls (fat pointer {fn_ptr, env_ptr}) |
-| 16.3 | Loop Labels (`'label: for` with break/continue support) |
-| 16.4 | Proper Tuple Iteration (EnumeratedInt struct) |
-| 16.5 | Multiline Expression Improvements (trailing operator handling) |
-| 16.6 | Grammar Export Completeness (shorthand keywords, indentation rules) |
-
-### Sprint 15 - Tooling Polish
-| Task | Feature |
-|------|---------|
-| 15.1 | Multi-error reporting - parser returns `Vec<CompileError>` |
-| 15.2 | REPL `:type` shows actual inferred types |
-| 15.3 | LSP go-to-definition working |
-| 15.4 | Trait implementation checking (validates methods & signatures) |
-| 15.5 | Enum pattern validation at compile time |
-| 15.6 | Formatter handles all constructs (no more `"..."`) |
-| 15.7 | Struct update syntax (`{ ..base, field: value }`) |
-
-### Sprint 14.7 - Final Hardening
-- Fixed call stack unwrap panics (helper methods with Result)
-- Fixed MIR lowerer unwrap panics
-- Fixed borrow checker unwrap panics
-- String/Bool/Char/Float literal pattern matching in `m` expressions
-
-### Sprint 14.6 - Import System
-- Fixed silent import failures (now returns ModuleError)
-- Renamed stdlib/ to std/
-- Import system with `us std.module` syntax
-
-### Sprint 14.5 - Async & JSON
-- Fixed JSON type mapping (`"Json"` => `Ty::Json`)
-- Verified async/spawn/await_all functionality
-- Fixed async_downloader example
-
-### Sprint 14 - Critical Fixes
-- Enum discriminant index-based registry (eliminates hash collisions)
-- Type system improvements
-
-### Sprint 12-13 - Language Features
-- Contextual keyword parsing (m/s/f/e/t/i work as identifiers)
-- Duration builtins
-- pow() negative exponent handling
-
-### Sprint 9-11 - Type Safety
-- Method/field type checking
-- Option/Result unification
-- Struct pattern validation
-
----
-
-## Known Limitations
-
-See [KNOWN_LIMITATIONS.md](planning/analysis/KNOWN_LIMITATIONS.md) for complete details.
-
-**v1.2 Status: All v1.x features complete!**
-
-| Item | Status | Notes |
-|------|--------|-------|
-| True async parallelism | ✅ Fixed | Sprint 16.1 - Tokio integration |
-| Indirect closure calls (LLVM) | ✅ Fixed | Sprint 16.2 - Fat pointer closures |
-| Loop labels | ✅ Fixed | Sprint 16.3 - `'label: for` syntax |
-| Iterator encoding hack | ✅ Fixed | Sprint 16.4 - EnumeratedInt struct |
-| Multiline expression edge cases | ✅ Fixed | Sprint 16.5 - Trailing operator handling |
-| Grammar export gaps | ✅ Fixed | Sprint 16.6 - Complete EBNF |
-| Higher-kinded types | Research | v2.0 (future) |
-
----
-
-## Upgrading
-
-### From Pre-release
-
-1. Rename `stdlib/` imports to `std/`:
-   ```forma
-   # Old
-   us stdlib.json
-
-   # New
-   us std.json
-   ```
-
-2. Struct update syntax now works:
-   ```forma
-   new_point := { ..old_point, x: 10 }
-   ```
-
-3. Multiple parse errors are now reported at once.
-
----
-
-## Contributors
-
-- Language design and implementation by the FORMA team
-- Code review and testing assistance by Claude
-
----
-
-*"Code that writes itself correctly."*
+# Forma changelog
+
+This project uses 0.x versions while its grammar, semantics, diagnostics, modules,
+and backend compatibility policy are evolving.
+
+## Unreleased
+
+- Nothing yet.
+
+## 0.2.0 — semantic foundation
+
+### Language semantics
+
+- Established affine ownership for ordinary non-`Copy` values.
+- Added explicit owned, shared `ref`, and exclusive `ref mut` parameter modes.
+- Added inferred non-lexical loans, initializedness tracking, partial moves, and
+  deterministic drop elaboration.
+- Defined compiler-known `Copy`, `Clone`, `Drop`, `Send`, and `Sync` behavior.
+- Defined `=` as immutable binding and `:=` as mutable binding/update.
+- Added deterministic trait coherence and method-resolution rules.
+- Required exhaustive matching for finite algebraic domains.
+- Added named-struct `@inv(condition[, "message"])` declarations with static
+  Boolean checking, formatter support, runtime enforcement at construction,
+  function entry/return, and `ref mut` return boundaries, plus explain and
+  verification-report visibility.
+
+### Compiler architecture
+
+- Added a shared `CompilerSession` and stable source/module/definition identities.
+- Added typed ownership-explicit MIR with projected places and explicit Copy/Move
+  operands.
+- Required ownership and drop gates before optimization and backend selection.
+- Unified semantic facts used by checking, execution, verification, formatting,
+  and language-server tooling.
+
+### Effects, capabilities, and concurrency
+
+- Centralized builtin signatures, ownership modes, effects, capabilities, and
+  backend metadata.
+- Added call-graph effect inference and registry-driven runtime capability gates.
+- Added affine task handles, moving task captures, `Send`/`Sync` checks, capability
+  propagation, and shared channel/mutex state.
+- Corrected `sp` to defer the spawned expression and added overlap evidence for
+  real concurrent execution.
+- Added authenticated general HTTP, TLS PostgreSQL, canonical scoped-path, and
+  bounded structured-process primitives for production-shaped hosted programs.
+
+### Verification
+
+- Separated generated testing, exhaustive finite-domain checking, and formal proof
+  attempts with `--level test|exhaustive|formal`.
+- Added `UNCONTRACTED`, `TESTED`, `COUNTEREXAMPLE`, `EXHAUSTIVE`, `PROVED`,
+  `UNKNOWN`, and `SKIPPED` results.
+- Added deterministic seeds, execution limits, counterexample reporting, SMT
+  timeout and process cleanup, and human/JSON reports.
+
+### Profiles and packages
+
+- Published Core, Hosted, Native, and Experimental support profiles.
+- Added transitive per-function backend-support reporting.
+- Added deterministic local-path packages with `forma.toml` and generated
+  `forma.lock` files.
+- Kept registry and Git dependencies explicitly unsupported.
+- Added Forge, a live LLM engineering-workflow example with connected DAG
+  orchestration, bounded parallel nodes, structured tool use, iterative repair,
+  SQLite/PostgreSQL memory, compaction, token/deadline budgets, event replay,
+  and restart-safe resume.
+
+### Generated artifacts and tooling
+
+- Added a structured grammar model and generated EBNF, JSON grammar, keyword,
+  editor, and builtin metadata.
+- Expanded semantic hover, completion, navigation, references, signatures,
+  formatting, and CLI queries on shared compiler state.
+- Added repository corpus, formatter round-trip, grammar drift, ownership,
+  capability, verification, optimizer-equivalence, and backend-differential gates.
+- Made registered-builtin behavior/error coverage a 100% CI gate, backed by the
+  authoritative builtin registry rather than interpreter-source name matching.
+- Corrected `debug`/`info`/`error` dispatch, numeric-width conversion dispatch,
+  missing argument validation in C/time conversions, and the read capability for
+  `http_file_response` while closing the builtin coverage matrix.
+- Made compiler stack policy frontend-independent so the CLI, LSP, tests, and
+  embedded callers compile production-sized Forma packages consistently.
+
+## Before 0.2
+
+Earlier sprint notes and historical release labels described prototypes built before
+the 0.2 semantic reset. They remain in `planning/` as development history and are
+not compatibility claims. The current compiler version and this changelog are the
+authoritative public version record.

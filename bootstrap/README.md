@@ -1,6 +1,12 @@
-# FORMA Bootstrap Compiler
+# Forma Bootstrap Experiment
 
-This directory contains the FORMA bootstrap compiler - a self-hosting compiler infrastructure written in FORMA that can compile and run FORMA programs.
+This directory contains an incomplete compiler/bootstrap experiment written in
+Forma. It demonstrates lexer, parser, type-checker, MIR, and interpreter data
+structures; it is not the authoritative 0.2 compiler and does not yet provide a
+complete self-hosting source-to-execution path.
+
+The Rust compiler and `planning/design/FORMA_0_2_SEMANTICS.md` define current
+language behavior. Bootstrap sources may deliberately trail the complete language.
 
 ## Overview
 
@@ -148,7 +154,7 @@ Test 4: factorial(5) = 120
 All tests passed!
 ```
 
-## Known Limitations vs Rust Compiler
+## Known Limitations Compared with the Rust Compiler
 
 | Feature | Bootstrap | Rust Compiler |
 |---------|-----------|---------------|
@@ -207,6 +213,9 @@ The bootstrap compiler can:
 - [x] Handle recursion and function calls
 - [ ] Full source-to-execution pipeline
 - [ ] Compile itself completely
+
+Do not use this directory as syntax or semantic documentation for agents. Use
+`docs/ai-reference.md` and the generated grammar/builtin metadata instead.
 
 ## Future Work
 

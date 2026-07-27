@@ -1,0 +1,23 @@
+# Forge tool protocol: args are tool_input, tool_payload, and context JSON.
+
+f main() -> Int
+    invocation := args()
+    if invocation.len() != 3
+        print("TOOL_ERROR: expected input, payload, and context")
+    else if invocation[1].len() > 0
+        print("TOOL_ERROR: read_file payload must be empty")
+    else
+        m json_parse(str(invocation[2]))
+            Err(error) -> print("TOOL_ERROR: invalid context: " + error)
+            Ok(context) ->
+                root := m json_get_str(context, "workspace_root")
+                    Some(value) -> value
+                    None -> ""
+                m path_resolve_within(root, str(invocation[0]))
+                    Err(_) ->
+                        print("TOOL_ERROR: path must remain inside workspace_root")
+                    Ok(path) ->
+                        m file_read(path)
+                            Ok(content) -> print(content)
+                            Err(error) -> print("TOOL_ERROR: " + error)
+    0

@@ -75,6 +75,22 @@ f get_x(p: &Point) -> &Int = &p.x
 }
 
 #[test]
+fn test_return_reference_alias_preserves_input_provenance() {
+    let result = check_source(
+        r#"f alias(data: &Int) -> &Int
+    result = data
+    result"#,
+    );
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_reborrow_preserves_input_provenance() {
+    let result = check_source(r#"f reborrow(data: &mut Int) -> &Int = &*data"#);
+    assert!(result.is_ok());
+}
+
+#[test]
 fn test_struct_without_refs() {
     let result = check_source(
         r#"
@@ -340,6 +356,27 @@ fn test_return_local_ref_in_block() {
     y = &x
     y"#,
         |kind| matches!(kind, BorrowErrorKind::ReturnLocalReference { .. }),
+    );
+}
+
+#[test]
+fn test_return_join_rejects_any_local_reference_branch() {
+    expect_error(
+        r#"f bad(cond: Bool, input: &Int) -> &Int
+    local = 42
+    if cond then input else &local"#,
+        |kind| matches!(kind, BorrowErrorKind::ReturnLocalReference { .. }),
+    );
+}
+
+#[test]
+fn test_reference_alias_cannot_be_stored_in_collection() {
+    expect_error(
+        r#"f bad(input: &Int) -> Int
+    alias = input
+    refs = [alias]
+    0"#,
+        |kind| matches!(kind, BorrowErrorKind::ReferenceInCollection),
     );
 }
 

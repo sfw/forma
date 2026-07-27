@@ -244,7 +244,8 @@ mod tests {
         assert_eq!(forma_abs_int(-5), 5);
         assert_eq!(forma_abs_int(5), 5);
         assert_eq!(forma_abs_int(0), 0);
-        assert!((forma_abs_float(-3.14) - 3.14).abs() < 1e-10);
+        let pi = std::f64::consts::PI;
+        assert!((forma_abs_float(-pi) - pi).abs() < 1e-10);
     }
 
     #[test]

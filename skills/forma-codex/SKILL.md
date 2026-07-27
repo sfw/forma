@@ -13,15 +13,23 @@ Do not default to modifying FORMA compiler internals (`src/`, `runtime/`, Rust t
 
 ## Canonical Sources
 
-- `docs/ai-reference.md`: fastest syntax, builtins, and CLI lookup
-- `docs/reference.md`: complete language and tooling details
-- `examples/` and `examples/showcase/`: runnable usage patterns
-- `README.md`: capability security model and practical command usage
+Use sources in this order when details conflict:
+
+1. Current compiler output
+2. Generated `docs/grammar.*` and `docs/builtins.json`
+3. `planning/design/FORMA_0_2_SEMANTICS.md` and `docs/profiles.md`
+4. `docs/ai-reference.md` and `docs/reference.md`
+5. Checked examples and `README.md`
+
+Historical planning/review/sprint files are non-normative.
 
 ## Coverage Rules
 
 - Be inclusive of all FORMA user-facing features, not only a small subset.
 - Do not omit contract capabilities, variable-definition variants, grammar export, or CLI tooling.
+- Preserve affine moves, explicit clones, loans, and task-handle obligations.
+- Distinguish effects from runtime capabilities and state the required profile.
+- Preserve exact verification statuses; generated testing is not proof.
 - If uncertain about feature details, check `docs/ai-reference.md` before responding.
 
 ## Variable Definitions (Complete)
@@ -63,6 +71,18 @@ Guideline: Use `=` for values that do not change and `:=` for values that will b
 - Async features: `as`, `aw`, `sp`
 - Option/Result with `?`, `??`, `!`
 - Contracts with `@pre`, `@post`, `old`, quantifiers, named patterns
+
+## Affine Ownership Rules
+
+- Ordinary non-`Copy` values move through assignment, owned calls, returns, and
+  by-value destructuring.
+- `clone(value)` is explicit duplication; `mv value` may force or document a move.
+- `ref` is a shared loan and `ref mut` is exclusive; loan regions are inferred.
+- References cannot be stored in ordinary aggregates, captured by escaping
+  closures, or sent to tasks.
+- A returned reference must be derived from a reference parameter.
+- Initialized owned places are destroyed exactly once.
+- Compiler-known traits are `Copy`, `Clone`, `Drop`, `Send`, and `Sync`.
 
 ## CLI Workflows
 
@@ -109,6 +129,19 @@ cargo run -- init
 - Env builtins (`env_*`) need `--allow-env`.
 - Unsafe/FFI builtins need `--allow-unsafe`.
 - `verify` is side-effect-safe by default. Only use `--allow-side-effects` for trusted code that requires it.
+- Capability flags are not complete OS isolation for hostile programs.
+
+## Profiles and Verification Confidence
+
+- Core is the portable semantic subset; Hosted uses the managed interpreter;
+  Native names selected runtime-backed facilities; Experimental has weaker
+  compatibility guarantees.
+- Profile requirements propagate through direct calls.
+- Use `verify --level test|exhaustive|formal` deliberately.
+- Report `UNCONTRACTED`, `TESTED`, `COUNTEREXAMPLE`, `EXHAUSTIVE`, `PROVED`,
+  `UNKNOWN`, and `SKIPPED` exactly.
+- Never describe generated examples as proof. Formal verification covers only its
+  Experimental pure supported subset.
 
 ## Contracts (Complete Coverage)
 
@@ -116,12 +149,18 @@ Core contract constructs:
 
 - `@pre(condition[, "message"])`
 - `@post(condition[, "message"])`
+- `@inv(condition[, "message"])` on named structs
 - `result` in postconditions
 - `old(expr)` in postconditions
 - `forall x in xs: predicate`
 - `exists x in xs: predicate`
 - `x in collection`
 - `A => B` implication
+
+Struct invariant fields are directly in scope. `result` and `old(...)` are not.
+Invariants are enforced after construction, at function entry/return, and when
+an exclusive `ref mut` borrow returns. Untrusted decoders should validate before
+constructing invariant-bearing values.
 
 Named contract patterns (all):
 
@@ -204,6 +243,8 @@ cargo run -- explain path/to/file.forma --format json --examples=3 --seed 42
 cargo run -- explain path/to/file.forma --format markdown --examples=3 --seed 42
 cargo run -- verify path/or/dir --report --format human
 cargo run -- verify path/or/dir --report --format json --examples 20 --seed 42
+cargo run -- verify path/or/dir --level exhaustive --max-domain 4096 --report
+cargo run -- verify path/or/dir --level formal --report
 ```
 
 ## Grammar Export (Required Coverage)
@@ -269,4 +310,6 @@ Use these outputs with constrained-decoding toolchains to reduce syntax errors i
 - Return runnable `.forma` code, not pseudocode.
 - Include exact command(s) to run.
 - Include required capability flags and why they are needed.
+- State the expected Core, Hosted, Native, or Experimental profile.
+- Preserve the exact verification confidence status and its bounds.
 - If uncertain about a builtin or syntax, consult `docs/ai-reference.md` before answering.

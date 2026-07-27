@@ -1,0 +1,236 @@
+# Manifest-driven Forge tool plugins. Manifests select trusted executors; they
+# never load arbitrary host code.
+
+us model
+us codec
+
+pub f plugin_name_is_safe(ref name: Str) -> Bool
+    name.len() > 0 &&
+        !name.contains("\"") &&
+        !name.contains("\\") &&
+        !name.contains("\n") &&
+        !name.contains("\r") &&
+        !name.contains(" ") &&
+        !name.contains("\t")
+
+pub f plugin_capability_is_safe(ref capability: Str) -> Bool
+    capability == "read" || capability == "write" ||
+        capability == "network" || capability == "exec"
+
+pub f environment_name_is_safe(ref name: Str) -> Bool
+    plugin_name_is_safe(ref name) &&
+        !name.contains("=") &&
+        !name.contains("\u{0}")
+
+pub f decode_plugin_capabilities(ref root: Json) -> [Str]!Str
+    remaining := array_or_empty(ref root, "capabilities")
+    capabilities := []
+    failure := ""
+    wh remaining.len() > 0
+        (rest, next) := vec_pop(remaining)
+        remaining = rest
+        m next
+            None -> failure = "tool capabilities could not be decoded"
+            Some(raw_capability) ->
+                capability := json_string(raw_capability)
+                if !plugin_capability_is_safe(ref capability)
+                    failure = "unsupported tool capability: " + capability
+                else
+                    capabilities = vec_push(capabilities, capability)
+    if failure.len() > 0 then Err(failure) else Ok(capabilities)
+
+pub f decode_plugin_environment(ref root: Json) -> [Str]!Str
+    remaining := array_or_empty(ref root, "environment")
+    names := []
+    failure := ""
+    wh remaining.len() > 0
+        (rest, next) := vec_pop(remaining)
+        remaining = rest
+        m next
+            None -> failure = "tool environment could not be decoded"
+            Some(raw_name) ->
+                name := json_string(raw_name)
+                if !environment_name_is_safe(ref name)
+                    failure = "unsafe tool environment variable name: " + name
+                else
+                    names = vec_push(names, name)
+    if failure.len() > 0 then Err(failure) else Ok(names)
+
+pub f decode_tool_plugin(
+    source: Str,
+    manifest_path: Str,
+    entrypoint_path: Str,
+    source_digest: Str
+) -> ToolPlugin!Str
+    m toml_parse(source)
+        Err(error) -> Err("invalid tool manifest " + manifest_path + ": " + error)
+        Ok(root) ->
+            version := int_or(ref root, "version", 0)
+            name := string_or(ref root, "name", "")
+            entrypoint := string_or(ref root, "entrypoint", "tool.forma")
+            description := string_or(ref root, "description", "")
+            input_description := string_or(
+                ref root,
+                "input_description",
+                ""
+            )
+            payload_description := string_or(
+                ref root,
+                "payload_description",
+                ""
+            )
+            if version != 1
+                Err("tool manifest version must be 1: " + manifest_path)
+            else if !plugin_name_is_safe(ref name)
+                Err("tool plugin name is empty or unsafe: " + manifest_path)
+            else if entrypoint != "tool.forma"
+                Err("tool entrypoint must be tool.forma: " + manifest_path)
+            else if description.len() == 0
+                Err("tool description is required: " + manifest_path)
+            else
+                m decode_plugin_capabilities(ref root)
+                    Err(error) -> Err(error + " in " + manifest_path)
+                    Ok(capabilities) ->
+                        m decode_plugin_environment(ref root)
+                            Err(error) -> Err(error + " in " + manifest_path)
+                            Ok(environment) ->
+                                Ok(
+                                    ToolPlugin {
+                                        name: name,
+                                        entrypoint: entrypoint_path,
+                                        description: description,
+                                        capabilities: capabilities,
+                                        environment: environment,
+                                        source_digest: source_digest,
+                                        input_description: input_description,
+                                        payload_description: payload_description
+                                    }
+                                )
+
+pub f tool_plugin_index(
+    ref plugins: [ToolPlugin],
+    ref name: Str
+) -> Int
+    found := -1
+    i := 0
+    wh i < plugins.len()
+        if plugins[i].name == name
+            found = i
+        i = i + 1
+    found
+
+pub f validate_tool_plugins(ref plugins: [ToolPlugin]) -> Str?
+    if plugins.len() == 0
+        Some("tools plugin folder must contain at least one plugin")
+    else
+        error := None
+        i := 0
+        wh i < plugins.len()
+            j := i + 1
+            wh j < plugins.len()
+                if plugins[i].name == plugins[j].name && is_none(error)
+                    error = Some(
+                        "duplicate tool plugin name: " + plugins[i].name
+                    )
+                j = j + 1
+            i = i + 1
+        error
+
+pub f load_tool_plugins(path: Str) -> [ToolPlugin]!Str
+    m dir_list(path)
+        Err(error) -> Err("cannot read tools plugin folder: " + error)
+        Ok(raw_entries) ->
+            entries := sort_strings(raw_entries)
+            plugins := []
+            failure := ""
+            i := 0
+            wh i < entries.len()
+                entry := str(entries[i])
+                if file_is_dir(entry)
+                    manifest_path := path_join([str(entry), "tool.toml"])
+                    entrypoint := path_join([entry, "tool.forma"])
+                    m file_read(manifest_path)
+                        Err(error) ->
+                            if failure.len() == 0
+                                failure = "cannot read tool manifest " +
+                                    manifest_path + ": " + error
+                        Ok(source) ->
+                            m file_read(entrypoint)
+                                Err(error) ->
+                                    if failure.len() == 0
+                                        failure = "cannot read tool source " +
+                                            entrypoint + ": " + error
+                                Ok(tool_source) ->
+                                    m decode_tool_plugin(
+                                        source,
+                                        manifest_path,
+                                        entrypoint,
+                                        sha256(tool_source)
+                                    )
+                                        Err(error) ->
+                                            if failure.len() == 0
+                                                failure = error
+                                        Ok(decoded) ->
+                                            plugins = vec_push(plugins, decoded)
+                i = i + 1
+            if failure.len() > 0
+                Err(failure)
+            else
+                m validate_tool_plugins(ref plugins)
+                    Some(error) -> Err(error)
+                    None -> Ok(plugins)
+
+pub f tool_plugin_names(ref plugins: [ToolPlugin]) -> [Str]
+    names := []
+    i := 0
+    wh i < plugins.len()
+        names = vec_push(names, str(plugins[i].name))
+        i = i + 1
+    names
+
+pub f tool_capabilities_text(ref capabilities: [Str]) -> Str
+    text := ""
+    i := 0
+    wh i < capabilities.len()
+        if i > 0
+            text = text + ","
+        text = text + capabilities[i]
+        i = i + 1
+    if text.len() == 0 then "none" else text
+
+pub f tool_plugin_digest_source(ref plugin: ToolPlugin) -> Str
+    source := int_to_str(plugin.name.len()) + ":" + plugin.name
+    source = source + int_to_str(plugin.entrypoint.len()) + ":"
+    source = source + plugin.entrypoint
+    source = source + int_to_str(plugin.description.len()) + ":"
+    source = source + plugin.description
+    source = source + tool_capabilities_text(ref plugin.capabilities)
+    source = source + tool_capabilities_text(ref plugin.environment)
+    source = source + plugin.source_digest
+    source = source + int_to_str(plugin.input_description.len()) + ":"
+    source = source + plugin.input_description
+    source = source + int_to_str(plugin.payload_description.len()) + ":"
+    source + plugin.payload_description
+
+pub f tool_plugins_digest(ref plugins: [ToolPlugin]) -> Str
+    source := ""
+    i := 0
+    wh i < plugins.len()
+        source = source + tool_plugin_digest_source(ref plugins[i])
+        i = i + 1
+    sha256(source)
+
+pub f tool_plugin_catalog_line(ref plugin: ToolPlugin) -> Str
+    line := "\n- " + plugin.name + " ["
+    line = line + tool_capabilities_text(ref plugin.capabilities)
+    line = line + "]: " + plugin.description
+    line = line + "\n  tool_input: " + plugin.input_description
+    line + "\n  tool_payload: " + plugin.payload_description
+
+pub f tool_catalog_prompt(ref plugins: [ToolPlugin]) -> Str
+    catalog := "Available tool plugins:"
+    i := 0
+    wh i < plugins.len()
+        catalog = catalog + tool_plugin_catalog_line(ref plugins[i])
+        i = i + 1
+    catalog

@@ -14,9 +14,19 @@ use crate::parser::{
 use crate::types::Ty;
 
 use super::mir::{
-    BinOp, BlockId, Constant, Function, Local, MirContract, Mutability, Operand, PassMode, Program,
-    Rvalue, Statement, StatementKind, Terminator, UnOp,
+    BinOp, BlockId, Constant, Function, Local, MirContract, Mutability, Operand, PassMode, Place,
+    Program, Rvalue, Statement, StatementKind, Terminator, UnOp,
 };
+
+fn fixed_array_length(expr: &Expr) -> Option<usize> {
+    let ExprKind::Literal(literal) = &expr.kind else {
+        return None;
+    };
+    let LiteralKind::Int(value) = literal.kind else {
+        return None;
+    };
+    usize::try_from(value).ok()
+}
 
 /// Convert AST PassMode to MIR PassMode.
 fn lower_pass_mode(ast_mode: crate::parser::PassMode) -> PassMode {
@@ -76,6 +86,8 @@ pub struct Lowerer {
     impl_methods: HashMap<String, Vec<String>>,
     /// Function return types for proper call type inference
     fn_return_types: HashMap<String, Ty>,
+    /// Named struct field types used for projected-place lowering.
+    struct_fields: HashMap<(String, String), Ty>,
 }
 
 #[derive(Debug, Clone)]
@@ -103,6 +115,7 @@ impl Lowerer {
             fn_defaults: HashMap::new(),
             impl_methods: HashMap::new(),
             fn_return_types: HashMap::new(),
+            struct_fields: HashMap::new(),
         }
     }
 
@@ -149,6 +162,66 @@ impl Lowerer {
     pub fn lower(mut self, source: &SourceFile) -> Result<Program, Vec<LowerError>> {
         // First pass: collect type definitions (enums, structs) so we know about variants
         for item in &source.items {
+            let derives_copy = item.attrs.iter().any(|attribute| {
+                attribute.name.name == "derive"
+                    && attribute
+                        .args
+                        .iter()
+                        .any(|argument| argument.name.name == "Copy")
+            });
+            let derives_send = item.attrs.iter().any(|attribute| {
+                attribute.name.name == "derive"
+                    && attribute
+                        .args
+                        .iter()
+                        .any(|argument| argument.name.name == "Send")
+            });
+            if derives_copy {
+                match &item.kind {
+                    ItemKind::Struct(structure) => {
+                        self.program.copy_types.insert(structure.name.name.clone());
+                    }
+                    ItemKind::Enum(enumeration) => {
+                        self.program
+                            .copy_types
+                            .insert(enumeration.name.name.clone());
+                    }
+                    _ => {}
+                }
+            }
+            if derives_send {
+                match &item.kind {
+                    ItemKind::Struct(structure) => {
+                        self.program.send_types.insert(structure.name.name.clone());
+                    }
+                    ItemKind::Enum(enumeration) => {
+                        self.program
+                            .send_types
+                            .insert(enumeration.name.name.clone());
+                    }
+                    _ => {}
+                }
+            }
+            if let ItemKind::Impl(implementation) = &item.kind
+                && implementation.trait_.as_ref().is_some_and(|trait_type| {
+                    matches!(&trait_type.kind, crate::parser::TypeKind::Path(path)
+                        if path.segments.last().is_some_and(|segment| segment.name.name == "Copy"))
+                })
+                && let crate::parser::TypeKind::Path(path) = &implementation.self_type.kind
+                && let Some(name) = path.segments.last()
+            {
+                self.program.copy_types.insert(name.name.name.clone());
+            }
+            if let ItemKind::Impl(implementation) = &item.kind
+                && implementation.trait_.as_ref().is_some_and(|trait_type| {
+                    matches!(&trait_type.kind, crate::parser::TypeKind::Path(path)
+                        if path.segments.last().is_some_and(|segment| segment.name.name == "Send"))
+                })
+                && let crate::parser::TypeKind::Path(path) = &implementation.self_type.kind
+                && let Some(name) = path.segments.last()
+            {
+                self.program.send_types.insert(name.name.name.clone());
+            }
             if let ItemKind::Enum(e) = &item.kind {
                 let enum_name = e.name.name.clone();
                 for (idx, variant) in e.variants.iter().enumerate() {
@@ -164,6 +237,39 @@ impl Lowerer {
                         .enum_variants
                         .insert((enum_name.clone(), variant.name.name.clone()), idx);
                 }
+            } else if let ItemKind::Struct(structure) = &item.kind
+                && let crate::parser::StructKind::Named(fields) = &structure.kind
+            {
+                let field_types: Vec<_> = fields
+                    .iter()
+                    .map(|field| (field.name.name.clone(), self.lower_type(&field.ty)))
+                    .collect();
+                for (field_name, ty) in field_types {
+                    self.struct_fields
+                        .insert((structure.name.name.clone(), field_name), ty);
+                }
+                let layout = fields
+                    .iter()
+                    .map(|field| (field.name.name.clone(), self.lower_type(&field.ty)))
+                    .collect();
+                self.program
+                    .struct_fields
+                    .insert(structure.name.name.clone(), layout);
+                if !structure.invariants.is_empty() {
+                    let invariants = structure
+                        .invariants
+                        .iter()
+                        .map(|contract| MirContract {
+                            expr_string: self.expr_to_string(&contract.condition),
+                            message: contract.message.clone(),
+                            pattern_name: Some("inv".to_string()),
+                            condition: Some(contract.condition.clone()),
+                        })
+                        .collect();
+                    self.program
+                        .struct_invariants
+                        .insert(structure.name.name.clone(), invariants);
+                }
             }
         }
 
@@ -178,6 +284,7 @@ impl Lowerer {
         }
 
         if self.errors.is_empty() {
+            super::ownership::make_operands_explicit(&mut self.program);
             Ok(self.program)
         } else {
             Err(self.errors)
@@ -482,6 +589,11 @@ impl Lowerer {
                 StmtKind::Let(let_stmt) => {
                     // Try to infer type from init expression for method resolution
                     let inferred_type = self.infer_receiver_type(&let_stmt.init);
+                    let binding_ty = let_stmt
+                        .ty
+                        .as_ref()
+                        .map(|ty| self.lower_type(ty))
+                        .unwrap_or_else(|| self.infer_expr_type(&let_stmt.init));
 
                     let init = self.lower_expr(&let_stmt.init);
                     if let Some(op) = init {
@@ -491,7 +603,7 @@ impl Lowerer {
                         {
                             self.var_types.insert(ident.name.clone(), type_name);
                         }
-                        self.bind_pattern(&let_stmt.pattern, op);
+                        self.bind_pattern(&let_stmt.pattern, op, &binding_ty);
                     }
                     last_value = None;
                 }
@@ -553,6 +665,26 @@ impl Lowerer {
                                         type_name: enum_name,
                                         variant: ident.name.clone(),
                                         fields: vec![],
+                                    },
+                                ));
+                                return Some(Operand::Local(result));
+                            }
+
+                            // A named function used as a value is a closure with
+                            // an empty environment. This is the same runtime
+                            // representation as a lifted closure and permits
+                            // callback APIs such as `http_serve(port, handler)`.
+                            if let Some(function) = self.program.functions.get(&ident.name) {
+                                let function_ty = Ty::Fn(
+                                    function.params.iter().map(|(_, ty)| ty.clone()).collect(),
+                                    Box::new(function.return_ty.clone()),
+                                );
+                                let result = self.new_temp(function_ty);
+                                self.emit(StatementKind::Assign(
+                                    result,
+                                    Rvalue::Closure {
+                                        func_name: ident.name.clone(),
+                                        captures: vec![],
                                     },
                                 ));
                                 return Some(Operand::Local(result));
@@ -681,34 +813,30 @@ impl Lowerer {
                     Some(Operand::Local(result))
                 }
                 AstUnaryOp::Ref => {
-                    if let ExprKind::Ident(ident) = &operand.kind
-                        && let Some(&local) = self.vars.get(&ident.name)
-                    {
-                        let inner_ty = self.local_types.get(&local).cloned().unwrap_or(Ty::Unit);
+                    if let Some(place) = self.lower_place(operand) {
+                        let inner_ty = self.infer_expr_type(operand);
                         let result = self.new_temp(Ty::Ref(
                             Box::new(inner_ty),
                             crate::types::Mutability::Immutable,
                         ));
                         self.emit(StatementKind::Assign(
                             result,
-                            Rvalue::Ref(local, Mutability::Immutable),
+                            Rvalue::RefPlace(place, Mutability::Immutable),
                         ));
                         return Some(Operand::Local(result));
                     }
                     self.lower_expr(operand)
                 }
                 AstUnaryOp::RefMut => {
-                    if let ExprKind::Ident(ident) = &operand.kind
-                        && let Some(&local) = self.vars.get(&ident.name)
-                    {
-                        let inner_ty = self.local_types.get(&local).cloned().unwrap_or(Ty::Unit);
+                    if let Some(place) = self.lower_place(operand) {
+                        let inner_ty = self.infer_expr_type(operand);
                         let result = self.new_temp(Ty::Ref(
                             Box::new(inner_ty),
                             crate::types::Mutability::Mutable,
                         ));
                         self.emit(StatementKind::Assign(
                             result,
-                            Rvalue::Ref(local, Mutability::Mutable),
+                            Rvalue::RefPlace(place, Mutability::Mutable),
                         ));
                         return Some(Operand::Local(result));
                     }
@@ -826,6 +954,10 @@ impl Lowerer {
                     }
                 }
 
+                if is_direct && let Some(name) = &func_name {
+                    self.apply_declared_call_modes(name, &mut mir_arg_pass_modes, mir_args.len());
+                }
+
                 // Fill in default arguments if needed
                 if is_direct
                     && let Some(fn_name_ref) = &func_name
@@ -843,7 +975,7 @@ impl Lowerer {
 
                 // Get return type for the function
                 let return_ty = if let Some(ref name) = func_name {
-                    self.get_function_return_type(name)
+                    self.infer_call_return_type(name, args)
                 } else {
                     self.infer_expr_type(expr)
                 };
@@ -904,6 +1036,8 @@ impl Lowerer {
                 // Resolve method name to built-in function or qualified name
                 let func_name =
                     self.resolve_method_with_type(&method.name, receiver_type.as_deref());
+                let mut arg_pass_modes = vec![PassMode::Owned; mir_args.len()];
+                self.apply_declared_call_modes(&func_name, &mut arg_pass_modes, mir_args.len());
 
                 // Create call with proper return type
                 let return_ty = self.get_method_return_type(&method.name);
@@ -912,7 +1046,7 @@ impl Lowerer {
                 self.terminate(Terminator::Call {
                     func: func_name,
                     args: mir_args,
-                    arg_pass_modes: vec![],
+                    arg_pass_modes,
                     dest: Some(result),
                     next: next_block,
                 });
@@ -1043,6 +1177,14 @@ impl Lowerer {
                     Ty::Str => Ty::Char,
                     _ => Ty::Unit,
                 };
+                if let Some(place) = self.lower_place(expr) {
+                    let result = self.new_temp(elem_ty.clone());
+                    self.emit(StatementKind::Assign(
+                        result,
+                        Rvalue::Use(self.operand_for_place(place, &elem_ty)),
+                    ));
+                    return Some(Operand::Local(result));
+                }
                 let base_op = self.lower_expr(base)?;
                 let index_op = self.lower_expr(index)?;
                 let result = self.new_temp(elem_ty);
@@ -1057,6 +1199,14 @@ impl Lowerer {
                 // For field access, we'd need struct field type info
                 // Use expression type inference as best effort
                 let field_ty = self.infer_expr_type(expr);
+                if let Some(place) = self.lower_place(expr) {
+                    let result = self.new_temp(field_ty.clone());
+                    self.emit(StatementKind::Assign(
+                        result,
+                        Rvalue::Use(self.operand_for_place(place, &field_ty)),
+                    ));
+                    return Some(Operand::Local(result));
+                }
                 let base_op = self.lower_expr(base)?;
                 let result = self.new_temp(field_ty);
                 self.emit(StatementKind::Assign(
@@ -1073,6 +1223,14 @@ impl Lowerer {
                     Ty::Tuple(elems) => elems.get(*index).cloned().unwrap_or(Ty::Unit),
                     _ => Ty::Unit,
                 };
+                if let Some(place) = self.lower_place(expr) {
+                    let result = self.new_temp(elem_ty.clone());
+                    self.emit(StatementKind::Assign(
+                        result,
+                        Rvalue::Use(self.operand_for_place(place, &elem_ty)),
+                    ));
+                    return Some(Operand::Local(result));
+                }
                 let base_op = self.lower_expr(base)?;
                 let result = self.new_temp(elem_ty);
                 self.emit(StatementKind::Assign(
@@ -1089,15 +1247,24 @@ impl Lowerer {
                 // Handle assignment target
                 if let ExprKind::Ident(ident) = &target.kind {
                     if let Some(&local) = self.vars.get(&ident.name) {
+                        // Overwrite drops are inserted by drop elaboration.  Doing
+                        // this here is too late for `xs = vec_push(xs, value)`:
+                        // lowering the call has already moved `xs`, so an eager
+                        // Drop would be a double consume.
                         self.emit(StatementKind::Assign(local, Rvalue::Use(val)));
-                        return Some(Operand::Local(local));
+                        return Some(Operand::Constant(Constant::Unit));
                     } else {
                         // New binding with inferred type
                         let local = self.new_local(value_ty, Some(ident.name.clone()));
                         self.vars.insert(ident.name.clone(), local);
                         self.emit(StatementKind::Assign(local, Rvalue::Use(val)));
-                        return Some(Operand::Local(local));
+                        return Some(Operand::Constant(Constant::Unit));
                     }
+                }
+
+                if let Some(place) = self.lower_place(target) {
+                    self.emit(StatementKind::AssignPlace(place, Rvalue::Use(val)));
+                    return Some(Operand::Constant(Constant::Unit));
                 }
 
                 // Handle index assignment: arr[i] := value
@@ -1207,7 +1374,12 @@ impl Lowerer {
                 let mut captures: Vec<Operand> = Vec::new();
                 for var_name in &free_vars {
                     if let Some(&local) = self.vars.get(var_name) {
-                        captures.push(Operand::Copy(local));
+                        let ty = self.local_types.get(&local).cloned().unwrap_or(Ty::Unit);
+                        captures.push(if self.program.is_copy_type(&ty) {
+                            Operand::Copy(local)
+                        } else {
+                            Operand::Move(local)
+                        });
                     }
                 }
 
@@ -1560,8 +1732,21 @@ impl Lowerer {
             }
 
             ExprKind::Spawn(inner) => {
-                // Lower spawn expression
-                let expr_operand = self.lower_expr(inner)?;
+                // Spawn must defer evaluation. Lowering the inner expression
+                // first made `sp work()` execute `work()` synchronously and
+                // merely placed its already-computed value in a task. Lift the
+                // expression into a zero-argument closure so its captures move
+                // into, and its body executes inside, the child interpreter.
+                let deferred = Expr::new(
+                    ExprKind::Closure(crate::parser::Closure {
+                        params: vec![],
+                        return_type: None,
+                        body: inner.clone(),
+                        span: expr.span,
+                    }),
+                    expr.span,
+                );
+                let expr_operand = self.lower_expr(&deferred)?;
                 let result = self.new_temp(Ty::Task(Box::new(Ty::fresh_var())));
                 let next_block = self.new_block();
                 self.terminate(Terminator::Spawn {
@@ -1725,20 +1910,13 @@ impl Lowerer {
             }
 
             ExprKind::ArrayRepeat(value, count) => {
-                // [value; count] - array with repeated value
-                // Lower as a call to a builtin that creates repeated arrays
+                // Fixed-array lengths are compile-time literals. Repeating the
+                // operand in MIR lets ownership normalization require `Copy`
+                // when the length exceeds one, without a hidden cloning builtin.
                 let val = self.lower_expr(value)?;
-                let cnt = self.lower_expr(count)?;
-                let result = self.new_temp(Ty::List(Box::new(Ty::fresh_var())));
-                let next_block = self.new_block();
-                self.terminate(Terminator::Call {
-                    func: "array_repeat".to_string(),
-                    args: vec![val, cnt],
-                    arg_pass_modes: vec![],
-                    dest: Some(result),
-                    next: next_block,
-                });
-                self.current_block = Some(next_block);
+                let len = fixed_array_length(count).unwrap_or(0);
+                let result = self.new_temp(Ty::Array(Box::new(self.infer_expr_type(value)), len));
+                self.emit(StatementKind::Assign(result, Rvalue::Array(vec![val; len])));
                 Some(Operand::Local(result))
             }
 
@@ -1895,15 +2073,23 @@ impl Lowerer {
         _span: Span,
     ) -> Option<Operand> {
         let scrutinee_op = self.lower_expr(scrutinee)?;
+        let scrutinee_ty = self.infer_expr_type(scrutinee);
 
         // Store scrutinee in a local for repeated access
-        let scrut_local = self.new_temp(Ty::Unit);
+        let scrut_local = self.new_temp(scrutinee_ty);
         self.emit(StatementKind::Assign(
             scrut_local,
             Rvalue::Use(scrutinee_op),
         ));
 
         let result = self.new_temp(Ty::Unit);
+        // Keep the merge value initialized even on the defensive no-arm-match
+        // edge. Exhaustiveness checking makes that edge unreachable for closed
+        // domains, while initializedness must remain sound independently.
+        self.emit(StatementKind::Assign(
+            result,
+            Rvalue::Use(Operand::Constant(Constant::Unit)),
+        ));
         let exit_block = self.new_block();
 
         // Collect arm info for processing
@@ -2011,8 +2197,8 @@ impl Lowerer {
                         cond_local,
                         Rvalue::BinaryOp(
                             BinOp::Eq,
-                            Operand::Copy(scrut_local),
-                            Operand::Copy(lit_local),
+                            Operand::Borrow(scrut_local, Mutability::Immutable),
+                            Operand::Borrow(lit_local, Mutability::Immutable),
                         ),
                     ));
                     self.terminate(Terminator::If {
@@ -2037,8 +2223,8 @@ impl Lowerer {
                         cond_local,
                         Rvalue::BinaryOp(
                             BinOp::Eq,
-                            Operand::Copy(scrut_local),
-                            Operand::Copy(lit_local),
+                            Operand::Borrow(scrut_local, Mutability::Immutable),
+                            Operand::Borrow(lit_local, Mutability::Immutable),
                         ),
                     ));
                     self.terminate(Terminator::If {
@@ -2484,8 +2670,13 @@ impl Lowerer {
             "Some" => 1,
             "Ok" => 0,
             "Err" => 1,
-            // For user-defined enums, use FNV-1a hash to avoid collisions
-            // (ASCII sum would collide e.g., "ab" == "ba")
+            _ if self.enum_variants.contains_key(variant) => self
+                .program
+                .enum_variants
+                .iter()
+                .find_map(|((_, name), index)| (name == variant).then_some(*index as i64))
+                .unwrap_or(0),
+            // Defensive fallback for legacy MIR assembled without a registry.
             _ => {
                 const FNV_OFFSET: u64 = 14695981039346656037;
                 const FNV_PRIME: u64 = 1099511628211;
@@ -2652,11 +2843,25 @@ impl Lowerer {
         };
 
         // Evaluate the iterable (should be an array)
-        let iter_val = self.lower_expr(iter_expr)?;
-
-        // Store the array in a local for repeated access
-        let arr_local = self.new_temp(Ty::Int);
-        self.emit(StatementKind::Assign(arr_local, Rvalue::Use(iter_val)));
+        let iter_ty = self.infer_expr_type(iter_expr);
+        let elem_ty = match &iter_ty {
+            Ty::List(inner) | Ty::Array(inner, _) => (**inner).clone(),
+            _ => Ty::Unit,
+        };
+        // Iterating Copy elements only observes the collection, so an existing
+        // place can be indexed directly. Iteration of affine elements consumes
+        // the collection into the loop's private storage.
+        let arr_local = if self.program.is_copy_type(&elem_ty)
+            && let Some(place) = self.lower_place(iter_expr)
+            && place.projection.is_empty()
+        {
+            place.local
+        } else {
+            let iter_val = self.lower_expr(iter_expr)?;
+            let local = self.new_temp(iter_ty);
+            self.emit(StatementKind::Assign(local, Rvalue::Use(iter_val)));
+            local
+        };
 
         // Create index counter starting at 0
         let idx_local = self.new_temp(Ty::Int);
@@ -2670,8 +2875,8 @@ impl Lowerer {
         let len_block = self.new_block();
         self.terminate(Terminator::Call {
             func: "vec_len".to_string(),
-            args: vec![Operand::Copy(arr_local)],
-            arg_pass_modes: vec![],
+            args: vec![Operand::Borrow(arr_local, Mutability::Immutable)],
+            arg_pass_modes: vec![PassMode::Ref],
             dest: Some(len_local),
             next: len_block,
         });
@@ -2714,20 +2919,20 @@ impl Lowerer {
         self.current_block = Some(body_block);
 
         // Get element at current index: arr[idx]
-        let elem_local = self.new_temp(Ty::Int);
+        let elem_local = self.new_temp(elem_ty.clone());
         self.emit(StatementKind::Assign(
             elem_local,
-            Rvalue::Index(Operand::Copy(arr_local), Operand::Copy(idx_local)),
+            Rvalue::Use(self.operand_for_place(Place::new(arr_local).index(idx_local), &elem_ty)),
         ));
 
         // Bind pattern variable(s)
         match &pattern.kind {
             PatternKind::Ident(ident, _, _) => {
                 // Simple pattern: `for x in arr`
-                let var_local = self.new_local(Ty::Int, Some(ident.name.clone()));
+                let var_local = self.new_local(elem_ty.clone(), Some(ident.name.clone()));
                 self.emit(StatementKind::Assign(
                     var_local,
-                    Rvalue::Use(Operand::Copy(elem_local)),
+                    Rvalue::Use(self.operand_for_place(Place::new(elem_local), &elem_ty)),
                 ));
                 self.vars.insert(ident.name.clone(), var_local);
             }
@@ -2743,10 +2948,10 @@ impl Lowerer {
                     self.vars.insert(idx_ident.name.clone(), idx_var);
                 }
                 if let PatternKind::Ident(val_ident, _, _) = &patterns[1].kind {
-                    let val_var = self.new_local(Ty::Int, Some(val_ident.name.clone()));
+                    let val_var = self.new_local(elem_ty.clone(), Some(val_ident.name.clone()));
                     self.emit(StatementKind::Assign(
                         val_var,
-                        Rvalue::Use(Operand::Copy(elem_local)),
+                        Rvalue::Use(self.operand_for_place(Place::new(elem_local), &elem_ty)),
                     ));
                     self.vars.insert(val_ident.name.clone(), val_var);
                 }
@@ -2754,10 +2959,10 @@ impl Lowerer {
             _ => {
                 // Fallback: try to bind as simple identifier
                 if let PatternKind::Ident(ident, _, _) = &pattern.kind {
-                    let var_local = self.new_local(Ty::Int, Some(ident.name.clone()));
+                    let var_local = self.new_local(elem_ty.clone(), Some(ident.name.clone()));
                     self.emit(StatementKind::Assign(
                         var_local,
-                        Rvalue::Use(Operand::Copy(elem_local)),
+                        Rvalue::Use(self.operand_for_place(Place::new(elem_local), &elem_ty)),
                     ));
                     self.vars.insert(ident.name.clone(), var_local);
                 }
@@ -2995,26 +3200,45 @@ impl Lowerer {
         Some(Operand::Local(result))
     }
 
-    fn bind_pattern(&mut self, pattern: &Pattern, value: Operand) {
+    fn bind_pattern(&mut self, pattern: &Pattern, value: Operand, value_ty: &Ty) {
         match &pattern.kind {
             PatternKind::Ident(ident, _mutable, _) => {
                 // Check if variable already exists - if so, update it rather than shadow
                 if let Some(&existing_local) = self.vars.get(&ident.name) {
                     self.emit(StatementKind::Assign(existing_local, Rvalue::Use(value)));
                 } else {
-                    let local = self.new_local(Ty::Int, Some(ident.name.clone()));
+                    let local = self.new_local(value_ty.clone(), Some(ident.name.clone()));
                     self.vars.insert(ident.name.clone(), local);
                     self.emit(StatementKind::Assign(local, Rvalue::Use(value)));
                 }
             }
             PatternKind::Tuple(patterns) => {
+                let root = match &value {
+                    Operand::Local(local)
+                    | Operand::Copy(local)
+                    | Operand::Move(local)
+                    | Operand::Borrow(local, _) => Some(Place::new(*local)),
+                    Operand::CopyPlace(place)
+                    | Operand::MovePlace(place)
+                    | Operand::BorrowPlace(place, _) => Some(place.clone()),
+                    Operand::Constant(_) => None,
+                };
                 for (i, pat) in patterns.iter().enumerate() {
-                    let elem = self.new_temp(Ty::Int);
+                    let elem_ty = match value_ty {
+                        Ty::Tuple(elements) => elements.get(i).cloned().unwrap_or(Ty::Unit),
+                        _ => Ty::Unit,
+                    };
+                    let elem = self.new_temp(elem_ty.clone());
+                    let projected = root
+                        .as_ref()
+                        .map(|root| self.operand_for_place(root.clone().tuple_field(i), &elem_ty));
                     self.emit(StatementKind::Assign(
                         elem,
-                        Rvalue::TupleField(value.clone(), i),
+                        projected
+                            .map(Rvalue::Use)
+                            .unwrap_or_else(|| Rvalue::TupleField(value.clone(), i)),
                     ));
-                    self.bind_pattern(pat, Operand::Local(elem));
+                    self.bind_pattern(pat, Operand::Local(elem), &elem_ty);
                 }
             }
             PatternKind::Wildcard => {
@@ -3175,10 +3399,10 @@ impl Lowerer {
                 Ty::Fn(param_tys, Box::new(ret_ty))
             }
 
-            AstTypeKind::Array(inner, _size_expr) => {
-                // For now, use a default size - proper const evaluation would be needed
-                Ty::Array(Box::new(self.lower_type(inner)), 0)
-            }
+            AstTypeKind::Array(inner, size_expr) => Ty::Array(
+                Box::new(self.lower_type(inner)),
+                fixed_array_length(size_expr).unwrap_or(0),
+            ),
 
             AstTypeKind::Map(key, value) => Ty::Map(
                 Box::new(self.lower_type(key)),
@@ -3194,6 +3418,75 @@ impl Lowerer {
     }
 
     // Helper methods
+
+    fn lower_place(&mut self, expr: &Expr) -> Option<Place> {
+        match &expr.kind {
+            ExprKind::Ident(ident) => self.vars.get(&ident.name).copied().map(Place::new),
+            ExprKind::Field(base, field) => self
+                .lower_place(base)
+                .map(|place| place.field(field.name.clone())),
+            ExprKind::TupleField(base, index) => self
+                .lower_place(base)
+                .map(|place| place.tuple_field(*index)),
+            ExprKind::Index(base, index) => {
+                let place = self.lower_place(base)?;
+                let index_operand = self.lower_expr(index)?;
+                let index_local = match index_operand {
+                    Operand::Local(local) | Operand::Copy(local) | Operand::Move(local) => local,
+                    operand => {
+                        let local = self.new_temp(Ty::Int);
+                        self.emit(StatementKind::Assign(local, Rvalue::Use(operand)));
+                        local
+                    }
+                };
+                Some(place.index(index_local))
+            }
+            ExprKind::Unary(AstUnaryOp::Deref, inner) => self.lower_place(inner).map(Place::deref),
+            ExprKind::Paren(inner) => self.lower_place(inner),
+            _ => None,
+        }
+    }
+
+    fn operand_for_place(&self, place: Place, ty: &Ty) -> Operand {
+        if self.program.is_copy_type(ty) {
+            Operand::CopyPlace(place)
+        } else {
+            Operand::MovePlace(place)
+        }
+    }
+
+    fn apply_declared_call_modes(
+        &self,
+        function_name: &str,
+        call_modes: &mut Vec<PassMode>,
+        arity: usize,
+    ) {
+        let declared = if crate::builtins::get(function_name).is_some() {
+            crate::builtins::ownership_modes(function_name, arity)
+                .into_iter()
+                .map(|mode| match mode {
+                    crate::builtins::OwnershipMode::Owned => PassMode::Owned,
+                    crate::builtins::OwnershipMode::Shared => PassMode::Ref,
+                    crate::builtins::OwnershipMode::Mutable => PassMode::RefMut,
+                })
+                .collect::<Vec<_>>()
+        } else {
+            self.program
+                .functions
+                .get(function_name)
+                .map(|function| function.param_pass_modes.clone())
+                .unwrap_or_default()
+        };
+
+        call_modes.resize(arity, PassMode::Owned);
+        for (index, mode) in declared.into_iter().enumerate().take(arity) {
+            // An explicit `ref`/`ref mut` at the call site remains authoritative;
+            // the declaration supplies the mode for ordinary arguments.
+            if call_modes[index] == PassMode::Owned {
+                call_modes[index] = mode;
+            }
+        }
+    }
 
     fn new_temp(&mut self, ty: Ty) -> Local {
         let func = match self.current_function_mut() {
@@ -3291,10 +3584,10 @@ impl Lowerer {
                 },
             },
 
-            ExprKind::Call(callee, _args) => {
+            ExprKind::Call(callee, args) => {
                 // Try to get function return type
                 if let ExprKind::Ident(ident) = &callee.kind {
-                    return self.get_function_return_type(&ident.name);
+                    return self.infer_call_return_type(&ident.name, args);
                 }
                 if let ExprKind::Path(path) = &callee.kind {
                     let name = path
@@ -3324,18 +3617,25 @@ impl Lowerer {
                 Ty::List(Box::new(elem_ty))
             }
 
+            ExprKind::ArrayRepeat(element, count) => Ty::Array(
+                Box::new(self.infer_expr_type(element)),
+                fixed_array_length(count).unwrap_or(0),
+            ),
+
             ExprKind::Index(arr, _idx) => match self.infer_expr_type(arr) {
-                Ty::List(elem) => *elem,
+                Ty::List(elem) | Ty::Array(elem, _) => *elem,
                 Ty::Str => Ty::Char,
                 _ => Ty::Unit,
             },
 
-            ExprKind::Field(expr, _field) => {
-                // For field access, we'd need struct field type info
-                // For now, use Unit and let type checker handle it
-                let _ = self.infer_expr_type(expr);
-                Ty::Unit
-            }
+            ExprKind::Field(expr, field) => match self.infer_expr_type(expr) {
+                Ty::Named(type_id, _) => self
+                    .struct_fields
+                    .get(&(type_id.name, field.name.clone()))
+                    .cloned()
+                    .unwrap_or(Ty::Unit),
+                _ => Ty::Unit,
+            },
 
             ExprKind::Struct(path, _fields, _base) => {
                 let name = path
@@ -3398,7 +3698,7 @@ impl Lowerer {
                 }
             }
 
-            ExprKind::Spawn(_) => Ty::Task(Box::new(Ty::Unit)),
+            ExprKind::Spawn(inner) => Ty::Task(Box::new(self.infer_expr_type(inner))),
 
             _ => Ty::Unit,
         }
@@ -3420,9 +3720,17 @@ impl Lowerer {
     fn operand_type(&self, operand: &Operand) -> Ty {
         match operand {
             Operand::Constant(c) => self.constant_type(c),
-            Operand::Local(local) | Operand::Copy(local) | Operand::Move(local) => {
-                self.local_types.get(local).cloned().unwrap_or(Ty::Unit)
-            }
+            Operand::Local(local)
+            | Operand::Copy(local)
+            | Operand::Move(local)
+            | Operand::Borrow(local, _) => self.local_types.get(local).cloned().unwrap_or(Ty::Unit),
+            Operand::CopyPlace(place)
+            | Operand::MovePlace(place)
+            | Operand::BorrowPlace(place, _) => self
+                .local_types
+                .get(&place.local)
+                .cloned()
+                .unwrap_or(Ty::Unit),
         }
     }
 
@@ -3496,6 +3804,30 @@ impl Lowerer {
             "time_format" => Ty::Str,
 
             _ => Ty::Unit,
+        }
+    }
+
+    fn infer_call_return_type(&self, name: &str, args: &[crate::parser::Arg]) -> Ty {
+        match name {
+            "await_all" => match args.first().map(|arg| self.infer_expr_type(&arg.value)) {
+                Some(Ty::List(task)) => match *task {
+                    Ty::Task(value) => Ty::List(value),
+                    _ => Ty::List(Box::new(Ty::Unit)),
+                },
+                _ => Ty::List(Box::new(Ty::Unit)),
+            },
+            "await_any" => match args.first().map(|arg| self.infer_expr_type(&arg.value)) {
+                Some(Ty::List(task)) => match *task {
+                    Ty::Task(value) => *value,
+                    _ => Ty::Unit,
+                },
+                _ => Ty::Unit,
+            },
+            "vec_push" | "vec_insert" | "vec_set" => args
+                .first()
+                .map(|arg| self.infer_expr_type(&arg.value))
+                .unwrap_or(Ty::Unit),
+            _ => self.get_function_return_type(name),
         }
     }
 

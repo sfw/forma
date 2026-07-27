@@ -1,0 +1,8 @@
+version = 1
+name = "list_directory"
+entrypoint = "tool.forma"
+capabilities = ["read"]
+environment = []
+description = "List one directory confined to the configured workspace."
+input_description = "Workspace-relative directory path."
+payload_description = "Must be empty."

@@ -1,0 +1,4 @@
+s Borrowed
+    value: &Int
+
+f main() -> Int = 0

@@ -36,8 +36,8 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::mir::{
-    BasicBlock, BinOp, Constant, Function, Operand, Program, Rvalue, Statement, StatementKind,
-    Terminator, UnOp,
+    BasicBlock, BinOp, Constant, Function, Operand, Place, Program, ProjectionElem, Rvalue,
+    Statement, StatementKind, Terminator, UnOp,
 };
 use crate::types::Ty;
 
@@ -66,6 +66,11 @@ pub struct LLVMCodegen<'ctx> {
     locals: HashMap<usize, PointerValue<'ctx>>,
     /// Map from local variable indices to their LLVM types
     local_types: HashMap<usize, BasicTypeEnum<'ctx>>,
+    /// Semantic local types and named layouts for projected places.
+    local_mir_types: HashMap<usize, Ty>,
+    struct_fields: HashMap<String, Vec<(String, Ty)>>,
+    enum_variants: HashMap<(String, String), usize>,
+    enum_names: std::collections::HashSet<String>,
     /// Current function being compiled
     current_function: Option<FunctionValue<'ctx>>,
     /// Optimization level
@@ -85,6 +90,10 @@ impl<'ctx> LLVMCodegen<'ctx> {
             functions: HashMap::new(),
             locals: HashMap::new(),
             local_types: HashMap::new(),
+            local_mir_types: HashMap::new(),
+            struct_fields: HashMap::new(),
+            enum_variants: HashMap::new(),
+            enum_names: std::collections::HashSet::new(),
             current_function: None,
             opt_level: OptimizationLevel::Default,
         }
@@ -148,6 +157,13 @@ impl<'ctx> LLVMCodegen<'ctx> {
 
     /// Compile a MIR program to LLVM IR.
     pub fn compile(&mut self, program: &Program) -> Result<(), CodegenError> {
+        self.struct_fields = program.struct_fields.clone();
+        self.enum_variants = program.enum_variants.clone();
+        self.enum_names = program
+            .enum_variants
+            .keys()
+            .map(|(name, _)| name.clone())
+            .collect();
         // First pass: declare all functions
         for func in program.functions.values() {
             self.declare_function(func)?;
@@ -174,6 +190,8 @@ impl<'ctx> LLVMCodegen<'ctx> {
             BasicTypeEnum::IntType(t) => t.fn_type(&param_types, false),
             BasicTypeEnum::FloatType(t) => t.fn_type(&param_types, false),
             BasicTypeEnum::PointerType(t) => t.fn_type(&param_types, false),
+            BasicTypeEnum::StructType(t) => t.fn_type(&param_types, false),
+            BasicTypeEnum::ArrayType(t) => t.fn_type(&param_types, false),
             _ => {
                 // Default to i64 for unknown types
                 self.context.i64_type().fn_type(&param_types, false)
@@ -199,6 +217,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
         self.current_function = Some(fn_value);
         self.locals.clear();
         self.local_types.clear();
+        self.local_mir_types.clear();
 
         // Create entry block
         let entry = self.context.append_basic_block(fn_value, "entry");
@@ -215,6 +234,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
                 })?;
             self.locals.insert(i, alloca);
             self.local_types.insert(i, ty);
+            self.local_mir_types.insert(i, local.ty.clone());
         }
 
         // Store function parameters into their locals
@@ -313,11 +333,25 @@ impl<'ctx> LLVMCodegen<'ctx> {
                     }
                 }
             }
-            StatementKind::IndexAssign(_local, _index, _value) => {
-                return Err(CodegenError {
-                    message: "IndexAssign is not yet supported in LLVM codegen".to_string(),
-                });
+            StatementKind::IndexAssign(local, index, value) => {
+                let index_value = self.compile_operand(index)?;
+                let index = self.as_int_value(index_value)?;
+                let replacement = self.compile_operand(value)?;
+                let place = Place::new(*local).index(crate::mir::Local(u32::MAX));
+                let pointer = self.place_pointer_with_index(&place, Some(index))?;
+                self.builder
+                    .build_store(pointer, replacement)
+                    .map_err(|error| CodegenError {
+                        message: format!("indexed assignment failed: {error:?}"),
+                    })?;
             }
+            StatementKind::AssignPlace(place, rvalue) => {
+                let replacement = self.compile_rvalue(rvalue)?;
+                self.store_projected_place(place, replacement)?;
+            }
+            // Scalar values have no destructor in the current native Core
+            // subset. Aggregate drop glue is added with typed layout support.
+            StatementKind::Drop(_) | StatementKind::DropPlace(_) => {}
             StatementKind::Nop => {}
         }
         Ok(())
@@ -411,15 +445,19 @@ impl<'ctx> LLVMCodegen<'ctx> {
                     })?)
             }
             // Field access by name - requires struct type info to map name to index
-            Rvalue::Field(_base, field_name) => {
-                // TODO: Need struct type info to map field name to index
-                // For now, return error since we can't resolve field names without type info
-                Err(CodegenError {
-                    message: format!(
-                        "Field access by name '{}' not yet supported in LLVM codegen - need type info",
-                        field_name
-                    ),
-                })
+            Rvalue::Field(base, field_name) => {
+                let local = match base {
+                    Operand::Local(local)
+                    | Operand::Copy(local)
+                    | Operand::Move(local)
+                    | Operand::Borrow(local, _) => *local,
+                    _ => {
+                        return Err(CodegenError {
+                            message: "named field base is not an addressable local".to_string(),
+                        });
+                    }
+                };
+                self.compile_place_value(&Place::new(local).field(field_name))
             }
             // Tuple field access
             Rvalue::TupleField(base, idx) => {
@@ -463,6 +501,7 @@ impl<'ctx> LLVMCodegen<'ctx> {
                     })
                 }
             }
+            Rvalue::RefPlace(place, _mutability) => self.place_pointer(place).map(Into::into),
             // Dereference: *operand
             Rvalue::Deref(operand) => {
                 let ptr_val = self.compile_operand(operand)?;
@@ -478,13 +517,11 @@ impl<'ctx> LLVMCodegen<'ctx> {
             }
             // Enum construction: Some(42), None, Ok(x), Err(e), etc.
             Rvalue::Enum {
-                type_name: _,
-                variant: _,
+                type_name,
+                variant,
                 fields,
             } => {
                 // Enum layout: { i32 discriminant, field0, field1, ... }
-                // For simplicity, compute discriminant from variant name hash
-                // In practice, we'd use a proper enum registry
                 let i32_type = self.context.i32_type();
                 let i64_type = self.context.i64_type();
 
@@ -507,8 +544,18 @@ impl<'ctx> LLVMCodegen<'ctx> {
                 let enum_type = self.context.struct_type(&field_types, false);
                 let mut enum_val = enum_type.get_undef();
 
-                // Insert discriminant (use 0 for now - proper mapping would use enum registry)
-                let disc_val = i32_type.const_int(0, false);
+                let discriminant = builtin_discriminant(type_name, variant)
+                    .or_else(|| {
+                        self.enum_variants
+                            .get(&(type_name.clone(), variant.clone()))
+                            .copied()
+                    })
+                    .ok_or_else(|| CodegenError {
+                        message: format!(
+                            "missing discriminant for enum variant `{type_name}::{variant}`"
+                        ),
+                    })?;
+                let disc_val = i32_type.const_int(discriminant as u64, false);
                 enum_val = self
                     .builder
                     .build_insert_value(enum_val, disc_val, 0, "enum_disc")
@@ -676,7 +723,10 @@ impl<'ctx> LLVMCodegen<'ctx> {
     /// Compile an operand.
     fn compile_operand(&mut self, operand: &Operand) -> Result<BasicValueEnum<'ctx>, CodegenError> {
         match operand {
-            Operand::Local(local) | Operand::Copy(local) | Operand::Move(local) => {
+            Operand::Local(local)
+            | Operand::Copy(local)
+            | Operand::Move(local)
+            | Operand::Borrow(local, _) => {
                 let idx = local.0 as usize;
                 if let Some(alloca) = self.locals.get(&idx) {
                     let ty = self
@@ -695,6 +745,9 @@ impl<'ctx> LLVMCodegen<'ctx> {
                     })
                 }
             }
+            Operand::CopyPlace(place)
+            | Operand::MovePlace(place)
+            | Operand::BorrowPlace(place, _) => self.compile_place_value(place),
             Operand::Constant(constant) => {
                 match constant {
                     Constant::Int(n) => {
@@ -734,6 +787,283 @@ impl<'ctx> LLVMCodegen<'ctx> {
     }
 
     /// Compile a binary operation.
+    fn compile_place_value(&mut self, place: &Place) -> Result<BasicValueEnum<'ctx>, CodegenError> {
+        let mut value = self.compile_operand(&Operand::Copy(place.local))?;
+        let mut ty = self
+            .local_mir_types
+            .get(&(place.local.0 as usize))
+            .cloned()
+            .ok_or_else(|| CodegenError {
+                message: format!("missing type for projected place `{place}`"),
+            })?;
+        for projection in &place.projection {
+            match projection {
+                ProjectionElem::Field(name) => {
+                    let (index, field_ty) = self.field_index_and_type(&ty, name)?;
+                    value = self
+                        .builder
+                        .build_extract_value(self.as_struct_value(value)?, index as u32, "field")
+                        .map_err(|error| CodegenError {
+                            message: format!("field extraction failed: {error:?}"),
+                        })?;
+                    ty = field_ty;
+                }
+                ProjectionElem::TupleField(index) => {
+                    let Ty::Tuple(fields) = &ty else {
+                        return Err(CodegenError {
+                            message: format!("tuple projection on non-tuple `{ty}`"),
+                        });
+                    };
+                    let field_ty = fields.get(*index).cloned().ok_or_else(|| CodegenError {
+                        message: format!("tuple field {index} is out of range"),
+                    })?;
+                    value = self
+                        .builder
+                        .build_extract_value(
+                            self.as_struct_value(value)?,
+                            *index as u32,
+                            "tuple_field",
+                        )
+                        .map_err(|error| CodegenError {
+                            message: format!("tuple extraction failed: {error:?}"),
+                        })?;
+                    ty = field_ty;
+                }
+                ProjectionElem::Index(index_local) => {
+                    let index_value = self.compile_operand(&Operand::Copy(*index_local))?;
+                    let index = self.as_int_value(index_value)?;
+                    let BasicValueEnum::ArrayValue(array) = value else {
+                        return Err(CodegenError {
+                            message: format!("index projection on unsupported `{ty}`"),
+                        });
+                    };
+                    let array_ty = array.get_type();
+                    let storage = self
+                        .builder
+                        .build_alloca(array_ty, "projected_array")
+                        .map_err(|error| CodegenError {
+                            message: format!("array allocation failed: {error:?}"),
+                        })?;
+                    self.builder
+                        .build_store(storage, array)
+                        .map_err(|error| CodegenError {
+                            message: format!("array store failed: {error:?}"),
+                        })?;
+                    let element_pointer = unsafe {
+                        self.builder
+                            .build_gep(
+                                array_ty,
+                                storage,
+                                &[self.context.i64_type().const_zero(), index],
+                                "projected_index",
+                            )
+                            .map_err(|error| CodegenError {
+                                message: format!("array projection failed: {error:?}"),
+                            })?
+                    };
+                    value = self
+                        .builder
+                        .build_load(array_ty.get_element_type(), element_pointer, "index")
+                        .map_err(|error| CodegenError {
+                            message: format!("array extraction failed: {error:?}"),
+                        })?;
+                    ty = match ty {
+                        Ty::Array(inner, _) | Ty::List(inner) => *inner,
+                        other => {
+                            return Err(CodegenError {
+                                message: format!("index projection on unsupported `{other}`"),
+                            });
+                        }
+                    };
+                }
+                ProjectionElem::Deref => {
+                    let pointer = self.as_pointer_value(value)?;
+                    ty = match ty {
+                        Ty::Ref(inner, _) | Ty::Ptr(inner, _) => *inner,
+                        other => {
+                            return Err(CodegenError {
+                                message: format!("dereference projection on `{other}`"),
+                            });
+                        }
+                    };
+                    let llvm_ty = self.lower_type(&ty)?;
+                    value = self
+                        .builder
+                        .build_load(llvm_ty, pointer, "deref_place")
+                        .map_err(|error| CodegenError {
+                            message: format!("projected dereference failed: {error:?}"),
+                        })?;
+                }
+            }
+        }
+        Ok(value)
+    }
+
+    fn store_projected_place(
+        &mut self,
+        place: &Place,
+        replacement: BasicValueEnum<'ctx>,
+    ) -> Result<(), CodegenError> {
+        let pointer = self.place_pointer(place)?;
+        self.builder
+            .build_store(pointer, replacement)
+            .map_err(|error| CodegenError {
+                message: format!("projected store failed: {error:?}"),
+            })?;
+        Ok(())
+    }
+
+    fn place_pointer(&mut self, place: &Place) -> Result<PointerValue<'ctx>, CodegenError> {
+        self.place_pointer_with_index(place, None)
+    }
+
+    fn place_pointer_with_index(
+        &mut self,
+        place: &Place,
+        mut supplied_index: Option<IntValue<'ctx>>,
+    ) -> Result<PointerValue<'ctx>, CodegenError> {
+        let root_index = place.local.0 as usize;
+        let mut pointer = self
+            .locals
+            .get(&root_index)
+            .copied()
+            .ok_or_else(|| CodegenError {
+                message: format!("unknown projected place `{place}`"),
+            })?;
+        let mut ty = self
+            .local_mir_types
+            .get(&root_index)
+            .cloned()
+            .ok_or_else(|| CodegenError {
+                message: format!("missing type for projected place `{place}`"),
+            })?;
+        for projection in &place.projection {
+            match projection {
+                ProjectionElem::Field(name) => {
+                    let (index, field_ty) = self.field_index_and_type(&ty, name)?;
+                    let BasicTypeEnum::StructType(structure) = self.lower_type(&ty)? else {
+                        return Err(CodegenError {
+                            message: format!("native field projection on non-struct `{ty}`"),
+                        });
+                    };
+                    pointer = self
+                        .builder
+                        .build_struct_gep(structure, pointer, index as u32, "field_ptr")
+                        .map_err(|error| CodegenError {
+                            message: format!("field address failed: {error:?}"),
+                        })?;
+                    ty = field_ty;
+                }
+                ProjectionElem::TupleField(index) => {
+                    let Ty::Tuple(fields) = &ty else {
+                        return Err(CodegenError {
+                            message: format!("tuple projection on non-tuple `{ty}`"),
+                        });
+                    };
+                    let field_ty = fields.get(*index).cloned().ok_or_else(|| CodegenError {
+                        message: format!("tuple field {index} is out of range"),
+                    })?;
+                    let BasicTypeEnum::StructType(structure) = self.lower_type(&ty)? else {
+                        unreachable!("tuple lowers to an LLVM struct")
+                    };
+                    pointer = self
+                        .builder
+                        .build_struct_gep(structure, pointer, *index as u32, "tuple_ptr")
+                        .map_err(|error| CodegenError {
+                            message: format!("tuple field address failed: {error:?}"),
+                        })?;
+                    ty = field_ty;
+                }
+                ProjectionElem::Index(index_local) => {
+                    let index = if let Some(index) = supplied_index.take() {
+                        index
+                    } else {
+                        let value = self.compile_operand(&Operand::Copy(*index_local))?;
+                        self.as_int_value(value)?
+                    };
+                    let (element, array) = match &ty {
+                        Ty::Array(element, _) => {
+                            let BasicTypeEnum::ArrayType(array) = self.lower_type(&ty)? else {
+                                unreachable!("array lowers to an LLVM array")
+                            };
+                            (*element.clone(), array)
+                        }
+                        Ty::List(element) => {
+                            let Some(BasicTypeEnum::ArrayType(array)) =
+                                self.local_types.get(&root_index).copied()
+                            else {
+                                return Err(CodegenError {
+                                    message: format!(
+                                        "dynamic list `{ty}` has no native contiguous layout"
+                                    ),
+                                });
+                            };
+                            (*element.clone(), array)
+                        }
+                        _ => {
+                            return Err(CodegenError {
+                                message: format!("native index projection on non-array `{ty}`"),
+                            });
+                        }
+                    };
+                    pointer = unsafe {
+                        self.builder
+                            .build_gep(
+                                array,
+                                pointer,
+                                &[self.context.i64_type().const_zero(), index],
+                                "index_ptr",
+                            )
+                            .map_err(|error| CodegenError {
+                                message: format!("index address failed: {error:?}"),
+                            })?
+                    };
+                    ty = element;
+                }
+                ProjectionElem::Deref => {
+                    let pointee = match &ty {
+                        Ty::Ref(inner, _) | Ty::Ptr(inner, _) => *inner.clone(),
+                        _ => {
+                            return Err(CodegenError {
+                                message: format!("dereference projection on `{ty}`"),
+                            });
+                        }
+                    };
+                    let pointer_type = self.context.ptr_type(AddressSpace::default());
+                    pointer = self
+                        .builder
+                        .build_load(pointer_type, pointer, "deref_ptr")
+                        .map_err(|error| CodegenError {
+                            message: format!("dereference address failed: {error:?}"),
+                        })?
+                        .into_pointer_value();
+                    ty = pointee;
+                }
+            }
+        }
+        Ok(pointer)
+    }
+
+    fn field_index_and_type(&self, ty: &Ty, name: &str) -> Result<(usize, Ty), CodegenError> {
+        let Ty::Named(id, _) = ty else {
+            return Err(CodegenError {
+                message: format!("named field `{name}` on non-struct `{ty}`"),
+            });
+        };
+        self.struct_fields
+            .get(&id.name)
+            .and_then(|fields| {
+                fields
+                    .iter()
+                    .enumerate()
+                    .find(|(_, (field, _))| field == name)
+                    .map(|(index, (_, ty))| (index, ty.clone()))
+            })
+            .ok_or_else(|| CodegenError {
+                message: format!("unknown field `{name}` on `{}`", id.name),
+            })
+    }
+
     fn compile_binop(
         &mut self,
         op: BinOp,
@@ -2245,6 +2575,49 @@ impl<'ctx> LLVMCodegen<'ctx> {
             // use i64 so it can hold any integer/pointer-sized value without truncation
             Ty::Unit => Ok(self.context.i64_type().into()),
             Ty::Str => Ok(self.context.ptr_type(AddressSpace::default()).into()),
+            Ty::Tuple(fields) => {
+                let fields = fields
+                    .iter()
+                    .map(|field| self.lower_type(field))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(self.context.struct_type(&fields, false).into())
+            }
+            Ty::Array(element, len) => {
+                let len = u32::try_from(*len).map_err(|_| CodegenError {
+                    message: format!("array length {len} exceeds native layout limits"),
+                })?;
+                Ok(self.lower_type(element)?.array_type(len).into())
+            }
+            Ty::Named(id, _) => {
+                if self.enum_names.contains(&id.name)
+                    || matches!(id.name.as_str(), "Option" | "Result")
+                {
+                    return Ok(self
+                        .context
+                        .struct_type(
+                            &[
+                                self.context.i32_type().into(),
+                                self.context.i64_type().into(),
+                            ],
+                            false,
+                        )
+                        .into());
+                }
+                let fields = self
+                    .struct_fields
+                    .get(&id.name)
+                    .ok_or_else(|| CodegenError {
+                        message: format!("missing native layout for `{}`", id.name),
+                    })?;
+                let fields = fields
+                    .iter()
+                    .map(|(_, field)| self.lower_type(field))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(self.context.struct_type(&fields, false).into())
+            }
+            Ty::Ref(_, _) | Ty::Ptr(_, _) | Ty::RawPtr(_) => {
+                Ok(self.context.ptr_type(AddressSpace::default()).into())
+            }
             _ => {
                 // Default to i64 for complex types
                 Ok(self.context.i64_type().into())
@@ -2299,6 +2672,14 @@ impl<'ctx> LLVMCodegen<'ctx> {
     }
 }
 
+fn builtin_discriminant(type_name: &str, variant: &str) -> Option<usize> {
+    match (type_name, variant) {
+        ("Option", "None") | ("Result", "Ok") => Some(0),
+        ("Option", "Some") | ("Result", "Err") => Some(1),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2329,6 +2710,10 @@ mod tests {
             functions,
             entry: Some("main".to_string()),
             enum_variants: HashMap::new(),
+            struct_fields: HashMap::new(),
+            struct_invariants: HashMap::new(),
+            copy_types: std::collections::HashSet::new(),
+            send_types: std::collections::HashSet::new(),
         }
     }
 
@@ -2383,6 +2768,10 @@ mod tests {
             functions,
             entry: Some("main".to_string()),
             enum_variants: HashMap::new(),
+            struct_fields: HashMap::new(),
+            struct_invariants: HashMap::new(),
+            copy_types: std::collections::HashSet::new(),
+            send_types: std::collections::HashSet::new(),
         };
 
         let ctx = Context::create();
@@ -2392,5 +2781,100 @@ mod tests {
         // LLVM may constant-fold 2+3=5, so just verify compilation succeeded
         // and produced valid IR with a main function
         assert!(ir.contains("main"), "IR should contain main function");
+    }
+
+    #[test]
+    fn test_compile_tuple_projection_read_and_assignment() {
+        let tuple = crate::mir::Local(0);
+        let result = crate::mir::Local(1);
+        let block = BasicBlock {
+            id: crate::mir::BlockId(0),
+            stmts: vec![
+                Statement {
+                    kind: StatementKind::Assign(
+                        tuple,
+                        Rvalue::Tuple(vec![
+                            Operand::Constant(Constant::Int(1)),
+                            Operand::Constant(Constant::Int(2)),
+                        ]),
+                    ),
+                },
+                Statement {
+                    kind: StatementKind::AssignPlace(
+                        Place::new(tuple).tuple_field(1),
+                        Rvalue::Use(Operand::Constant(Constant::Int(9))),
+                    ),
+                },
+                Statement {
+                    kind: StatementKind::Assign(
+                        result,
+                        Rvalue::Use(Operand::CopyPlace(Place::new(tuple).tuple_field(1))),
+                    ),
+                },
+            ],
+            terminator: Some(Terminator::Return(Some(Operand::Copy(result)))),
+        };
+        let mut function = Function::new("main".into(), vec![], Ty::Int);
+        function.locals = vec![
+            crate::mir::LocalDecl {
+                ty: Ty::Tuple(vec![Ty::Int, Ty::Int]),
+                name: Some("pair".into()),
+            },
+            crate::mir::LocalDecl {
+                ty: Ty::Int,
+                name: Some("result".into()),
+            },
+        ];
+        function.blocks.push(block);
+        let mut program = Program::new();
+        program.entry = Some("main".into());
+        program.functions.insert("main".into(), function);
+
+        let context = Context::create();
+        let mut codegen = LLVMCodegen::new(&context, "tuple_projection");
+        codegen.compile(&program).expect("tuple projection is Core");
+        codegen.module.verify().expect("generated IR must verify");
+    }
+
+    #[test]
+    fn enum_construction_uses_registered_discriminant() {
+        let value = crate::mir::Local(0);
+        let block = BasicBlock {
+            id: crate::mir::BlockId(0),
+            stmts: vec![Statement {
+                kind: StatementKind::Assign(
+                    value,
+                    Rvalue::Enum {
+                        type_name: "Choice".into(),
+                        variant: "Second".into(),
+                        fields: vec![],
+                    },
+                ),
+            }],
+            terminator: Some(Terminator::Return(Some(Operand::Constant(Constant::Int(
+                0,
+            ))))),
+        };
+        let mut function = Function::new("main".into(), vec![], Ty::Int);
+        function.locals.push(crate::mir::LocalDecl {
+            ty: Ty::Unit,
+            name: Some("choice".into()),
+        });
+        function.blocks.push(block);
+        let mut program = Program::new();
+        program.entry = Some("main".into());
+        program.functions.insert("main".into(), function);
+        program
+            .enum_variants
+            .insert(("Choice".into(), "First".into()), 0);
+        program
+            .enum_variants
+            .insert(("Choice".into(), "Second".into()), 1);
+
+        let context = Context::create();
+        let mut codegen = LLVMCodegen::new(&context, "enum_discriminant");
+        codegen.compile(&program).unwrap();
+        codegen.module.verify().unwrap();
+        assert!(codegen.get_llvm_ir().contains("i32 1"));
     }
 }

@@ -1,0 +1,29 @@
+# FORGE-RUST-GAP: FRG-005
+
+f create_table(ref db: Database) -> Bool
+    m db_execute(db, "CREATE TABLE resource_signature_test (id INTEGER)")
+        Ok(_) -> true
+        Err(_) -> false
+
+f row_id(row: Row) -> Int
+    row_get_int(row, 0)
+
+f query_first(statement: Statement) -> Int
+    m db_query_prepared(statement, [])
+        Ok(rows) ->
+            if vec_len(rows) == 0 then -1 else row_id(rows[0])
+        Err(_) -> -1
+
+f main() -> Int
+    m db_open_memory()
+        Err(_) -> 1
+        Ok(db) ->
+            if !create_table(ref db) then 1
+            else
+                db_execute(db, "INSERT INTO resource_signature_test VALUES (7)")
+                m db_prepare(db, "SELECT id FROM resource_signature_test")
+                    Err(_) -> 1
+                    Ok(statement) ->
+                        result := query_first(statement)
+                        db_close(db)
+                        if result == 7 then 0 else 1

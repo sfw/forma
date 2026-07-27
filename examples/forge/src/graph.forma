@@ -1,0 +1,183 @@
+# Connected DAG validation and graph queries.
+
+us model
+
+@post(result => exists value in values: value == target)
+pub f contains_str(ref values: [Str], ref target: Str) -> Bool
+    i := 0
+    found := false
+    wh i < vec_len(values)
+        if values[i] == target
+            found = true
+        i = i + 1
+    found
+
+@post(result >= -1)
+@post(result < nodes.len())
+@post(result >= 0 => exists node in nodes: node.id == id)
+pub f node_index(ref nodes: [ProcessNode], ref id: Str) -> Int
+    i := 0
+    found := -1
+    wh i < vec_len(nodes)
+        if nodes[i].id == id
+            found = i
+        i = i + 1
+    found
+
+pub f edge_condition_valid(ref condition: Str) -> Bool
+    condition == "requires_success" ||
+        condition == "requires_terminal" ||
+        condition == "on_success" ||
+        condition == "on_failure"
+
+pub f capability_allowed(ref authority: [Str], ref capability: Str) -> Bool
+    capability == "none" || contains_str(ref authority, ref capability)
+
+pub f unique_node_ids(ref nodes: [ProcessNode]) -> Bool
+    i := 0
+    valid := true
+    wh i < vec_len(nodes)
+        j := i + 1
+        wh j < vec_len(nodes)
+            if nodes[i].id == nodes[j].id
+                valid = false
+            j = j + 1
+        i = i + 1
+    valid
+
+pub f edges_are_well_formed(ref graph: WorkflowGraph) -> Bool
+    i := 0
+    valid := true
+    wh i < vec_len(graph.edges)
+        if node_index(ref graph.nodes, ref graph.edges[i].source) < 0
+            valid = false
+        if node_index(ref graph.nodes, ref graph.edges[i].target) < 0
+            valid = false
+        if graph.edges[i].source == graph.edges[i].target
+            valid = false
+        if !edge_condition_valid(ref graph.edges[i].condition)
+            valid = false
+        i = i + 1
+    valid
+
+pub f node_policies_are_valid(ref graph: WorkflowGraph) -> Bool
+    i := 0
+    valid := true
+    wh i < vec_len(graph.nodes)
+        if str_len(graph.nodes[i].id) == 0 || str_len(graph.nodes[i].role) == 0
+            valid = false
+        if graph.nodes[i].max_attempts < 1
+            valid = false
+        if graph.nodes[i].self_correcting
+            if graph.nodes[i].repair_attempts_per_strategy < 1 || graph.nodes[i].repair_strategy_changes < 0
+                valid = false
+        if !capability_allowed(ref graph.authority, ref graph.nodes[i].required_capability)
+            valid = false
+        i = i + 1
+    valid
+
+@post(result.attempts_per_strategy > 0)
+@post(result.strategy_changes >= 0)
+pub f repair_policy_for_node(
+    ref graph: WorkflowGraph,
+    ref node_id: Str
+) -> RepairPolicy
+    index := node_index(ref graph.nodes, ref node_id)
+    if index < 0 || !graph.nodes[index].self_correcting
+        repair_policy(1, 0)
+    else
+        repair_policy(
+            graph.nodes[index].repair_attempts_per_strategy,
+            graph.nodes[index].repair_strategy_changes
+        )
+
+@post(result.len() == graph.nodes.len())
+@post(forall degree in result: degree >= 0)
+pub f indegrees(ref graph: WorkflowGraph) -> [Int]
+    result := []
+    i := 0
+    wh i < vec_len(graph.nodes)
+        result = vec_push(result, 0)
+        i = i + 1
+
+    edge_index := 0
+    wh edge_index < vec_len(graph.edges)
+        target_index := node_index(ref graph.nodes, ref graph.edges[edge_index].target)
+        if target_index >= 0
+            current := result[target_index]
+            result = vec_set(result, target_index, current + 1)
+        edge_index = edge_index + 1
+    result
+
+pub f graph_is_acyclic(ref graph: WorkflowGraph) -> Bool
+    degrees := indegrees(ref graph)
+    queue := []
+    i := 0
+    wh i < vec_len(degrees)
+        degree := degrees[i]
+        if degree == 0
+            queue = vec_push(queue, i)
+        i = i + 1
+
+    visited := 0
+    cursor := 0
+    wh cursor < vec_len(queue)
+        current_index := queue[cursor]
+        cursor = cursor + 1
+        if current_index >= 0
+            visited = visited + 1
+            edge_index := 0
+            wh edge_index < vec_len(graph.edges)
+                if graph.edges[edge_index].source == graph.nodes[current_index].id
+                    target_index := node_index(
+                        ref graph.nodes,
+                        ref graph.edges[edge_index].target
+                    )
+                    if target_index >= 0
+                        degree := degrees[target_index]
+                        degrees = vec_set(degrees, target_index, degree - 1)
+                        if degree - 1 == 0
+                            queue = vec_push(queue, target_index)
+                edge_index = edge_index + 1
+    visited == vec_len(graph.nodes)
+
+@post(result.len() > 0)
+@post(result[0] == old(root))
+@post(forall id in result: id.len() > 0)
+pub f reachable_from(ref graph: WorkflowGraph, root: Str) -> [Str]
+    reached := [root]
+    cursor := 0
+    wh cursor < vec_len(reached)
+        current := str(reached[cursor])
+        cursor = cursor + 1
+        edge_index := 0
+        wh edge_index < vec_len(graph.edges)
+            if graph.edges[edge_index].source == current && !contains_str(ref reached, ref graph.edges[edge_index].target)
+                reached = vec_push(reached, str(graph.edges[edge_index].target))
+            edge_index = edge_index + 1
+    reached
+
+pub f has_single_connected_root(ref graph: WorkflowGraph) -> Bool
+    degrees := indegrees(ref graph)
+    root_index := -1
+    roots := 0
+    i := 0
+    wh i < vec_len(degrees)
+        if degrees[i] == 0
+            roots = roots + 1
+            root_index = i
+        i = i + 1
+
+    if roots != 1 then false
+    else
+        root_id := str(graph.nodes[root_index].id)
+        vec_len(reachable_from(ref graph, root_id)) == vec_len(graph.nodes)
+
+pub f validate_graph(ref graph: WorkflowGraph) -> Str?
+    if vec_len(graph.nodes) == 0 then Some("workflow requires at least one node")
+    else if !unique_node_ids(ref graph.nodes) then Some("node identifiers must be unique")
+    else if !edges_are_well_formed(ref graph) then Some("workflow contains an invalid edge")
+    else if !node_policies_are_valid(ref graph) then Some("workflow contains an invalid node policy")
+    else if !graph_is_acyclic(ref graph) then Some("workflow graph must be acyclic")
+    else if !has_single_connected_root(ref graph) then Some("workflow must have one connected root")
+    else None

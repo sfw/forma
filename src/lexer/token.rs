@@ -37,7 +37,7 @@ impl Token {
 }
 
 /// Source location information.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Span {
     pub start: usize,
     pub end: usize,
@@ -203,46 +203,280 @@ pub enum TokenKind {
     Error(String),
 }
 
+/// Semantic identity of a source keyword, independent of its spelling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Keyword {
+    Function,
+    Struct,
+    Enum,
+    Trait,
+    Impl,
+    Match,
+    If,
+    Then,
+    Else,
+    For,
+    In,
+    While,
+    Loop,
+    Break,
+    Continue,
+    Return,
+    Async,
+    Await,
+    Spawn,
+    Use,
+    Module,
+    Public,
+    Mutable,
+    Reference,
+    Move,
+    Unsafe,
+    Type,
+    Where,
+    Linear,
+    Affine,
+}
+
+/// Canonical spelling and accepted aliases for one keyword.
+#[derive(Debug, Clone, Copy)]
+pub struct KeywordSpec {
+    pub keyword: Keyword,
+    pub canonical: &'static str,
+    pub aliases: &'static [&'static str],
+    pub contextual: bool,
+}
+
+pub const KEYWORDS: &[KeywordSpec] = &[
+    KeywordSpec {
+        keyword: Keyword::Function,
+        canonical: "f",
+        aliases: &["function"],
+        contextual: true,
+    },
+    KeywordSpec {
+        keyword: Keyword::Struct,
+        canonical: "s",
+        aliases: &["struct"],
+        contextual: true,
+    },
+    KeywordSpec {
+        keyword: Keyword::Enum,
+        canonical: "e",
+        aliases: &["enum"],
+        contextual: true,
+    },
+    KeywordSpec {
+        keyword: Keyword::Trait,
+        canonical: "t",
+        aliases: &["trait"],
+        contextual: true,
+    },
+    KeywordSpec {
+        keyword: Keyword::Impl,
+        canonical: "i",
+        aliases: &["impl"],
+        contextual: true,
+    },
+    KeywordSpec {
+        keyword: Keyword::Match,
+        canonical: "m",
+        aliases: &["match"],
+        contextual: true,
+    },
+    KeywordSpec {
+        keyword: Keyword::If,
+        canonical: "if",
+        aliases: &[],
+        contextual: false,
+    },
+    KeywordSpec {
+        keyword: Keyword::Then,
+        canonical: "then",
+        aliases: &[],
+        contextual: false,
+    },
+    KeywordSpec {
+        keyword: Keyword::Else,
+        canonical: "else",
+        aliases: &[],
+        contextual: false,
+    },
+    KeywordSpec {
+        keyword: Keyword::For,
+        canonical: "for",
+        aliases: &[],
+        contextual: false,
+    },
+    KeywordSpec {
+        keyword: Keyword::In,
+        canonical: "in",
+        aliases: &[],
+        contextual: false,
+    },
+    KeywordSpec {
+        keyword: Keyword::While,
+        canonical: "wh",
+        aliases: &["while"],
+        contextual: false,
+    },
+    KeywordSpec {
+        keyword: Keyword::Loop,
+        canonical: "lp",
+        aliases: &["loop"],
+        contextual: false,
+    },
+    KeywordSpec {
+        keyword: Keyword::Break,
+        canonical: "br",
+        aliases: &["break"],
+        contextual: false,
+    },
+    KeywordSpec {
+        keyword: Keyword::Continue,
+        canonical: "ct",
+        aliases: &["continue"],
+        contextual: false,
+    },
+    KeywordSpec {
+        keyword: Keyword::Return,
+        canonical: "ret",
+        aliases: &["return"],
+        contextual: false,
+    },
+    KeywordSpec {
+        keyword: Keyword::Async,
+        canonical: "as",
+        aliases: &["async"],
+        contextual: false,
+    },
+    KeywordSpec {
+        keyword: Keyword::Await,
+        canonical: "aw",
+        aliases: &["await"],
+        contextual: false,
+    },
+    KeywordSpec {
+        keyword: Keyword::Spawn,
+        canonical: "sp",
+        aliases: &["spawn"],
+        contextual: false,
+    },
+    KeywordSpec {
+        keyword: Keyword::Use,
+        canonical: "us",
+        aliases: &["use"],
+        contextual: false,
+    },
+    KeywordSpec {
+        keyword: Keyword::Module,
+        canonical: "md",
+        aliases: &["module", "mod"],
+        contextual: false,
+    },
+    KeywordSpec {
+        keyword: Keyword::Public,
+        canonical: "pub",
+        aliases: &["public"],
+        contextual: false,
+    },
+    KeywordSpec {
+        keyword: Keyword::Mutable,
+        canonical: "mut",
+        aliases: &[],
+        contextual: false,
+    },
+    KeywordSpec {
+        keyword: Keyword::Reference,
+        canonical: "ref",
+        aliases: &[],
+        contextual: false,
+    },
+    KeywordSpec {
+        keyword: Keyword::Move,
+        canonical: "mv",
+        aliases: &["move"],
+        contextual: false,
+    },
+    KeywordSpec {
+        keyword: Keyword::Unsafe,
+        canonical: "un",
+        aliases: &["unsafe"],
+        contextual: false,
+    },
+    KeywordSpec {
+        keyword: Keyword::Type,
+        canonical: "type",
+        aliases: &[],
+        contextual: false,
+    },
+    KeywordSpec {
+        keyword: Keyword::Where,
+        canonical: "where",
+        aliases: &[],
+        contextual: false,
+    },
+    KeywordSpec {
+        keyword: Keyword::Linear,
+        canonical: "linear",
+        aliases: &[],
+        contextual: false,
+    },
+    KeywordSpec {
+        keyword: Keyword::Affine,
+        canonical: "affine",
+        aliases: &[],
+        contextual: false,
+    },
+];
+
+impl Keyword {
+    pub fn token(self) -> TokenKind {
+        match self {
+            Self::Function => TokenKind::F,
+            Self::Struct => TokenKind::S,
+            Self::Enum => TokenKind::E,
+            Self::Trait => TokenKind::T,
+            Self::Impl => TokenKind::I,
+            Self::Match => TokenKind::M,
+            Self::If => TokenKind::If,
+            Self::Then => TokenKind::Then,
+            Self::Else => TokenKind::Else,
+            Self::For => TokenKind::For,
+            Self::In => TokenKind::In,
+            Self::While => TokenKind::Wh,
+            Self::Loop => TokenKind::Lp,
+            Self::Break => TokenKind::Br,
+            Self::Continue => TokenKind::Ct,
+            Self::Return => TokenKind::Ret,
+            Self::Async => TokenKind::As,
+            Self::Await => TokenKind::Aw,
+            Self::Spawn => TokenKind::Sp,
+            Self::Use => TokenKind::Us,
+            Self::Module => TokenKind::Md,
+            Self::Public => TokenKind::Pub,
+            Self::Mutable => TokenKind::Mut,
+            Self::Reference => TokenKind::Ref,
+            Self::Move => TokenKind::Mv,
+            Self::Unsafe => TokenKind::Un,
+            Self::Type => TokenKind::Type,
+            Self::Where => TokenKind::Where,
+            Self::Linear => TokenKind::Linear,
+            Self::Affine => TokenKind::Affine,
+        }
+    }
+}
+
 impl TokenKind {
     /// Returns the keyword for a given string, if it is a keyword.
     pub fn keyword(s: &str) -> Option<TokenKind> {
+        if let Some(spec) = KEYWORDS
+            .iter()
+            .find(|spec| spec.canonical == s || spec.aliases.contains(&s))
+        {
+            return Some(spec.keyword.token());
+        }
         match s {
-            // Single-character keywords
-            "f" => Some(TokenKind::F),
-            "s" => Some(TokenKind::S),
-            "e" => Some(TokenKind::E),
-            "t" => Some(TokenKind::T),
-            "i" => Some(TokenKind::I),
-            "m" => Some(TokenKind::M),
-
-            // Multi-character keywords
-            "if" => Some(TokenKind::If),
-            "then" => Some(TokenKind::Then),
-            "else" => Some(TokenKind::Else),
-            "for" => Some(TokenKind::For),
-            "in" => Some(TokenKind::In),
-            "wh" => Some(TokenKind::Wh),
-            "lp" => Some(TokenKind::Lp),
-            "br" => Some(TokenKind::Br),
-            "ct" => Some(TokenKind::Ct),
-            "ret" => Some(TokenKind::Ret),
-            "return" => Some(TokenKind::Ret),
-            "as" => Some(TokenKind::As),
-            "aw" => Some(TokenKind::Aw),
-            "sp" => Some(TokenKind::Sp),
-            "us" => Some(TokenKind::Us),
-            "md" => Some(TokenKind::Md),
-            "pub" => Some(TokenKind::Pub),
-            "mut" => Some(TokenKind::Mut),
-            "ref" => Some(TokenKind::Ref),
-            "mv" => Some(TokenKind::Mv),
-            "un" => Some(TokenKind::Un),
-            "type" => Some(TokenKind::Type),
-            "where" => Some(TokenKind::Where),
-
-            "linear" => Some(TokenKind::Linear),
-            "affine" => Some(TokenKind::Affine),
-
             // Boolean literals
             "T" => Some(TokenKind::True),
             "F" => Some(TokenKind::False),

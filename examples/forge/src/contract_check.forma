@@ -1,0 +1,33 @@
+# Positive black-box fixture for Forge's pure contracted core.
+
+us model
+us graph
+us kernel
+us workspace
+
+f missing_graph_lookup() -> Int
+    nodes := [process_node("root", "coordinator", "none", 1, true)]
+    missing := "missing"
+    node_index(ref nodes, ref missing)
+
+f main() -> Int
+    nodes := [
+        process_node("root", "coordinator", "none", 1, true),
+        repairing_process_node("review", "reviewer", "none", 2, true, 2, 1)
+    ]
+    workflow := WorkflowGraph {
+        id: "contract-check",
+        authority: [],
+        nodes: nodes,
+        edges: [process_edge("root", "review", "requires_success")]
+    }
+    state := initial_state(ref workflow, "contract-run")
+    state = append_event(state, "root", "contract_checked", "positive path")
+    state = advance_logical_time(state, 3)
+    bounded := truncate_text("abcdefghijklmnopqrstuvwxyz", 12)
+    valid := m validate_graph(ref workflow)
+        None -> true
+        Some(_) -> false
+    if valid && missing_graph_lookup() == -1 && workflow_event_count(ref state) == 2 && workflow_event_sequence_is_valid(ref state) && state.logical_time == 3 && str_len(bounded) == 12
+        0
+    else 1

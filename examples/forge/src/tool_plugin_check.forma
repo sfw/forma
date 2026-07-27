@@ -1,0 +1,82 @@
+# End-to-end check for manifest discovery, role grants, and custom Forma source.
+
+us model
+us settings
+us agentic
+
+f manifest_validation_passes() -> Bool
+    valid := "version=1\nname=\"sample\"\nentrypoint=\"tool.forma\"\ncapabilities=[\"network\"]\nenvironment=[\"SAMPLE_TOKEN\"]\ndescription=\"Sample\"\ninput_description=\"Input\"\npayload_description=\"Payload\"\n"
+    unsafe_capability := "version=1\nname=\"sample\"\nentrypoint=\"tool.forma\"\ncapabilities=[\"unsafe\"]\nenvironment=[]\ndescription=\"Sample\"\n"
+    unsafe_environment := "version=1\nname=\"sample\"\nentrypoint=\"tool.forma\"\ncapabilities=[]\nenvironment=[\"BAD=VALUE\"]\ndescription=\"Sample\"\n"
+    wrong_entrypoint := "version=1\nname=\"sample\"\nentrypoint=\"host.sh\"\ncapabilities=[]\nenvironment=[]\ndescription=\"Sample\"\n"
+    digest := sha256("fixture")
+    is_ok(
+        decode_tool_plugin(
+            valid,
+            "valid/tool.toml",
+            "valid/tool.forma",
+            str(digest)
+        )
+    ) &&
+        is_err(
+            decode_tool_plugin(
+                unsafe_capability,
+                "unsafe/tool.toml",
+                "unsafe/tool.forma",
+                str(digest)
+            )
+        ) &&
+        is_err(
+            decode_tool_plugin(
+                unsafe_environment,
+                "environment/tool.toml",
+                "environment/tool.forma",
+                str(digest)
+            )
+        ) &&
+        is_err(
+            decode_tool_plugin(
+                wrong_entrypoint,
+                "entrypoint/tool.toml",
+                "entrypoint/tool.forma",
+                digest
+            )
+        )
+
+f main() -> Int
+    m file_read("examples/forge/forge.settings.toml")
+        Err(error) ->
+            print("FAIL: settings read: " + error)
+            1
+        Ok(source) ->
+            m load_settings(source)
+                Err(error) ->
+                    print("FAIL: settings load: " + error)
+                    1
+                Ok(settings) ->
+                    request := failed_agent_result("tool check fixture")
+                    request.tool_name = "read_file"
+                    request.tool_input = "Cargo.toml"
+                    request.tool_payload = ""
+                    denied_role := "run coordinator"
+                    denied := execute_agent_tool(
+                        ref settings,
+                        ref denied_role,
+                        ref request
+                    )
+                    role := "repository analyst"
+                    result := execute_agent_tool(
+                        ref settings,
+                        ref role,
+                        ref request
+                    )
+                    passed := result.contains("[package]") &&
+                        result.contains("name = \"forma\"") &&
+                        denied.contains("TOOL_DENIED") &&
+                        manifest_validation_passes()
+                    if passed
+                        print("Forge tool plugin check passed")
+                        0
+                    else
+                        print("FAIL: " + result)
+                        1

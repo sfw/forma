@@ -1,0 +1,341 @@
+# Forge settings loading and validation.
+
+us model
+us codec
+us tool_plugins
+
+pub f json_object_or_empty(ref value: Json, key: Str) -> Json
+    m json_get(value, key)
+        Some(result) -> if json_is_object(result) then result else json_object()
+        None -> json_object()
+
+pub f command_authority_digest(ref commands: [Str]) -> Str
+    result := ""
+    i := 0
+    wh i < commands.len()
+        result = result + int_to_str(commands[i].len()) + ":" + commands[i]
+        i = i + 1
+    result
+
+pub f load_settings(source: Str) -> ForgeSettings!Str
+    m toml_parse(source)
+        Err(error) -> Err("invalid Forge settings TOML: " + error)
+        Ok(root) ->
+            provider := json_object_or_empty(ref root, "provider")
+            memory := json_object_or_empty(ref root, "memory")
+            workspace := json_object_or_empty(ref root, "workspace")
+            compaction := json_object_or_empty(ref root, "compaction")
+            limits := json_object_or_empty(ref root, "limits")
+            tools := json_object_or_empty(ref root, "tools")
+            prompts := json_object_or_empty(ref root, "prompts")
+            allowed_command_json := array_or_empty(ref tools, "allowed_commands")
+            plugins_path := string_or(
+                ref tools,
+                "plugins_path",
+                "examples/forge/tools"
+            )
+            plugin_error := ""
+            plugins := m load_tool_plugins(str(plugins_path))
+                Err(error) ->
+                    plugin_error = error
+                    []
+                Ok(loaded) -> loaded
+            settings := ForgeSettings {
+                version: int_or(ref root, "version", 0),
+                workspace_root: string_or(ref root, "workspace_root", "."),
+                graph_path: string_or(
+                    ref root,
+                    "graph_path",
+                    "examples/forge/fixtures/project-review.json"
+                ),
+                max_workspace_files: int_or(ref workspace, "max_files", 80),
+                max_file_chars: int_or(ref workspace, "max_file_chars", 12000),
+                max_workspace_context_chars: int_or(
+                    ref workspace,
+                    "max_context_chars",
+                    180000
+                ),
+                provider_kind: string_or(ref provider, "kind", ""),
+                provider_base_url: string_or(ref provider, "base_url", ""),
+                api_key_env: string_or(ref provider, "api_key_env", ""),
+                default_model: string_or(ref provider, "default_model", ""),
+                reasoning_effort: string_or(
+                    ref provider,
+                    "reasoning_effort",
+                    "medium"
+                ),
+                max_output_tokens: int_or(
+                    ref provider,
+                    "max_output_tokens",
+                    4096
+                ),
+                provider_timeout_ms: int_or(
+                    ref provider,
+                    "timeout_ms",
+                    120000
+                ),
+                store_provider_responses: bool_or(ref provider, "store", false),
+                server_compact_threshold: int_or(
+                    ref compaction,
+                    "server_threshold_tokens",
+                    32000
+                ),
+                database_path: string_or(
+                    ref memory,
+                    "database_path",
+                    "examples/forge/.forge/history.db"
+                ),
+                database_url_env: string_or(ref memory, "database_url_env", ""),
+                recall_messages: int_or(ref memory, "recall_messages", 12),
+                compact_after_chars: int_or(
+                    ref compaction,
+                    "local_trigger_chars",
+                    48000
+                ),
+                keep_recent_messages: int_or(
+                    ref compaction,
+                    "keep_recent_messages",
+                    8
+                ),
+                max_agent_turns: int_or(ref limits, "max_agent_turns", 32),
+                max_repair_turns: int_or(ref limits, "max_repair_turns", 8),
+                max_parallel_nodes: int_or(ref limits, "max_parallel_nodes", 3),
+                max_total_tokens: int_or(ref limits, "max_total_tokens", 500000),
+                workflow_timeout_ms: int_or(
+                    ref limits,
+                    "workflow_timeout_ms",
+                    14400000
+                ),
+                command_timeout_ms: int_or(ref tools, "command_timeout_ms", 120000),
+                max_command_output_chars: int_or(
+                    ref tools,
+                    "max_command_output_chars",
+                    100000
+                ),
+                allowed_commands: decode_authority(ref allowed_command_json),
+                forma_executable: string_or(
+                    ref tools,
+                    "forma_executable",
+                    "target/debug/forma"
+                ),
+                tool_plugins_path: plugins_path,
+                tool_plugins: plugins,
+                system_prompt: string_or(ref prompts, "system", ""),
+                compaction_prompt: string_or(ref prompts, "compaction", ""),
+                agent_overrides: json_object_or_empty(ref root, "agents")
+            }
+            if plugin_error.len() > 0
+                Err(plugin_error)
+            else
+                m validate_settings(ref settings)
+                    Some(error) -> Err(error)
+                    None -> Ok(settings)
+
+pub f validate_agent_tool_grants(ref settings: ForgeSettings) -> Str?
+    error := None
+    remaining_agents := json_values(settings.agent_overrides)
+    wh remaining_agents.len() > 0
+        (agent_rest, next_agent) := vec_pop(remaining_agents)
+        remaining_agents = agent_rest
+        m next_agent
+            None -> error = error
+            Some(agent) ->
+                grants := array_or_empty(ref agent, "tools")
+                wh grants.len() > 0
+                    (grant_rest, next_grant) := vec_pop(grants)
+                    grants = grant_rest
+                    m next_grant
+                        None -> error = error
+                        Some(grant) ->
+                            name := json_string(grant)
+                            if tool_plugin_index(
+                                ref settings.tool_plugins,
+                                ref name
+                            ) < 0 && is_none(error)
+                                error = Some(
+                                    "agent grants unknown tool plugin: " + name
+                                )
+    error
+
+pub f validate_settings(ref settings: ForgeSettings) -> Str?
+    if settings.version != 1
+        Some("settings.version must be 1")
+    else if settings.provider_kind != "openai"
+        Some("provider.kind must be openai")
+    else if str_len(settings.provider_base_url) == 0
+        Some("provider.base_url is required")
+    else if str_len(settings.api_key_env) == 0
+        Some("provider.api_key_env is required")
+    else if str_len(settings.default_model) == 0
+        Some("provider.default_model is required")
+    else if settings.max_output_tokens < 256
+        Some("provider.max_output_tokens must be at least 256")
+    else if settings.provider_timeout_ms < 1000 || settings.provider_timeout_ms > 3600000
+        Some("provider.timeout_ms must be between 1000 and 3600000")
+    else if settings.max_workspace_files < 1 || settings.max_file_chars < 256 || settings.max_workspace_context_chars < 4096
+        Some("workspace context limits must be positive and bounded")
+    else if settings.server_compact_threshold < 4096
+        Some("compaction.server_threshold_tokens must be at least 4096")
+    else if settings.recall_messages < 1
+        Some("memory.recall_messages must be positive")
+    else if settings.keep_recent_messages < 1
+        Some("compaction.keep_recent_messages must be positive")
+    else if settings.compact_after_chars < 4096
+        Some("compaction.local_trigger_chars must be at least 4096")
+    else if settings.max_agent_turns < 1
+        Some("limits.max_agent_turns must be positive")
+    else if settings.max_repair_turns < 1
+        Some("limits.max_repair_turns must be positive")
+    else if settings.max_parallel_nodes < 1 || settings.max_parallel_nodes > 32
+        Some("limits.max_parallel_nodes must be between 1 and 32")
+    else if settings.max_total_tokens < settings.max_output_tokens
+        Some("limits.max_total_tokens must cover at least one provider response")
+    else if settings.workflow_timeout_ms < 1000
+        Some("limits.workflow_timeout_ms must be at least 1000")
+    else if settings.command_timeout_ms < 1 || settings.command_timeout_ms > 3600000
+        Some("tools.command_timeout_ms must be between 1 and 3600000")
+    else if settings.max_command_output_chars < 1 || settings.max_command_output_chars > 16777216
+        Some("tools.max_command_output_chars must be between 1 and 16777216")
+    else if settings.allowed_commands.len() == 0
+        Some("tools.allowed_commands must contain at least one executable")
+    else if settings.forma_executable.len() == 0
+        Some("tools.forma_executable must not be empty")
+    else if settings.tool_plugins_path.len() == 0
+        Some("tools.plugins_path must not be empty")
+    else if settings.tool_plugins.len() == 0
+        Some("tools.plugins_path must contain a valid plugin")
+    else if is_some(validate_agent_tool_grants(ref settings))
+        validate_agent_tool_grants(ref settings)
+    else if str_len(settings.system_prompt) == 0
+        Some("prompts.system is required")
+    else if str_len(settings.compaction_prompt) == 0
+        Some("prompts.compaction is required")
+    else None
+
+@post(result.len() == 64)
+pub f forge_settings_digest(ref settings: ForgeSettings) -> Str
+    sha256(
+        int_to_str(settings.version) + "\n" +
+        settings.workspace_root + "\n" +
+        settings.graph_path + "\n" +
+        int_to_str(settings.max_workspace_files) + "\n" +
+        int_to_str(settings.max_file_chars) + "\n" +
+        int_to_str(settings.max_workspace_context_chars) + "\n" +
+        settings.provider_kind + "\n" +
+        settings.provider_base_url + "\n" +
+        settings.api_key_env + "\n" +
+        settings.default_model + "\n" +
+        settings.reasoning_effort + "\n" +
+        int_to_str(settings.max_output_tokens) + "\n" +
+        int_to_str(settings.provider_timeout_ms) + "\n" +
+        (if settings.store_provider_responses then "true" else "false") + "\n" +
+        int_to_str(settings.server_compact_threshold) + "\n" +
+        settings.database_path + "\n" +
+        settings.database_url_env + "\n" +
+        int_to_str(settings.recall_messages) + "\n" +
+        int_to_str(settings.compact_after_chars) + "\n" +
+        int_to_str(settings.keep_recent_messages) + "\n" +
+        int_to_str(settings.max_agent_turns) + "\n" +
+        int_to_str(settings.max_repair_turns) + "\n" +
+        int_to_str(settings.max_parallel_nodes) + "\n" +
+        int_to_str(settings.max_total_tokens) + "\n" +
+        int_to_str(settings.workflow_timeout_ms) + "\n" +
+        int_to_str(settings.command_timeout_ms) + "\n" +
+        int_to_str(settings.max_command_output_chars) + "\n" +
+        command_authority_digest(ref settings.allowed_commands) + "\n" +
+        settings.forma_executable + "\n" +
+        settings.tool_plugins_path + "\n" +
+        tool_plugins_digest(ref settings.tool_plugins) + "\n" +
+        settings.system_prompt + "\n" +
+        settings.compaction_prompt + "\n" +
+        json_stringify(settings.agent_overrides)
+    )
+
+@pre(graph_source.len() > 0, "workflow graph source must not be empty")
+@post(result.len() == 64)
+pub f forge_execution_digest(
+    ref settings: ForgeSettings,
+    ref graph_source: Str
+) -> Str
+    sha256(
+        forge_settings_digest(ref settings) + "\n" + sha256(str(graph_source))
+    )
+
+@pre(settings.default_model.len() > 0, "default model must be configured")
+@post(result.len() > 0)
+pub f agent_model(ref settings: ForgeSettings, ref role: Str) -> Str
+    m json_get(settings.agent_overrides, role)
+        Some(agent) -> string_or(ref agent, "model", str(settings.default_model))
+        None -> str(settings.default_model)
+
+@pre(settings.system_prompt.len() > 0, "system prompt must be configured")
+@post(result.len() >= settings.system_prompt.len())
+@post(result.contains(settings.system_prompt))
+pub f agent_instructions(ref settings: ForgeSettings, ref role: Str) -> Str
+    m json_get(settings.agent_overrides, role)
+        Some(agent) ->
+            settings.system_prompt + "\n\nRole instructions:\n" +
+                string_or(ref agent, "instructions", "")
+        None -> str(settings.system_prompt)
+
+pub f agent_allows_tool(
+    ref settings: ForgeSettings,
+    ref role: Str,
+    ref tool_name: Str
+) -> Bool
+    allowed := tool_plugin_index(
+        ref settings.tool_plugins,
+        ref tool_name
+    ) >= 0
+    m json_get(settings.agent_overrides, role)
+        None -> allowed = false
+        Some(agent) ->
+            granted := false
+            remaining := array_or_empty(ref agent, "tools")
+            wh vec_len(remaining) > 0
+                (rest, next) := vec_pop(remaining)
+                remaining = rest
+                m next
+                    Some(tool) ->
+                        if json_string(tool) == tool_name
+                            granted = true
+                    None -> allowed = allowed
+            allowed = allowed && granted
+    allowed
+
+pub f agent_tool_names(
+    ref settings: ForgeSettings,
+    ref role: Str
+) -> [Str]
+    names := []
+    i := 0
+    wh i < settings.tool_plugins.len()
+        name := str(settings.tool_plugins[i].name)
+        if agent_allows_tool(ref settings, ref role, ref name)
+            names = vec_push(names, name)
+        i = i + 1
+    names
+
+pub f agent_tool_catalog(
+    ref settings: ForgeSettings,
+    ref role: Str
+) -> Str
+    catalog := "Available tool plugins for this role:"
+    found := false
+    i := 0
+    wh i < settings.tool_plugins.len()
+        name := str(settings.tool_plugins[i].name)
+        if agent_allows_tool(ref settings, ref role, ref name)
+            found = true
+            catalog = catalog + "\n- " + name +
+                " [" +
+                tool_capabilities_text(
+                    ref settings.tool_plugins[i].capabilities
+                ) + "]: " +
+                settings.tool_plugins[i].description +
+                "\n  tool_input: " +
+                settings.tool_plugins[i].input_description +
+                "\n  tool_payload: " +
+                settings.tool_plugins[i].payload_description
+        i = i + 1
+    if found then catalog else catalog + "\n- none"

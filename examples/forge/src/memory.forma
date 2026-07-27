@@ -1,0 +1,380 @@
+# Durable Forge history, recall, and local compaction over SQLite.
+
+us model
+
+pub f initialize_memory(ref db: Database, postgres: Bool) -> Str?
+    m db_execute(
+        db,
+        "CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, goal TEXT NOT NULL, status TEXT NOT NULL, settings_digest TEXT NOT NULL, created_at_ms BIGINT NOT NULL, updated_at_ms BIGINT NOT NULL)"
+    )
+        Err(error) -> Some(error)
+        Ok(_) ->
+            message_id := if postgres
+                "BIGSERIAL PRIMARY KEY"
+            else
+                "INTEGER PRIMARY KEY AUTOINCREMENT"
+            m db_execute(
+                db,
+                "CREATE TABLE IF NOT EXISTS messages (id " + message_id + ", run_id TEXT NOT NULL, node_id TEXT NOT NULL, role TEXT NOT NULL, kind TEXT NOT NULL, content TEXT NOT NULL, response_id TEXT NOT NULL, input_tokens BIGINT NOT NULL, output_tokens BIGINT NOT NULL, created_at_ms BIGINT NOT NULL)"
+            )
+                Err(error) -> Some(error)
+                Ok(_) ->
+                    m db_execute(
+                        db,
+                        "CREATE INDEX IF NOT EXISTS messages_recall ON messages(run_id, node_id, id)"
+                    )
+                        Err(error) -> Some(error)
+                        Ok(_) ->
+                            compaction_id := if postgres
+                                "BIGSERIAL PRIMARY KEY"
+                            else
+                                "INTEGER PRIMARY KEY AUTOINCREMENT"
+                            m db_execute(
+                                db,
+                                "CREATE TABLE IF NOT EXISTS compactions (id " + compaction_id + ", run_id TEXT NOT NULL, through_message_id BIGINT NOT NULL, summary TEXT NOT NULL, response_id TEXT NOT NULL, input_tokens BIGINT NOT NULL, output_tokens BIGINT NOT NULL, created_at_ms BIGINT NOT NULL)"
+                            )
+                                Err(error) -> Some(error)
+                                Ok(_) ->
+                                    m db_execute(
+                                        db,
+                                        "CREATE TABLE IF NOT EXISTS events (run_id TEXT NOT NULL, sequence BIGINT NOT NULL, logical_time BIGINT NOT NULL, node_id TEXT NOT NULL, kind TEXT NOT NULL, detail TEXT NOT NULL, PRIMARY KEY(run_id, sequence))"
+                                    )
+                                        Err(error) -> Some(error)
+                                        Ok(_) -> None
+
+@pre(run_id.len() > 0, "run id must not be empty")
+@pre(goal.len() > 0, "run goal must not be empty")
+@pre(settings_digest.len() > 0, "settings digest must not be empty")
+pub f create_run(
+    ref db: Database,
+    run_id: Str,
+    goal: Str,
+    settings_digest: Str
+) -> Str?
+    m db_prepare(
+        db,
+        "INSERT INTO runs(id, goal, status, settings_digest, created_at_ms, updated_at_ms) VALUES(?, ?, 'running', ?, ?, ?)"
+    )
+        Err(error) -> Some(error)
+        Ok(statement) ->
+            now := int_to_str(time_now_ms())
+            m db_execute_prepared(
+                statement,
+                [run_id, goal, settings_digest, now, now]
+            )
+                Err(error) -> Some(error)
+                Ok(_) -> None
+
+@pre(run_id.len() > 0, "run id must not be empty")
+@pre(status.len() > 0, "run status must not be empty")
+pub f update_run_status(ref db: Database, run_id: Str, status: Str) -> Str?
+    m db_prepare(
+        db,
+        "UPDATE runs SET status = ?, updated_at_ms = ? WHERE id = ?"
+    )
+        Err(error) -> Some(error)
+        Ok(statement) ->
+            m db_execute_prepared(
+                statement,
+                [status, int_to_str(time_now_ms()), run_id]
+            )
+                Err(error) -> Some(error)
+                Ok(_) -> None
+
+@pre(run_id.len() > 0, "event run id must not be empty")
+pub f persist_event(
+    ref db: Database,
+    run_id: Str,
+    ref event: AuditEvent
+) -> Str?
+    m db_prepare(
+        db,
+        "INSERT INTO events(run_id, sequence, logical_time, node_id, kind, detail) VALUES(?, ?, ?, ?, ?, ?) ON CONFLICT(run_id, sequence) DO UPDATE SET logical_time = excluded.logical_time, node_id = excluded.node_id, kind = excluded.kind, detail = excluded.detail"
+    )
+        Err(error) -> Some(error)
+        Ok(statement) ->
+            m db_execute_prepared(
+                statement,
+                [
+                    run_id,
+                    int_to_str(event.sequence),
+                    int_to_str(event.logical_time),
+                    str(event.node_id),
+                    str(event.kind),
+                    str(event.detail)
+                ]
+            )
+                Err(error) -> Some(error)
+                Ok(_) -> None
+
+@pre(run_id.len() > 0, "event run id must not be empty")
+pub f persist_events(
+    ref db: Database,
+    run_id: Str,
+    ref events: [AuditEvent]
+) -> Str?
+    error := None
+    i := 0
+    wh i < events.len()
+        m persist_event(ref db, str(run_id), ref events[i])
+            Some(message) ->
+                if is_none(error)
+                    error = Some(message)
+            None -> error = error
+        i = i + 1
+    error
+
+pub f persist_workflow_state(
+    ref db: Database,
+    ref state: WorkflowState
+) -> Str?
+    persist_events(ref db, str(state.run_id), ref state.events)
+
+@pre(run_id.len() > 0, "event run id must not be empty")
+pub f load_events(ref db: Database, ref run_id: Str) -> [AuditEvent]!Str
+    m db_prepare(
+        db,
+        "SELECT sequence, logical_time, node_id, kind, detail FROM events WHERE run_id = ? ORDER BY sequence ASC"
+    )
+        Err(error) -> Err(error)
+        Ok(statement) ->
+            m db_query_prepared(statement, [str(run_id)])
+                Err(error) -> Err(error)
+                Ok(rows) ->
+                    events := []
+                    i := 0
+                    wh i < rows.len()
+                        events = vec_push(
+                            events,
+                            audit_event(
+                                row_get_int(rows[i], 0),
+                                row_get_int(rows[i], 1),
+                                row_get_str(rows[i], 2),
+                                row_get_str(rows[i], 3),
+                                row_get_str(rows[i], 4)
+                            )
+                        )
+                        i = i + 1
+                    Ok(events)
+
+@pre(run_id.len() > 0, "run id must not be empty")
+pub f load_run_goal(ref db: Database, ref run_id: Str) -> Str!Str
+    m db_prepare(db, "SELECT goal FROM runs WHERE id = ? LIMIT 1")
+        Err(error) -> Err(error)
+        Ok(statement) ->
+            m db_query_prepared(statement, [str(run_id)])
+                Err(error) -> Err(error)
+                Ok(rows) ->
+                    if rows.len() == 0 then Err("run not found")
+                    else Ok(row_get_str(rows[0], 0))
+
+@pre(run_id.len() > 0, "run id must not be empty")
+pub f load_run_settings_digest(ref db: Database, ref run_id: Str) -> Str!Str
+    m db_prepare(db, "SELECT settings_digest FROM runs WHERE id = ? LIMIT 1")
+        Err(error) -> Err(error)
+        Ok(statement) ->
+            m db_query_prepared(statement, [str(run_id)])
+                Err(error) -> Err(error)
+                Ok(rows) ->
+                    if rows.len() == 0 then Err("run not found")
+                    else Ok(row_get_str(rows[0], 0))
+
+@pre(run_id.len() > 0, "run id must not be empty")
+pub f run_token_usage(ref db: Database, ref run_id: Str) -> Int
+    m db_prepare(
+        db,
+        "SELECT (SELECT COALESCE(SUM(input_tokens + output_tokens), 0) FROM messages WHERE run_id = ?) + (SELECT COALESCE(SUM(input_tokens + output_tokens), 0) FROM compactions WHERE run_id = ?)"
+    )
+        Err(_) -> -1
+        Ok(statement) ->
+            m db_query_prepared(statement, [str(run_id), str(run_id)])
+                Err(_) -> -1
+                Ok(rows) ->
+                    if rows.len() == 0 then -1
+                    else row_get_int(rows[0], 0)
+
+@pre(run_id.len() > 0, "run id must not be empty")
+pub f load_run_created_at_ms(ref db: Database, ref run_id: Str) -> Int!Str
+    m db_prepare(db, "SELECT created_at_ms FROM runs WHERE id = ? LIMIT 1")
+        Err(error) -> Err(error)
+        Ok(statement) ->
+            m db_query_prepared(statement, [str(run_id)])
+                Err(error) -> Err(error)
+                Ok(rows) ->
+                    if rows.len() == 0 then Err("run not found")
+                    else Ok(row_get_int(rows[0], 0))
+
+@pre(run_id.len() > 0, "message run id must not be empty")
+@pre(role.len() > 0, "message role must not be empty")
+@pre(kind.len() > 0, "message kind must not be empty")
+@pre(input_tokens >= 0, "input token count must be non-negative")
+@pre(output_tokens >= 0, "output token count must be non-negative")
+pub f remember(
+    ref db: Database,
+    run_id: Str,
+    node_id: Str,
+    role: Str,
+    kind: Str,
+    content: Str,
+    response_id: Str,
+    input_tokens: Int,
+    output_tokens: Int
+) -> Str?
+    m db_prepare(
+        db,
+        "INSERT INTO messages(run_id, node_id, role, kind, content, response_id, input_tokens, output_tokens, created_at_ms) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    )
+        Err(error) -> Some(error)
+        Ok(statement) ->
+            m db_execute_prepared(
+                statement,
+                [
+                    run_id,
+                    node_id,
+                    role,
+                    kind,
+                    content,
+                    response_id,
+                    int_to_str(input_tokens),
+                    int_to_str(output_tokens),
+                    int_to_str(time_now_ms())
+                ]
+            )
+                Err(error) -> Some(error)
+                Ok(_) -> None
+
+pub f latest_compaction(ref db: Database, ref run_id: Str) -> Str
+    m db_prepare(
+        db,
+        "SELECT summary FROM compactions WHERE run_id = ? ORDER BY through_message_id DESC LIMIT 1"
+    )
+        Err(_) -> ""
+        Ok(statement) ->
+            m db_query_prepared(statement, [str(run_id)])
+                Err(_) -> ""
+                Ok(rows) ->
+                    if vec_len(rows) == 0
+                        ""
+                    else row_get_str(rows[0], 0)
+
+@pre(run_id.len() > 0, "recall run id must not be empty")
+@pre(limit > 0, "recall limit must be positive")
+@post(result.len() > 0)
+pub f recall_context(
+    ref db: Database,
+    ref run_id: Str,
+    limit: Int
+) -> Str
+    summary := latest_compaction(ref db, ref run_id)
+    context := if str_len(summary) == 0
+        "No compacted memory yet."
+    else
+        "Compacted memory:\n" + summary
+    m db_prepare(
+        db,
+        "SELECT node_id, role, kind, content FROM messages WHERE run_id = ? ORDER BY id DESC LIMIT ?"
+    )
+        Err(_) -> context
+        Ok(statement) ->
+            m db_query_prepared(
+                statement,
+                [str(run_id), int_to_str(limit)]
+            )
+                Err(_) -> context
+                Ok(rows) ->
+                    i := vec_len(rows) - 1
+                    wh i >= 0
+                        context = context + "\n\n[" +
+                            row_get_str(rows[i], 0) + " / " +
+                            row_get_str(rows[i], 1) + " / " +
+                            row_get_str(rows[i], 2) + "]\n" +
+                            row_get_str(rows[i], 3)
+                        i = i - 1
+                    context
+
+@pre(run_id.len() > 0, "compaction run id must not be empty")
+@pre(keep_recent_messages >= 0, "recent-message budget must be non-negative")
+@post(result.1 >= 0)
+@post(result.2 == result.0.len())
+pub f uncompacted_context(
+    ref db: Database,
+    ref run_id: Str,
+    keep_recent_messages: Int
+) -> (Str, Int, Int)
+    watermark := 0
+    m db_prepare(
+        db,
+        "SELECT through_message_id FROM compactions WHERE run_id = ? ORDER BY through_message_id DESC LIMIT 1"
+    )
+        Ok(statement) ->
+            m db_query_prepared(statement, [str(run_id)])
+                Ok(rows) ->
+                    if vec_len(rows) > 0
+                        watermark = row_get_int(rows[0], 0)
+                Err(_) -> watermark = 0
+        Err(_) -> watermark = 0
+
+    source := ""
+    through := watermark
+    m db_prepare(
+        db,
+        "SELECT id, node_id, role, kind, content FROM messages WHERE run_id = ? AND id > ? AND id NOT IN (SELECT id FROM messages WHERE run_id = ? ORDER BY id DESC LIMIT ?) ORDER BY id ASC"
+    )
+        Ok(statement) ->
+            m db_query_prepared(
+                statement,
+                [
+                    str(run_id),
+                    int_to_str(watermark),
+                    str(run_id),
+                    int_to_str(keep_recent_messages)
+                ]
+            )
+                Ok(rows) ->
+                    i := 0
+                    wh i < vec_len(rows)
+                        through = row_get_int(rows[i], 0)
+                        source = source + "\n\n[" +
+                            row_get_str(rows[i], 1) + " / " +
+                            row_get_str(rows[i], 2) + " / " +
+                            row_get_str(rows[i], 3) + "]\n" +
+                            row_get_str(rows[i], 4)
+                        i = i + 1
+                Err(_) -> source = ""
+        Err(_) -> source = ""
+    (source, through, str_len(source))
+
+@pre(run_id.len() > 0, "compaction run id must not be empty")
+@pre(through_message_id >= 0, "compaction watermark must be non-negative")
+@pre(summary.len() > 0, "compaction summary must not be empty")
+@pre(input_tokens >= 0, "input token count must be non-negative")
+@pre(output_tokens >= 0, "output token count must be non-negative")
+pub f save_compaction(
+    ref db: Database,
+    run_id: Str,
+    through_message_id: Int,
+    summary: Str,
+    response_id: Str,
+    input_tokens: Int,
+    output_tokens: Int
+) -> Str?
+    m db_prepare(
+        db,
+        "INSERT INTO compactions(run_id, through_message_id, summary, response_id, input_tokens, output_tokens, created_at_ms) VALUES(?, ?, ?, ?, ?, ?, ?)"
+    )
+        Err(error) -> Some(error)
+        Ok(statement) ->
+            m db_execute_prepared(
+                statement,
+                [
+                    run_id,
+                    int_to_str(through_message_id),
+                    summary,
+                    response_id,
+                    int_to_str(input_tokens),
+                    int_to_str(output_tokens),
+                    int_to_str(time_now_ms())
+                ]
+            )
+                Err(error) -> Some(error)
+                Ok(_) -> None

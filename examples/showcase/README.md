@@ -51,7 +51,7 @@ A collection of canonical programming examples demonstrating FORMA's features an
 | 17 | `17_verified_sort.forma` | Sorting with full behavioral contracts | `@pre`, `@sorted`, `@permutation`, trust report |
 | 18 | `18_verified_stack.forma` | Stack operations with pre/post state checks | `old(...)`, tuple postconditions |
 | 19 | `19_verified_math.forma` | Numeric and collection invariants | named patterns, quantifiers |
-| 20 | `20_verification_demo.forma` | End-to-end explain/verify workflow | PASS/WARN visibility, CI-friendly output |
+| 20 | `20_verification_demo.forma` | End-to-end explain/verify workflow | confidence statuses, CI-friendly output |
 
 ## Running Examples
 
@@ -72,6 +72,7 @@ cargo run -- explain --examples examples/showcase/17_verified_sort.forma
 
 # Generate trust report for showcase directory
 cargo run -- verify --report examples/showcase/
+cargo run -- verify examples/showcase/ --level exhaustive --max-domain 4096 --report
 ```
 
 ## Verification Script
@@ -114,7 +115,9 @@ These examples collectively demonstrate:
 - **Array Operations**: Indexing, mutation, parallel arrays, safe access (`vec_get`)
 - **Algorithms**: Sorting, searching, backtracking, constraint satisfaction
 - **Mathematical**: GCD, LCM, primes, factorials, Fibonacci
-- **Verification UX**: Contract explanation, deterministic examples, PASS/WARN/SKIP/FAIL reporting
+- **Verification UX**: Contract explanation, deterministic examples, and explicit
+  `UNCONTRACTED`/`TESTED`/`COUNTEREXAMPLE`/`EXHAUSTIVE`/`PROVED`/`UNKNOWN`/`SKIPPED`
+  reporting. Generated examples are evidence, not proof.
 
 ## Performance Notes
 

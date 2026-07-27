@@ -1,0 +1,8 @@
+version = 1
+name = "write_file"
+entrypoint = "tool.forma"
+capabilities = ["write"]
+environment = []
+description = "Write UTF-8 content to one file confined to the workspace."
+input_description = "Workspace-relative destination path."
+payload_description = "Complete UTF-8 file contents."

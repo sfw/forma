@@ -133,6 +133,34 @@ fn test_all_keywords() {
 }
 
 #[test]
+fn test_long_keyword_aliases_map_to_canonical_tokens() {
+    let aliases = [
+        ("function", TokenKind::F),
+        ("struct", TokenKind::S),
+        ("enum", TokenKind::E),
+        ("trait", TokenKind::T),
+        ("impl", TokenKind::I),
+        ("match", TokenKind::M),
+        ("while", TokenKind::Wh),
+        ("loop", TokenKind::Lp),
+        ("break", TokenKind::Br),
+        ("continue", TokenKind::Ct),
+        ("return", TokenKind::Ret),
+        ("async", TokenKind::As),
+        ("await", TokenKind::Aw),
+        ("spawn", TokenKind::Sp),
+        ("use", TokenKind::Us),
+        ("module", TokenKind::Md),
+        ("public", TokenKind::Pub),
+        ("move", TokenKind::Mv),
+        ("unsafe", TokenKind::Un),
+    ];
+    for (alias, expected) in aliases {
+        assert_eq!(TokenKind::keyword(alias), Some(expected), "alias `{alias}`");
+    }
+}
+
+#[test]
 fn test_all_operators() {
     let operators = vec![
         ("+", TokenKind::Plus),

@@ -31,10 +31,14 @@ pub mod interp;
 pub mod lower;
 pub mod mir;
 pub mod optimize;
+pub mod ownership;
 
 pub use interp::{InterpError, Interpreter, RuntimeError, Value};
 pub use lower::{LowerError, Lowerer};
 pub use mir::{
     BasicBlock, BinOp, BlockId, Constant, Function, Local, LocalDecl, MirContract, Mutability,
-    Operand, Program, Rvalue, Statement, StatementKind, Terminator, UnOp,
+    Operand, Place, Program, ProjectionElem, Rvalue, Statement, StatementKind, Terminator, UnOp,
+};
+pub use ownership::{
+    OwnershipError, OwnershipErrorKind, OwnershipReport, elaborate_drops, make_operands_explicit,
 };

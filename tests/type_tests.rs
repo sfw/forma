@@ -80,6 +80,56 @@ s Point
 }
 
 #[test]
+fn struct_invariant_fields_are_type_checked() {
+    assert!(
+        check_source(
+            r#"
+@inv(balance >= 0)
+@inv(owner.len() > 0)
+s Account
+    owner: Str
+    balance: Int
+"#
+        )
+        .is_ok()
+    );
+}
+
+#[test]
+fn struct_invariant_must_be_boolean() {
+    let errors = check_source(
+        r#"
+@inv(balance)
+s Account
+    balance: Int
+"#,
+    )
+    .unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.message.contains("mismatch"))
+    );
+}
+
+#[test]
+fn struct_invariant_rejects_unknown_fields() {
+    let errors = check_source(
+        r#"
+@inv(missing >= 0)
+s Account
+    balance: Int
+"#,
+    )
+    .unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.message.contains("undefined variable: missing"))
+    );
+}
+
+#[test]
 fn test_enum_type() {
     let result = check_source(
         r#"
@@ -305,6 +355,84 @@ i Display for Point
     );
 
     assert!(result.is_ok());
+}
+
+#[test]
+fn test_conflicting_trait_impls_are_rejected() {
+    let errors = check_source(
+        r#"
+t Display
+    f display(&self) -> Str
+
+s Point
+    x: Int
+
+i Display for Point
+    f display(&self) -> Str = "first"
+
+i Display for Point
+    f display(&self) -> Str = "second"
+"#,
+    )
+    .unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.message.contains("conflicting implementations"))
+    );
+}
+
+#[test]
+fn disjoint_concrete_generic_impls_are_allowed() {
+    let result = check_source(
+        r#"
+t Marker
+
+s Box[T]
+    value: T
+
+i Marker for Box[Int]
+i Marker for Box[Str]
+"#,
+    );
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[test]
+fn blanket_and_concrete_generic_impls_overlap() {
+    let errors = check_source(
+        r#"
+t Marker
+
+s Box[T]
+    value: T
+
+i [T] Marker for Box[T]
+i Marker for Box[Int]
+"#,
+    )
+    .unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.message.contains("conflicting implementations"))
+    );
+}
+
+#[test]
+fn test_orphan_trait_impl_is_rejected() {
+    let errors = check_source(
+        r#"
+i Foreign for Int
+    f value(&self) -> Int = 0
+"#,
+    )
+    .unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.message.contains("orphan implementation"))
+    );
 }
 
 #[test]
@@ -618,6 +746,133 @@ f test() -> Int = add(1, "two")
 }
 
 #[test]
+fn test_public_function_requires_annotated_return_type() {
+    let errors = check_source("pub f answer() = 42").unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.message.contains("must declare its return type"))
+    );
+    assert!(check_source("pub f answer() -> Int = 42").is_ok());
+}
+
+#[test]
+fn compiler_known_copy_requires_structurally_copy_fields() {
+    assert!(
+        check_source(
+            r#"
+@derive(Copy)
+s Point
+    x: Int
+    y: Bool
+"#,
+        )
+        .is_ok()
+    );
+
+    let errors = check_source(
+        r#"
+@derive(Copy)
+s Named
+    value: Str
+"#,
+    )
+    .unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.message.contains("field is not `Copy`"))
+    );
+}
+
+#[test]
+fn compiler_known_drop_types_cannot_be_copy() {
+    let errors = check_source(
+        r#"
+@derive(Copy, Drop)
+s Resource
+    id: Int
+"#,
+    )
+    .unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.message.contains("cannot implement `Copy`"))
+    );
+}
+
+#[test]
+fn compiler_known_send_requires_task_safe_fields() {
+    assert!(
+        check_source(
+            r#"
+@derive(Send)
+s Message
+    text: Str
+"#,
+        )
+        .is_ok()
+    );
+
+    let errors = check_source(
+        r#"
+@derive(Send)
+s Query
+    database: Database
+"#,
+    )
+    .unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.message.contains("field is not task-safe"))
+    );
+}
+
+#[test]
+fn ambiguous_trait_methods_are_rejected_independent_of_source_order() {
+    for source in [
+        r#"
+t Alpha
+    f value(&self) -> Int
+t Beta
+    f value(&self) -> Int
+s Thing
+f test(x: Thing) -> Int = x.value()
+"#,
+        r#"
+t Beta
+    f value(&self) -> Int
+t Alpha
+    f value(&self) -> Int
+s Thing
+f test(x: Thing) -> Int = x.value()
+"#,
+    ] {
+        let errors = check_source(source).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message.contains("ambiguous method 'value'"))
+        );
+    }
+}
+
+#[test]
+fn semantic_query_retains_local_expression_types() {
+    let source = "f main() -> Int\n    local = 40 + 2\n    local\n";
+    let scanner = Scanner::new(source);
+    let (tokens, errors) = scanner.scan_all();
+    assert!(errors.is_empty());
+    let ast = Parser::new(&tokens).parse().unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check(&ast).unwrap();
+    let offset = source.rfind("local").unwrap();
+    assert_eq!(checker.type_at_offset(offset), Some(Ty::Int));
+}
+
+#[test]
 fn test_wrong_arg_count() {
     check_should_fail(
         r#"
@@ -699,4 +954,33 @@ f test() -> u8 = u8(255)
 "#,
     );
     assert!(result.is_ok());
+}
+
+#[test]
+fn fixed_array_repeat_preserves_its_length() {
+    let result = check_source("f zeros() -> [Int; 3] = [0; 3]\n");
+    assert!(
+        result.is_ok(),
+        "matching fixed-array lengths should type-check"
+    );
+}
+
+#[test]
+fn fixed_array_length_mismatch_is_rejected() {
+    let errors = check_source("f zeros() -> [Int; 2] = [0; 3]\n").unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.message.contains("array size mismatch"))
+    );
+}
+
+#[test]
+fn fixed_array_length_must_be_a_literal() {
+    let errors = check_source("f bad(n: Int) -> [Int; 2] = [0; n]\n").unwrap_err();
+    assert!(errors.iter().any(|error| {
+        error
+            .message
+            .contains("length must be a non-negative integer literal")
+    }));
 }

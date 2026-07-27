@@ -6,7 +6,7 @@
 # ============================================================
 
 # Assert that two integers are equal
-f assert_eq(actual: Int, expected: Int, msg: Str) -> Bool
+pub f assert_eq(actual: Int, expected: Int, msg: Str) -> Bool
     if actual == expected then true
     else
         print("Assertion failed:")
@@ -18,7 +18,7 @@ f assert_eq(actual: Int, expected: Int, msg: Str) -> Bool
         false
 
 # Assert that two strings are equal
-f assert_str_eq(actual: Str, expected: Str, msg: Str) -> Bool
+pub f assert_str_eq(actual: Str, expected: Str, msg: Str) -> Bool
     if actual == expected then true
     else
         print("Assertion failed:")
@@ -30,7 +30,7 @@ f assert_str_eq(actual: Str, expected: Str, msg: Str) -> Bool
         false
 
 # Assert that a boolean is true
-f assert_true(cond: Bool, msg: Str) -> Bool
+pub f assert_true(cond: Bool, msg: Str) -> Bool
     if cond then true
     else
         print("Assertion failed:")
@@ -38,7 +38,7 @@ f assert_true(cond: Bool, msg: Str) -> Bool
         false
 
 # Assert that a boolean is false
-f assert_false(cond: Bool, msg: Str) -> Bool
+pub f assert_false(cond: Bool, msg: Str) -> Bool
     if !cond then true
     else
         print("Assertion failed (expected false):")
@@ -50,25 +50,25 @@ f assert_false(cond: Bool, msg: Str) -> Bool
 # ============================================================
 
 # Absolute value
-f abs(n: Int) -> Int
+pub f abs(n: Int) -> Int
     if n < 0 then 0 - n else n
 
 # Minimum of two integers
-f min(a: Int, b: Int) -> Int
+pub f min(a: Int, b: Int) -> Int
     if a < b then a else b
 
 # Maximum of two integers
-f max(a: Int, b: Int) -> Int
+pub f max(a: Int, b: Int) -> Int
     if a > b then a else b
 
 # Clamp a value between min and max
-f clamp(value: Int, min_val: Int, max_val: Int) -> Int
+pub f clamp(value: Int, min_val: Int, max_val: Int) -> Int
     if value < min_val then min_val
     else if value > max_val then max_val
     else value
 
 # Sign of an integer: -1, 0, or 1
-f sign(n: Int) -> Int
+pub f sign(n: Int) -> Int
     if n < 0 then 0 - 1
     else if n > 0 then 1
     else 0
@@ -76,7 +76,7 @@ f sign(n: Int) -> Int
 # Power function (integer exponent) using exponentiation by squaring
 # O(log n) operations, tail-recursive via accumulator pattern
 # For negative exponents: returns 0 for |base| > 1 (integer division rounds down)
-f pow(base: Int, exp: Int) -> Int
+pub f pow(base: Int, exp: Int) -> Int
     if exp < 0 then
         # Integer power with negative exponent
         if base == 1 then 1
@@ -87,7 +87,7 @@ f pow(base: Int, exp: Int) -> Int
         pow_acc(base, exp, 1)
 
 # Tail-recursive helper using exponentiation by squaring
-f pow_acc(base: Int, exp: Int, acc: Int) -> Int
+pub f pow_acc(base: Int, exp: Int, acc: Int) -> Int
     if exp == 0 then acc
     else if exp % 2 == 0 then
         # Even exponent: square base, halve exponent
@@ -97,37 +97,37 @@ f pow_acc(base: Int, exp: Int, acc: Int) -> Int
         pow_acc(base * base, exp / 2, acc * base)
 
 # GCD using Euclidean algorithm
-f gcd(a: Int, b: Int) -> Int
+pub f gcd(a: Int, b: Int) -> Int
     if b == 0 then abs(a)
     else gcd(b, a % b)
 
 # LCM using GCD (divide before multiply to prevent overflow)
-f lcm(a: Int, b: Int) -> Int
+pub f lcm(a: Int, b: Int) -> Int
     if a == 0 || b == 0 then 0
     else abs(a / gcd(a, b)) * abs(b)
 
 # Check if a number is even
-f is_even(n: Int) -> Bool
+pub f is_even(n: Int) -> Bool
     n % 2 == 0
 
 # Check if a number is odd
-f is_odd(n: Int) -> Bool
+pub f is_odd(n: Int) -> Bool
     n % 2 != 0
 
 # Check if a number is positive
-f is_positive(n: Int) -> Bool
+pub f is_positive(n: Int) -> Bool
     n > 0
 
 # Check if a number is negative
-f is_negative(n: Int) -> Bool
+pub f is_negative(n: Int) -> Bool
     n < 0
 
 # Check if a number is zero
-f is_zero(n: Int) -> Bool
+pub f is_zero(n: Int) -> Bool
     n == 0
 
 # Clamp a float between min and max
-f clamp_float(value: Float, min_val: Float, max_val: Float) -> Float
+pub f clamp_float(value: Float, min_val: Float, max_val: Float) -> Float
     if value < min_val then min_val
     else if value > max_val then max_val
     else value

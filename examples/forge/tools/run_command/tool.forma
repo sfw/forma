@@ -1,0 +1,90 @@
+# Forge tool protocol: args are tool_input, tool_payload, and context JSON.
+
+f json_string(value: Json) -> Str
+    json_to_value(value)
+
+f decode_arguments(source: Str) -> [Str]!Str
+    m json_parse(source)
+        Err(error) -> Err("command arguments must be JSON: " + error)
+        Ok(value) ->
+            if !json_is_array(value)
+                Err("command arguments must be a JSON array")
+            else
+                decoded := []
+                failure := ""
+                i := 0
+                wh i < json_array_len(value)
+                    m json_array_get(value, i)
+                        None -> failure = "could not decode command argument"
+                        Some(raw_argument) ->
+                            if !json_is_string(raw_argument)
+                                failure = "every command argument must be a string"
+                            else
+                                decoded = vec_push(
+                                    decoded,
+                                    json_string(raw_argument)
+                                )
+                    i = i + 1
+                if failure.len() > 0
+                    Err(failure)
+                else
+                    Ok(decoded)
+
+f decode_allowed_commands(ref context: Json) -> [Str]!Str
+    raw := m json_get_array(context, "allowed_commands")
+        Some(value) -> value
+        None -> []
+    decoded := []
+    wh raw.len() > 0
+        (rest, next) := vec_pop(raw)
+        raw = rest
+        m next
+            Some(raw_command) ->
+                decoded = vec_push(decoded, json_string(raw_command))
+            None -> decoded = decoded
+    Ok(vec_reverse(decoded))
+
+f main() -> Int
+    invocation := args()
+    if invocation.len() != 3
+        print("TOOL_ERROR: expected input, payload, and context")
+    else
+        m json_parse(str(invocation[2]))
+            Err(error) -> print("TOOL_ERROR: invalid context: " + error)
+            Ok(context) ->
+                root := m json_get_str(context, "workspace_root")
+                    Some(value) -> value
+                    None -> ""
+                timeout := m json_get_int(context, "command_timeout_ms")
+                    Some(value) -> value
+                    None -> 120000
+                output_limit := m json_get_int(
+                    context,
+                    "max_command_output_chars"
+                )
+                    Some(value) -> value
+                    None -> 100000
+                m decode_arguments(str(invocation[1]))
+                    Err(error) -> print("TOOL_ERROR: " + error)
+                    Ok(command_args) ->
+                        m decode_allowed_commands(ref context)
+                            Err(error) -> print("TOOL_ERROR: " + error)
+                            Ok(allowed) ->
+                                m process_run(
+                                    invocation[0],
+                                    command_args,
+                                    root,
+                                    map_new(),
+                                    allowed,
+                                    timeout,
+                                    output_limit
+                                )
+                                    Err(error) ->
+                                        print("TOOL_ERROR: " + error)
+                                    Ok(output) ->
+                                        print(
+                                            "exit=" + int_to_str(output.2) +
+                                                "\nstdout:\n" + output.0 +
+                                                "\nstderr:\n" + output.1
+                                        )
+    0

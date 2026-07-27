@@ -1,5 +1,8 @@
 # Installing FORMA
 
+These instructions install the Forma 0.2 prototype from source. There are no
+official binary packages yet.
+
 ## Prerequisites
 
 - **Rust** 1.85+ (edition 2024) — [rustup.rs](https://rustup.rs)
@@ -59,6 +62,7 @@ cargo check --features llvm
 ```bash
 # Check version
 ./target/release/forma --version
+# Expected: forma 0.2.0
 
 # Run a program
 echo 'f main()
@@ -76,6 +80,9 @@ for f in examples/showcase/*.forma; do
     echo "=== $(basename $f) ==="
     ./target/release/forma run "$f"
 done
+
+# Check generated documentation and version consistency
+bash scripts/check_docs.sh ./target/release/forma
 ```
 
 ## Add to PATH
@@ -97,9 +104,33 @@ forma lsp
 ```
 
 Configure your editor's LSP client to use `forma lsp` as the language server command.
+The repository also contains VS Code extension metadata in `editors/vscode/`.
+
+## Capability Safety
+
+Normal programs receive no ambient file, network, process, environment, or unsafe
+authority. Grant only what a program needs:
+
+```bash
+forma run reader.forma --allow-read
+forma run writer.forma --allow-write
+forma run client.forma --allow-network
+```
+
+Do not use `--allow-all` with untrusted code. Capability checks are not complete
+OS process isolation.
+
+## Support Boundaries
+
+The interpreter is the primary complete execution environment. `forma build`
+requires the optional LLVM feature and supports the documented Core/Native subset;
+whole-program parity remains Experimental. See `docs/profiles.md`.
 
 ## Running Tests
 
 ```bash
-cargo test
+cargo test --all-targets
+cargo clippy --all-targets -- -D warnings
+cargo fmt --all -- --check
+bash scripts/check_docs.sh
 ```

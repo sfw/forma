@@ -5,78 +5,78 @@
 # Vec[T] - Generic wrapper around arrays
 # ============================================================
 
-s Vec[T]
+pub s Vec[T]
     data: [T]
 
 # Create empty vector
-f vec_empty[T]() -> Vec[T]
+pub f vec_empty[T]() -> Vec[T]
     Vec { data: [] }
 
 # Create vector from array
-f vec_from[T](arr: [T]) -> Vec[T]
+pub f vec_from[T](arr: [T]) -> Vec[T]
     Vec { data: arr }
 
 # Create single-element vector
-f vec_single[T](item: T) -> Vec[T]
+pub f vec_single[T](item: T) -> Vec[T]
     Vec { data: vec_push([], item) }
 
 # Get length
-f vec_length[T](v: Vec[T]) -> Int
+pub f vec_length[T](v: Vec[T]) -> Int
     vec_len(v.data)
 
 # Check if empty
-f vec_is_empty[T](v: Vec[T]) -> Bool
+pub f vec_is_empty[T](v: Vec[T]) -> Bool
     vec_len(v.data) == 0
 
 # Get element at index
-f vec_at[T](v: Vec[T], idx: Int) -> T?
+pub f vec_at[T](v: Vec[T], idx: Int) -> T?
     vec_get(v.data, idx)
 
 # Get first element
-f vec_head[T](v: Vec[T]) -> T?
+pub f vec_head[T](v: Vec[T]) -> T?
     vec_first(v.data)
 
 # Get last element
-f vec_last_elem[T](v: Vec[T]) -> T?
+pub f vec_last_elem[T](v: Vec[T]) -> T?
     vec_last(v.data)
 
 # Get all elements except first (tail of list)
-f vec_tail[T](v: Vec[T]) -> Vec[T]
+pub f vec_tail[T](v: Vec[T]) -> Vec[T]
     Vec { data: vec_slice(v.data, 1, vec_len(v.data)) }
 
 # Get all elements except last (init of list)
-f vec_init[T](v: Vec[T]) -> Vec[T]
+pub f vec_init[T](v: Vec[T]) -> Vec[T]
     len := vec_len(v.data)
     if len == 0 then Vec { data: [] }
     else Vec { data: vec_slice(v.data, 0, len - 1) }
 
 # Append element (returns new vec)
-f vec_append[T](v: Vec[T], item: T) -> Vec[T]
+pub f vec_append[T](v: Vec[T], item: T) -> Vec[T]
     Vec { data: vec_push(v.data, item) }
 
 # Remove last element
-f vec_remove_last[T](v: Vec[T]) -> (Vec[T], T?)
+pub f vec_remove_last[T](v: Vec[T]) -> (Vec[T], T?)
     (new_data, removed) := vec_pop(v.data)
     (Vec { data: new_data }, removed)
 
 # Update element at index
-f vec_update[T](v: Vec[T], idx: Int, item: T) -> Vec[T]
+pub f vec_update[T](v: Vec[T], idx: Int, item: T) -> Vec[T]
     Vec { data: vec_set(v.data, idx, item) }
 
 # Concatenate two vecs
-f vec_join[T](v1: Vec[T], v2: Vec[T]) -> Vec[T]
+pub f vec_join[T](v1: Vec[T], v2: Vec[T]) -> Vec[T]
     Vec { data: vec_concat(v1.data, v2.data) }
 
 # Slice
-f vec_range[T](v: Vec[T], start: Int, end: Int) -> Vec[T]
+pub f vec_range[T](v: Vec[T], start: Int, end: Int) -> Vec[T]
     Vec { data: vec_slice(v.data, start, end) }
 
 # Reverse
-f vec_reversed[T](v: Vec[T]) -> Vec[T]
+pub f vec_reversed[T](v: Vec[T]) -> Vec[T]
     Vec { data: vec_reverse(v.data) }
 
 # To array
-f vec_to_array[T](v: Vec[T]) -> [T]
+pub f vec_to_array[T](v: Vec[T]) -> [T]
     v.data
 
 # ============================================================
@@ -84,10 +84,10 @@ f vec_to_array[T](v: Vec[T]) -> [T]
 # ============================================================
 
 # Sum all elements
-f int_vec_sum(arr: [Int]) -> Int
+pub f int_vec_sum(arr: [Int]) -> Int
     int_sum_loop(arr, 0, 0)
 
-f int_sum_loop(arr: [Int], idx: Int, acc: Int) -> Int
+pub f int_sum_loop(arr: [Int], idx: Int, acc: Int) -> Int
     if idx >= vec_len(arr) then acc
     else
         m vec_get(arr, idx)
@@ -95,10 +95,10 @@ f int_sum_loop(arr: [Int], idx: Int, acc: Int) -> Int
             None -> acc
 
 # Product of all elements
-f int_vec_product(arr: [Int]) -> Int
+pub f int_vec_product(arr: [Int]) -> Int
     int_product_loop(arr, 0, 1)
 
-f int_product_loop(arr: [Int], idx: Int, acc: Int) -> Int
+pub f int_product_loop(arr: [Int], idx: Int, acc: Int) -> Int
     if idx >= vec_len(arr) then acc
     else
         m vec_get(arr, idx)
@@ -106,14 +106,14 @@ f int_product_loop(arr: [Int], idx: Int, acc: Int) -> Int
             None -> acc
 
 # Find minimum
-f int_vec_min(arr: [Int]) -> Int?
+pub f int_vec_min(arr: [Int]) -> Int?
     if vec_len(arr) == 0 then None
     else
         m vec_first(arr)
             Some(first) -> Some(int_min_loop(arr, 1, first))
             None -> None
 
-f int_min_loop(arr: [Int], idx: Int, current: Int) -> Int
+pub f int_min_loop(arr: [Int], idx: Int, current: Int) -> Int
     if idx >= vec_len(arr) then current
     else
         m vec_get(arr, idx)
@@ -123,14 +123,14 @@ f int_min_loop(arr: [Int], idx: Int, current: Int) -> Int
             None -> current
 
 # Find maximum
-f int_vec_max(arr: [Int]) -> Int?
+pub f int_vec_max(arr: [Int]) -> Int?
     if vec_len(arr) == 0 then None
     else
         m vec_first(arr)
             Some(first) -> Some(int_max_loop(arr, 1, first))
             None -> None
 
-f int_max_loop(arr: [Int], idx: Int, current: Int) -> Int
+pub f int_max_loop(arr: [Int], idx: Int, current: Int) -> Int
     if idx >= vec_len(arr) then current
     else
         m vec_get(arr, idx)
@@ -140,10 +140,10 @@ f int_max_loop(arr: [Int], idx: Int, current: Int) -> Int
             None -> current
 
 # Count occurrences of value
-f int_vec_count(arr: [Int], target: Int) -> Int
+pub f int_vec_count(arr: [Int], target: Int) -> Int
     int_count_loop(arr, 0, 0, target)
 
-f int_count_loop(arr: [Int], idx: Int, count: Int, target: Int) -> Int
+pub f int_count_loop(arr: [Int], idx: Int, count: Int, target: Int) -> Int
     if idx >= vec_len(arr) then count
     else
         m vec_get(arr, idx)
@@ -153,10 +153,10 @@ f int_count_loop(arr: [Int], idx: Int, count: Int, target: Int) -> Int
             None -> count
 
 # Check if contains value
-f int_vec_contains(arr: [Int], target: Int) -> Bool
+pub f int_vec_contains(arr: [Int], target: Int) -> Bool
     int_contains_loop(arr, 0, target)
 
-f int_contains_loop(arr: [Int], idx: Int, target: Int) -> Bool
+pub f int_contains_loop(arr: [Int], idx: Int, target: Int) -> Bool
     if idx >= vec_len(arr) then false
     else
         m vec_get(arr, idx)
@@ -164,10 +164,10 @@ f int_contains_loop(arr: [Int], idx: Int, target: Int) -> Bool
             None -> false
 
 # Find index of value
-f int_vec_index_of(arr: [Int], target: Int) -> Int?
+pub f int_vec_index_of(arr: [Int], target: Int) -> Int?
     int_index_loop(arr, 0, target)
 
-f int_index_loop(arr: [Int], idx: Int, target: Int) -> Int?
+pub f int_index_loop(arr: [Int], idx: Int, target: Int) -> Int?
     if idx >= vec_len(arr) then None
     else
         m vec_get(arr, idx)
@@ -175,10 +175,10 @@ f int_index_loop(arr: [Int], idx: Int, target: Int) -> Int?
             None -> None
 
 # Check if all elements positive
-f int_vec_all_positive(arr: [Int]) -> Bool
+pub f int_vec_all_positive(arr: [Int]) -> Bool
     int_all_pos_loop(arr, 0)
 
-f int_all_pos_loop(arr: [Int], idx: Int) -> Bool
+pub f int_all_pos_loop(arr: [Int], idx: Int) -> Bool
     if idx >= vec_len(arr) then true
     else
         m vec_get(arr, idx)
@@ -186,10 +186,10 @@ f int_all_pos_loop(arr: [Int], idx: Int) -> Bool
             None -> true
 
 # Check if any element negative
-f int_vec_any_negative(arr: [Int]) -> Bool
+pub f int_vec_any_negative(arr: [Int]) -> Bool
     int_any_neg_loop(arr, 0)
 
-f int_any_neg_loop(arr: [Int], idx: Int) -> Bool
+pub f int_any_neg_loop(arr: [Int], idx: Int) -> Bool
     if idx >= vec_len(arr) then false
     else
         m vec_get(arr, idx)
@@ -197,10 +197,10 @@ f int_any_neg_loop(arr: [Int], idx: Int) -> Bool
             None -> false
 
 # Take first n elements
-f int_vec_take(arr: [Int], n: Int) -> [Int]
+pub f int_vec_take(arr: [Int], n: Int) -> [Int]
     int_take_loop(arr, 0, n, [])
 
-f int_take_loop(arr: [Int], idx: Int, n: Int, acc: [Int]) -> [Int]
+pub f int_take_loop(arr: [Int], idx: Int, n: Int, acc: [Int]) -> [Int]
     if idx >= n || idx >= vec_len(arr) then acc
     else
         m vec_get(arr, idx)
@@ -208,10 +208,10 @@ f int_take_loop(arr: [Int], idx: Int, n: Int, acc: [Int]) -> [Int]
             None -> acc
 
 # Drop first n elements
-f int_vec_drop(arr: [Int], n: Int) -> [Int]
+pub f int_vec_drop(arr: [Int], n: Int) -> [Int]
     int_drop_loop(arr, 0, n, [])
 
-f int_drop_loop(arr: [Int], idx: Int, n: Int, acc: [Int]) -> [Int]
+pub f int_drop_loop(arr: [Int], idx: Int, n: Int, acc: [Int]) -> [Int]
     if idx >= vec_len(arr) then acc
     else if idx < n then int_drop_loop(arr, idx + 1, n, acc)
     else
@@ -223,11 +223,11 @@ f int_drop_loop(arr: [Int], idx: Int, n: Int, acc: [Int]) -> [Int]
 # Builder pattern
 # ============================================================
 
-f vec_builder[T]() -> Vec[T]
+pub f vec_builder[T]() -> Vec[T]
     vec_empty()
 
-f vec_add[T](v: Vec[T], item: T) -> Vec[T]
+pub f vec_add[T](v: Vec[T], item: T) -> Vec[T]
     vec_append(v, item)
 
-f vec_build[T](v: Vec[T]) -> Vec[T]
+pub f vec_build[T](v: Vec[T]) -> Vec[T]
     v

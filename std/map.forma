@@ -20,17 +20,17 @@
 # ============================================================
 
 # Get a value with a default fallback
-f map_get_or[V](mp: Map[V], key: Str, default: V) -> V
+pub f map_get_or[V](mp: Map[V], key: Str, default: V) -> V
     m map_get(mp, key)
         Some(v) -> v
         None -> default
 
 # Merge two maps (second map's values override first's)
-f map_merge[V](m1: Map[V], m2: Map[V]) -> Map[V]
+pub f map_merge[V](m1: Map[V], m2: Map[V]) -> Map[V]
     keys := map_keys(m2)
     map_merge_helper(m1, m2, keys, 0)
 
-f map_merge_helper[V](result: Map[V], source: Map[V], keys: [Str], idx: Int) -> Map[V]
+pub f map_merge_helper[V](result: Map[V], source: Map[V], keys: [Str], idx: Int) -> Map[V]
     if idx >= vec_len(keys) then result
     else
         m vec_get(keys, idx)
@@ -41,11 +41,11 @@ f map_merge_helper[V](result: Map[V], source: Map[V], keys: [Str], idx: Int) -> 
             None -> result
 
 # Get entries as key-value pairs
-f map_entries[V](mp: Map[V]) -> [(Str, V)]
+pub f map_entries[V](mp: Map[V]) -> [(Str, V)]
     keys := map_keys(mp)
     map_entries_helper(mp, keys, 0, [])
 
-f map_entries_helper[V](mp: Map[V], keys: [Str], idx: Int, acc: [(Str, V)]) -> [(Str, V)]
+pub f map_entries_helper[V](mp: Map[V], keys: [Str], idx: Int, acc: [(Str, V)]) -> [(Str, V)]
     if idx >= vec_len(keys) then acc
     else
         m vec_get(keys, idx)
@@ -56,10 +56,10 @@ f map_entries_helper[V](mp: Map[V], keys: [Str], idx: Int, acc: [(Str, V)]) -> [
             None -> acc
 
 # Create map from key-value pairs
-f map_from_entries[V](entries: [(Str, V)]) -> Map[V]
+pub f map_from_entries[V](entries: [(Str, V)]) -> Map[V]
     map_from_entries_helper(entries, 0, map_new())
 
-f map_from_entries_helper[V](entries: [(Str, V)], idx: Int, acc: Map[V]) -> Map[V]
+pub f map_from_entries_helper[V](entries: [(Str, V)], idx: Int, acc: Map[V]) -> Map[V]
     if idx >= vec_len(entries) then acc
     else
         m vec_get(entries, idx)
@@ -70,11 +70,11 @@ f map_from_entries_helper[V](entries: [(Str, V)], idx: Int, acc: Map[V]) -> Map[
             None -> acc
 
 # Check if any entry satisfies predicate (on value)
-f map_any_value[V](mp: Map[V], pred: (V) -> Bool) -> Bool
+pub f map_any_value[V](mp: Map[V], pred: (V) -> Bool) -> Bool
     values := map_values(mp)
     map_any_value_helper(values, pred, 0)
 
-f map_any_value_helper[V](values: [V], pred: (V) -> Bool, idx: Int) -> Bool
+pub f map_any_value_helper[V](values: [V], pred: (V) -> Bool, idx: Int) -> Bool
     if idx >= vec_len(values) then false
     else
         m vec_get(values, idx)
@@ -82,11 +82,11 @@ f map_any_value_helper[V](values: [V], pred: (V) -> Bool, idx: Int) -> Bool
             None -> false
 
 # Check if all entries satisfy predicate (on value)
-f map_all_values[V](mp: Map[V], pred: (V) -> Bool) -> Bool
+pub f map_all_values[V](mp: Map[V], pred: (V) -> Bool) -> Bool
     values := map_values(mp)
     map_all_values_helper(values, pred, 0)
 
-f map_all_values_helper[V](values: [V], pred: (V) -> Bool, idx: Int) -> Bool
+pub f map_all_values_helper[V](values: [V], pred: (V) -> Bool, idx: Int) -> Bool
     if idx >= vec_len(values) then true
     else
         m vec_get(values, idx)
@@ -98,11 +98,11 @@ f map_all_values_helper[V](values: [V], pred: (V) -> Bool, idx: Int) -> Bool
 # ============================================================
 
 # Sum all values in an int map
-f int_map_sum_values(mp: Map[Int]) -> Int
+pub f int_map_sum_values(mp: Map[Int]) -> Int
     values := map_values(mp)
     int_array_sum(values, 0, 0)
 
-f int_array_sum(arr: [Int], idx: Int, acc: Int) -> Int
+pub f int_array_sum(arr: [Int], idx: Int, acc: Int) -> Int
     if idx >= vec_len(arr) then acc
     else
         m vec_get(arr, idx)
@@ -110,7 +110,7 @@ f int_array_sum(arr: [Int], idx: Int, acc: Int) -> Int
             None -> acc
 
 # Find max value in int map
-f int_map_max_value(mp: Map[Int]) -> Int?
+pub f int_map_max_value(mp: Map[Int]) -> Int?
     values := map_values(mp)
     if vec_len(values) == 0 then None
     else
@@ -118,7 +118,7 @@ f int_map_max_value(mp: Map[Int]) -> Int?
             Some(first) -> Some(int_array_max(values, 1, first))
             None -> None
 
-f int_array_max(arr: [Int], idx: Int, current: Int) -> Int
+pub f int_array_max(arr: [Int], idx: Int, current: Int) -> Int
     if idx >= vec_len(arr) then current
     else
         m vec_get(arr, idx)
@@ -128,7 +128,7 @@ f int_array_max(arr: [Int], idx: Int, current: Int) -> Int
             None -> current
 
 # Find min value in int map
-f int_map_min_value(mp: Map[Int]) -> Int?
+pub f int_map_min_value(mp: Map[Int]) -> Int?
     values := map_values(mp)
     if vec_len(values) == 0 then None
     else
@@ -136,7 +136,7 @@ f int_map_min_value(mp: Map[Int]) -> Int?
             Some(first) -> Some(int_array_min(values, 1, first))
             None -> None
 
-f int_array_min(arr: [Int], idx: Int, current: Int) -> Int
+pub f int_array_min(arr: [Int], idx: Int, current: Int) -> Int
     if idx >= vec_len(arr) then current
     else
         m vec_get(arr, idx)
@@ -146,11 +146,11 @@ f int_array_min(arr: [Int], idx: Int, current: Int) -> Int
             None -> current
 
 # Count entries matching a value
-f int_map_count_value(mp: Map[Int], target: Int) -> Int
+pub f int_map_count_value(mp: Map[Int], target: Int) -> Int
     values := map_values(mp)
     int_array_count(values, target, 0, 0)
 
-f int_array_count(arr: [Int], target: Int, idx: Int, count: Int) -> Int
+pub f int_array_count(arr: [Int], target: Int, idx: Int, count: Int) -> Int
     if idx >= vec_len(arr) then count
     else
         m vec_get(arr, idx)
@@ -164,11 +164,11 @@ f int_array_count(arr: [Int], target: Int, idx: Int, count: Int) -> Int
 # ============================================================
 
 # Concatenate all values with a separator
-f str_map_join_values(mp: Map[Str], sep: Str) -> Str
+pub f str_map_join_values(mp: Map[Str], sep: Str) -> Str
     values := map_values(mp)
     str_array_join(values, sep, 0, "")
 
-f str_array_join(arr: [Str], sep: Str, idx: Int, acc: Str) -> Str
+pub f str_array_join(arr: [Str], sep: Str, idx: Int, acc: Str) -> Str
     if idx >= vec_len(arr) then acc
     else
         m vec_get(arr, idx)

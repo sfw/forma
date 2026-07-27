@@ -1,0 +1,166 @@
+# Offline checks for Forge infrastructure. This does not emulate an agent.
+
+us model
+us settings
+us provider
+us memory
+us graph
+us kernel
+us workspace
+
+f sample_response() -> Json
+    source := "{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":12,\"output_tokens\":8},\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"{\\\"outcome\\\":\\\"completed\\\",\\\"artifact\\\":\\\"review.md\\\",\\\"summary\\\":\\\"done\\\",\\\"memory\\\":\\\"decision\\\",\\\"verification_disposition\\\":\\\"not_applicable\\\",\\\"failure_count\\\":0,\\\"severity_score\\\":0,\\\"failure_fingerprint\\\":\\\"\\\",\\\"evidence\\\":\\\"checked\\\",\\\"tool_name\\\":\\\"\\\",\\\"tool_input\\\":\\\"\\\",\\\"tool_payload\\\":\\\"\\\"}\"}]}]}"
+    m json_parse(source)
+        Ok(value) -> value
+        Err(_) -> json_object()
+
+f run_checks() -> Int
+    passed := 0
+    implementation_role := "implementation agent"
+    write_tool := "write_file"
+    run_id := "run-1"
+    m file_read("examples/forge/forge.settings.toml")
+        Err(_) -> print("FAIL: settings file")
+        Ok(source) ->
+            m load_settings(source)
+                Err(_) -> print("FAIL: settings decode")
+                Ok(settings) ->
+                    passed = passed + 1
+                    if agent_allows_tool(
+                        ref settings,
+                        ref implementation_role,
+                        ref write_tool
+                    )
+                        passed = passed + 1
+                    request := build_response_request(
+                        ref settings,
+                        ref implementation_role,
+                        "test prompt"
+                    )
+                    rendered := json_stringify(request)
+                    if str_contains(rendered, "json_schema") && str_contains(rendered, "compact_threshold")
+                        passed = passed + 1
+                    if settings.max_parallel_nodes == 3 && settings.provider_timeout_ms == 120000 && settings.max_total_tokens == 500000
+                        passed = passed + 1
+                    if forge_settings_digest(ref settings).len() == 64
+                        passed = passed + 1
+                    graph_source := "{\"id\":\"digest-check\"}"
+                    if forge_execution_digest(
+                        ref settings,
+                        ref graph_source
+                    ) != forge_settings_digest(ref settings)
+                        passed = passed + 1
+
+    result := decode_provider_response(sample_response())
+    if agent_outcome_for_check(ref result) == "completed"
+        passed = passed + 1
+    if agent_artifact_for_check(ref result) == "review.md"
+        passed = passed + 1
+    if result.input_tokens == 12 && result.output_tokens == 8
+        passed = passed + 1
+
+    m db_open_memory()
+        Err(_) -> print("FAIL: SQLite open")
+        Ok(db) ->
+            m initialize_memory(ref db, false)
+                Some(_) -> print("FAIL: SQLite schema")
+                None ->
+                    passed = passed + 1
+                    create_run(ref db, str(run_id), "goal", "settings")
+                    remember(
+                        ref db,
+                        str(run_id),
+                        "inventory",
+                        "repository analyst",
+                        "response",
+                        "found compiler sources",
+                        "resp_1",
+                        12,
+                        8
+                    )
+                    recall := recall_context(ref db, ref run_id, 4)
+                    if str_contains(recall, "found compiler sources")
+                        passed = passed + 1
+                    (source, through, chars) := uncompacted_context(
+                        ref db,
+                        ref run_id,
+                        0
+                    )
+                    if chars > 0 && through > 0
+                        passed = passed + 1
+                    save_compaction(
+                        ref db,
+                        str(run_id),
+                        through,
+                        "durable summary",
+                        "resp_2",
+                        4,
+                        3
+                    )
+                    if latest_compaction(ref db, ref run_id) == "durable summary"
+                        passed = passed + 1
+                    if run_token_usage(ref db, ref run_id) == 27
+                        passed = passed + 1
+                    m load_run_created_at_ms(ref db, ref run_id)
+                        Ok(created_at) ->
+                            if created_at > 0
+                                passed = passed + 1
+                        Err(_) -> print("FAIL: durable run timestamp")
+                    durable_events := [
+                        audit_event(0, 0, "", "run_started", "durable"),
+                        audit_event(1, 1, "inventory", "node_started", "")
+                    ]
+                    persist_events(ref db, str(run_id), ref durable_events)
+                    m load_events(ref db, ref run_id)
+                        Ok(loaded) ->
+                            if (
+                                loaded.len() == 2 &&
+                                loaded[1].kind == "node_started"
+                            )
+                                passed = passed + 1
+                        Err(_) -> print("FAIL: durable event journal")
+            db_close(db)
+
+    nodes := [
+        process_node("root", "coordinator", "none", 1, true),
+        process_node("review", "reviewer", "none", 1, true)
+    ]
+    edges := [process_edge("root", "review", "requires_success")]
+    workflow := WorkflowGraph {
+        id: "contract-check",
+        authority: [],
+        nodes: nodes,
+        edges: edges
+    }
+    m validate_graph(ref workflow)
+        None -> passed = passed + 1
+        Some(_) -> print("FAIL: contracted graph")
+
+    state := initial_state(ref workflow, "contract-run")
+    if workflow_event_count(ref state) == 1 && workflow_event_sequence_is_valid(ref state)
+        passed = passed + 1
+    state = append_event(state, "root", "contract_checked", "positive path")
+    if workflow_event_count(ref state) == 2 && workflow_event_sequence_is_valid(ref state)
+        passed = passed + 1
+    state = advance_logical_time(state, 3)
+    if state.logical_time == 3
+        passed = passed + 1
+    state.status = "awaiting_intervention"
+    state = append_event(state, "", "run_paused", "offline resume check")
+    if replay_matches(ref workflow, ref state)
+        passed = passed + 1
+    bounded := truncate_text("abcdefghijklmnopqrstuvwxyz", 12)
+    if str_len(bounded) == 12
+        passed = passed + 1
+
+    print("Forge infrastructure checks: " + int_to_str(passed) + "/22")
+    if passed == 22 then 0 else 1
+
+f agent_outcome_for_check(ref result: AgentResult) -> Str
+    str(result.outcome)
+
+f agent_artifact_for_check(ref result: AgentResult) -> Str
+    str(result.artifact)
+
+f main() -> Int
+    run_checks()

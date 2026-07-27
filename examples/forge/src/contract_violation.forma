@@ -1,0 +1,8 @@
+# Negative black-box fixture: proves Forge struct invariants are enforced at
+# construction by default.
+
+us model
+
+f main() -> Int
+    event := audit_event(-1, 0, "", "invalid", "negative sequence")
+    event.sequence

@@ -1,0 +1,100 @@
+# Bounded workspace context collection for hosted agents.
+
+us model
+
+pub f ignored_directory(ref path: Str) -> Bool
+    str_contains(path, "/.git") ||
+        str_contains(path, "/target") ||
+        str_contains(path, "/node_modules") ||
+        str_contains(path, "/.forge")
+
+pub f useful_file(ref path: Str) -> Bool
+    m path_extension(path)
+        None -> false
+        Some(extension) ->
+            extension == "forma" ||
+                extension == "rs" ||
+                extension == "md" ||
+                extension == "toml" ||
+                extension == "json" ||
+                extension == "yml" ||
+                extension == "yaml"
+
+@pre(max_files > 0, "workspace file budget must be positive")
+@pre(depth >= 0, "directory depth must be non-negative")
+@pre(files.len() <= max_files, "initial files exceed workspace budget")
+@post(result.len() >= old(files).len())
+@post(result.len() <= max_files)
+@post(is_prefix(old(files), result))
+pub f discover_files(
+    path: Str,
+    files: [Str],
+    max_files: Int,
+    depth: Int
+) -> [Str]
+    discovered := files
+    if depth > 16 || vec_len(discovered) >= max_files || ignored_directory(ref path)
+        discovered
+    else
+        m dir_list(path)
+            Err(_) -> discovered
+            Ok(entries) ->
+                i := 0
+                wh i < vec_len(entries) && vec_len(discovered) < max_files
+                    entry := str(entries[i])
+                    if file_is_dir(entry)
+                        discovered = discover_files(
+                            entry,
+                            discovered,
+                            max_files,
+                            depth + 1
+                        )
+                    else if file_is_file(entry) && useful_file(ref entry)
+                        discovered = vec_push(discovered, entry)
+                    i = i + 1
+                discovered
+
+@pre(limit >= 0, "text limit must be non-negative")
+@post(result.len() <= limit)
+@post(old(value).len() <= limit => result == old(value))
+pub f truncate_text(value: Str, limit: Int) -> Str
+    if str_len(value) <= limit then value
+    else
+        marker := "\n[truncated]"
+        if limit <= str_len(marker)
+            str_slice(marker, 0, limit)
+        else str_slice(value, 0, limit - str_len(marker)) + marker
+
+@pre(settings.max_workspace_files > 0)
+@pre(settings.max_file_chars > 0)
+@pre(settings.max_workspace_context_chars > settings.workspace_root.len())
+@post(result.len() <= settings.max_workspace_context_chars)
+@post(result.contains(settings.workspace_root))
+pub f workspace_context(ref settings: ForgeSettings) -> Str
+    remaining_files := discover_files(
+        str(settings.workspace_root),
+        [],
+        settings.max_workspace_files,
+        0
+    )
+    context := "Workspace: " + settings.workspace_root
+    wh vec_len(remaining_files) > 0 && str_len(context) < settings.max_workspace_context_chars
+        (rest, next) := vec_pop(remaining_files)
+        remaining_files = rest
+        m next
+            None -> context = context
+            Some(file) ->
+                m file_read(file)
+                    Ok(content) ->
+                        header := "\n\n--- " + file + " ---\n"
+                        remaining := settings.max_workspace_context_chars -
+                            str_len(context)
+                        content_budget := remaining - str_len(header)
+                        per_file := if content_budget < settings.max_file_chars
+                            content_budget
+                        else settings.max_file_chars
+                        if per_file > 0
+                            context = context + header +
+                                truncate_text(content, per_file)
+                    Err(_) -> context = context
+    context

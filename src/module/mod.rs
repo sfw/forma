@@ -5,4 +5,4 @@
 
 mod loader;
 
-pub use loader::{LoadedModule, ModuleError, ModuleLoader};
+pub use loader::{LoadedModule, ModuleError, ModuleId, ModuleLoader};

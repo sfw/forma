@@ -11,7 +11,7 @@ f vec_sum(arr: [Int]) -> Int
 f vec_is_empty(arr: [Int]) -> Bool
     vec_len(arr) == 0
 
-f vec_has(arr: [Int], target: Int) -> Bool
+f vec_has(ref arr: [Int], target: Int) -> Bool
     found := false
     for x in arr
         if x == target then found = true else found = found
@@ -113,7 +113,7 @@ f test_vec_reverse() -> Bool
 # Test vec has helper
 f test_vec_has() -> Bool
     v := [1, 2, 3, 4, 5]
-    vec_has(v, 3) && !vec_has(v, 99)
+    vec_has(ref v, 3) && !vec_has(ref v, 99)
 
 # Test vec sum helper
 f test_vec_sum() -> Bool

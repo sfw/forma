@@ -52,6 +52,16 @@ impl std::fmt::Display for TypeError {
 
 impl std::error::Error for TypeError {}
 
+fn fixed_array_length(expr: &Expr) -> Result<usize, &'static str> {
+    let ExprKind::Literal(literal) = &expr.kind else {
+        return Err("length must be a non-negative integer literal");
+    };
+    let LiteralKind::Int(value) = literal.kind else {
+        return Err("length must be a non-negative integer literal");
+    };
+    usize::try_from(value).map_err(|_| "length is negative or exceeds the target size limit")
+}
+
 /// Function info for tracking default parameters.
 #[derive(Debug, Clone)]
 pub struct FunctionInfo {
@@ -241,6 +251,26 @@ impl TypeEnv {
                 vars: vec![print_var],
                 ty: Ty::Fn(vec![Ty::Var(print_var)], Box::new(Ty::Unit)),
             },
+        );
+
+        for name in ["debug", "info", "error"] {
+            let value = TypeVar::fresh();
+            env.bindings.insert(
+                name.to_string(),
+                TypeScheme {
+                    vars: vec![value],
+                    ty: Ty::Fn(vec![Ty::Var(value)], Box::new(Ty::Unit)),
+                },
+            );
+        }
+
+        env.bindings.insert(
+            "i32".to_string(),
+            TypeScheme::mono(Ty::Fn(vec![Ty::Int], Box::new(Ty::I32))),
+        );
+        env.bindings.insert(
+            "i64".to_string(),
+            TypeScheme::mono(Ty::Fn(vec![Ty::Int], Box::new(Ty::I64))),
         );
 
         // str: T -> Str (convert any value to string)
@@ -1490,6 +1520,30 @@ impl TypeEnv {
             },
         );
 
+        // toml_parse: Str -> Result[Json, Str]
+        env.bindings.insert(
+            "toml_parse".to_string(),
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str],
+                    Box::new(Ty::Result(Box::new(Ty::Json), Box::new(Ty::Str))),
+                ),
+            },
+        );
+
+        // toml_stringify: Json -> Result[Str, Str]
+        env.bindings.insert(
+            "toml_stringify".to_string(),
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Json],
+                    Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str))),
+                ),
+            },
+        );
+
         // json_stringify: Json -> Str
         env.bindings.insert(
             "json_stringify".to_string(),
@@ -2349,6 +2403,29 @@ impl TypeEnv {
             },
         );
 
+        // Structured, bounded process execution without a shell or ambient env.
+        env.bindings.insert(
+            "process_run".to_string(),
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![
+                        Ty::Str,
+                        Ty::List(Box::new(Ty::Str)),
+                        Ty::Str,
+                        Ty::Named(TypeId::new("Map"), vec![Ty::Str]),
+                        Ty::List(Box::new(Ty::Str)),
+                        Ty::Int,
+                        Ty::Int,
+                    ],
+                    Box::new(Ty::Result(
+                        Box::new(Ty::Tuple(vec![Ty::Str, Ty::Str, Ty::Int])),
+                        Box::new(Ty::Str),
+                    )),
+                ),
+            },
+        );
+
         // env_set: (Str, Str) -> ()
         env.bindings.insert(
             "env_set".to_string(),
@@ -2498,6 +2575,18 @@ impl TypeEnv {
                 vars: vec![],
                 ty: Ty::Fn(
                     vec![Ty::Str],
+                    Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str))),
+                ),
+            },
+        );
+
+        // path_resolve_within: (root, relative) -> Result[absolute, error]
+        env.bindings.insert(
+            "path_resolve_within".to_string(),
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str, Ty::Str],
                     Box::new(Ty::Result(Box::new(Ty::Str), Box::new(Ty::Str))),
                 ),
             },
@@ -2678,6 +2767,59 @@ impl TypeEnv {
                 vars: vec![],
                 ty: Ty::Fn(
                     vec![Ty::Str, Ty::Json],
+                    Box::new(Ty::Result(
+                        Box::new(Ty::Tuple(vec![
+                            Ty::Int,
+                            Ty::Str,
+                            Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str)),
+                        ])),
+                        Box::new(Ty::Str),
+                    )),
+                ),
+            },
+        );
+
+        // http_request_json:
+        // (Str, Str, Json, {Str: Str}) -> Result[(Int, Str, {Str: Str}), Str]
+        env.bindings.insert(
+            "http_request_json".to_string(),
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![
+                        Ty::Str,
+                        Ty::Str,
+                        Ty::Json,
+                        Ty::Named(TypeId::new("Map"), vec![Ty::Str]),
+                    ],
+                    Box::new(Ty::Result(
+                        Box::new(Ty::Tuple(vec![
+                            Ty::Int,
+                            Ty::Str,
+                            Ty::Map(Box::new(Ty::Str), Box::new(Ty::Str)),
+                        ])),
+                        Box::new(Ty::Str),
+                    )),
+                ),
+            },
+        );
+
+        // http_request:
+        // (Str, Str, Str, {Str: Str}, Int, Bool)
+        //   -> Result[(Int, Str, {Str: Str}), Str]
+        env.bindings.insert(
+            "http_request".to_string(),
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![
+                        Ty::Str,
+                        Ty::Str,
+                        Ty::Str,
+                        Ty::Named(TypeId::new("Map"), vec![Ty::Str]),
+                        Ty::Int,
+                        Ty::Bool,
+                    ],
                     Box::new(Ty::Result(
                         Box::new(Ty::Tuple(vec![
                             Ty::Int,
@@ -3649,7 +3791,7 @@ impl TypeEnv {
             },
         );
 
-        // ===== SQLite database builtins =====
+        // ===== SQLite and PostgreSQL database builtins =====
         // db_open: Str -> Result[Database, Str]
         env.bindings.insert(
             "db_open".to_string(),
@@ -3668,6 +3810,19 @@ impl TypeEnv {
                 vars: vec![],
                 ty: Ty::Fn(
                     vec![],
+                    Box::new(Ty::Result(Box::new(Ty::Database), Box::new(Ty::Str))),
+                ),
+            },
+        );
+        // db_connect_postgres: Str -> Result[Database, Str]
+        // The connection URL should be obtained from env_get rather than stored
+        // directly in source or settings.
+        env.bindings.insert(
+            "db_connect_postgres".to_string(),
+            TypeScheme {
+                vars: vec![],
+                ty: Ty::Fn(
+                    vec![Ty::Str],
                     Box::new(Ty::Result(Box::new(Ty::Database), Box::new(Ty::Str))),
                 ),
             },
@@ -4489,6 +4644,8 @@ pub struct InferenceEngine {
     impl_self_type: Option<Ty>,
     /// Track where symbols are defined for LSP
     symbol_locations: HashMap<String, (Span, super::checker::DefinitionKind)>,
+    /// Finalizable inferred type for every successfully checked expression.
+    expression_types: HashMap<Span, Ty>,
     /// Linear/affine variable tracking: maps variable name to tracking info
     linear_tracking: HashMap<String, LinearVarInfo>,
 }
@@ -4503,6 +4660,7 @@ impl InferenceEngine {
             builtin_methods: HashMap::new(),
             impl_self_type: None,
             symbol_locations: HashMap::new(),
+            expression_types: HashMap::new(),
             linear_tracking: HashMap::new(),
         };
         engine.register_builtin_methods();
@@ -4518,6 +4676,7 @@ impl InferenceEngine {
             builtin_methods: HashMap::new(),
             impl_self_type: None,
             symbol_locations: HashMap::new(),
+            expression_types: HashMap::new(),
             linear_tracking: HashMap::new(),
         };
         engine.register_builtin_methods();
@@ -4934,18 +5093,23 @@ impl InferenceEngine {
     /// - For Vec[T]: the element type T
     /// - For Map[K,V]: the key and value types (K, V)
     /// - For primitives: empty
-    fn lookup_method(&self, ty: &Ty, method_name: &str) -> Option<(MethodSignature, Vec<Ty>)> {
+    fn lookup_method(
+        &self,
+        ty: &Ty,
+        method_name: &str,
+    ) -> Result<Option<(MethodSignature, Vec<Ty>)>, Vec<String>> {
         let (type_category, elem_types) = self.classify_type_for_method(ty);
 
         // Look up in builtin methods
         let key = (type_category, method_name.to_string());
         if let Some(sig) = self.builtin_methods.get(&key) {
-            return Some((sig.clone(), elem_types));
+            return Ok(Some((sig.clone(), elem_types)));
         }
 
-        // Check trait definitions for matching method names.
-        // If a trait defines a method with this name, return its signature.
-        // This enables method calls on types that implement the trait.
+        // Trait lookup must never depend on HashMap/source iteration order.
+        // Until import-qualified trait scopes are represented explicitly, an
+        // unqualified collision is diagnosed instead of choosing arbitrarily.
+        let mut candidates = Vec::new();
         for trait_info in self.env.traits.values() {
             for method in &trait_info.methods {
                 if method.name == method_name {
@@ -4954,12 +5118,16 @@ impl InferenceEngine {
                         return_type: method.return_type.clone(),
                         uses_receiver_type: false,
                     };
-                    return Some((sig, elem_types));
+                    candidates.push((trait_info.name.clone(), sig));
                 }
             }
         }
-
-        None
+        candidates.sort_by(|left, right| left.0.cmp(&right.0));
+        match candidates.len() {
+            0 => Ok(None),
+            1 => Ok(Some((candidates.remove(0).1, elem_types))),
+            _ => Err(candidates.into_iter().map(|(name, _)| name).collect()),
+        }
     }
 
     /// Classify a type for method lookup, returning the category name and element types.
@@ -5466,6 +5634,30 @@ impl InferenceEngine {
     /// Collect a function signature into the environment.
     fn collect_function_sig(&mut self, item: &Item) -> Result<(), TypeError> {
         match &item.kind {
+            ItemKind::Struct(structure) if !structure.invariants.is_empty() => {
+                let crate::parser::StructKind::Named(fields) = &structure.kind else {
+                    return Err(TypeError::new(
+                        "struct invariants currently require named fields",
+                        structure.span,
+                    ));
+                };
+                let mut invariant_env = self.env.child();
+                for field in fields {
+                    let ty = self.ast_type_to_ty(&field.ty)?;
+                    invariant_env.insert(field.name.name.clone(), TypeScheme::mono(ty));
+                }
+                let old_env = std::mem::replace(&mut self.env, invariant_env);
+                let checked = (|| {
+                    for invariant in &structure.invariants {
+                        let invariant_type = self.infer_expr(&invariant.condition)?;
+                        self.unifier
+                            .unify(&invariant_type, &Ty::Bool, invariant.span)?;
+                    }
+                    Ok(())
+                })();
+                self.env = old_env;
+                checked?;
+            }
             ItemKind::Function(f) => {
                 // Set up type parameters for generic functions
                 let old_type_params = std::mem::take(&mut self.type_params);
@@ -5747,6 +5939,12 @@ impl InferenceEngine {
 
     /// Infer the type of an expression.
     pub fn infer_expr(&mut self, expr: &Expr) -> Result<Ty, TypeError> {
+        let ty = self.infer_expr_inner(expr)?;
+        self.expression_types.insert(expr.span, ty.clone());
+        Ok(ty)
+    }
+
+    fn infer_expr_inner(&mut self, expr: &Expr) -> Result<Ty, TypeError> {
         match &expr.kind {
             ExprKind::Literal(lit) => self.infer_literal(&lit.kind, expr.span),
 
@@ -6011,14 +6209,24 @@ impl InferenceEngine {
                 let resolved_ty = receiver_ty.apply(&self.unifier.subst);
 
                 // Look up the method based on receiver type
-                let (method_sig, elem_types) = self
-                    .lookup_method(&resolved_ty, &method.name)
-                    .ok_or_else(|| {
-                        TypeError::new(
-                            format!("type {} has no method '{}'", resolved_ty, method.name),
-                            method.span,
-                        )
-                    })?;
+                let method_lookup =
+                    self.lookup_method(&resolved_ty, &method.name)
+                        .map_err(|traits| {
+                            TypeError::new(
+                                format!(
+                                    "ambiguous method '{}'; candidates are traits {}",
+                                    method.name,
+                                    traits.join(", ")
+                                ),
+                                method.span,
+                            )
+                        })?;
+                let (method_sig, elem_types) = method_lookup.ok_or_else(|| {
+                    TypeError::new(
+                        format!("type {} has no method '{}'", resolved_ty, method.name),
+                        method.span,
+                    )
+                })?;
 
                 // Infer argument types
                 let arg_types: Vec<Ty> = args
@@ -6086,6 +6294,13 @@ impl InferenceEngine {
                 let base_ty = self.infer_expr(base)?;
                 let index_ty = self.infer_expr(index)?;
 
+                // Fixed arrays carry their length in the type and should not be
+                // coerced to dynamic lists merely to support indexing.
+                if let Ty::Array(elem, _) = base_ty.apply(&self.unifier.subst) {
+                    self.unifier.unify(&index_ty, &Ty::Int, expr.span)?;
+                    return Ok(*elem);
+                }
+
                 // For list/array indexing — use checkpoint to avoid corrupting
                 // substitution state if this speculative unification fails
                 let elem_ty = Ty::fresh_var();
@@ -6126,7 +6341,10 @@ impl InferenceEngine {
                 let elem_ty = self.infer_expr(elem)?;
                 let count_ty = self.infer_expr(count)?;
                 self.unifier.unify(&count_ty, &Ty::Int, expr.span)?;
-                Ok(Ty::List(Box::new(elem_ty)))
+                let len = fixed_array_length(count).map_err(|message| {
+                    TypeError::new(format!("invalid fixed-array length: {message}"), count.span)
+                })?;
+                Ok(Ty::Array(Box::new(elem_ty), len))
             }
 
             ExprKind::MapOrSet(entries) => {
@@ -7070,6 +7288,12 @@ impl InferenceEngine {
                     "Str" | "String" => Ok(Ty::Str),
                     "Unit" => Ok(Ty::Unit),
                     "Json" => Ok(Ty::Json),
+                    // FORGE-RUST-GAP: FRG-005. These resource names are part of
+                    // the public builtin surface and must remain usable in
+                    // source-level function signatures.
+                    "Database" => Ok(Ty::Database),
+                    "Statement" => Ok(Ty::Statement),
+                    "Row" => Ok(Ty::DbRow),
                     _ => Ok(Ty::Named(TypeId::new(name), args)),
                 }
             }
@@ -7096,10 +7320,12 @@ impl InferenceEngine {
                 let elem_ty = self.ast_type_to_ty(elem)?;
                 Ok(Ty::Set(Box::new(elem_ty)))
             }
-            AstTypeKind::Array(elem, _size) => {
+            AstTypeKind::Array(elem, size) => {
                 let elem_ty = self.ast_type_to_ty(elem)?;
-                // For now, treat as list since size is an expression
-                Ok(Ty::List(Box::new(elem_ty)))
+                let len = fixed_array_length(size).map_err(|message| {
+                    TypeError::new(format!("invalid fixed-array length: {message}"), size.span)
+                })?;
+                Ok(Ty::Array(Box::new(elem_ty), len))
             }
             AstTypeKind::Option(inner) => {
                 let inner_ty = self.ast_type_to_ty(inner)?;
@@ -7201,6 +7427,10 @@ impl InferenceEngine {
         name: &str,
     ) -> Option<(Span, super::checker::DefinitionKind)> {
         self.symbol_locations.get(name).copied()
+    }
+
+    pub fn expression_types(&self) -> &HashMap<Span, Ty> {
+        &self.expression_types
     }
 
     /// Check whether an expression is a "place" (lvalue) that can be passed by reference.
