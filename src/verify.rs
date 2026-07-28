@@ -1812,7 +1812,10 @@ mod tests {
 
         let directory = tempfile::tempdir().unwrap();
         let solver = directory.path().join("solver");
-        std::fs::write(&solver, "#!/bin/sh\nsleep 10\n").unwrap();
+        // Use shell builtins so the fixture cannot exit early because an
+        // external `sleep` utility is missing, interrupted, or behaves
+        // differently on a CI runner.
+        std::fs::write(&solver, "#!/bin/sh\nwhile :; do :; done\n").unwrap();
         let mut permissions = std::fs::metadata(&solver).unwrap().permissions();
         permissions.set_mode(0o700);
         std::fs::set_permissions(&solver, permissions).unwrap();
@@ -1827,12 +1830,15 @@ mod tests {
         let result = run_solver_with_timeout(
             &obligation,
             solver.to_str().unwrap(),
-            Duration::from_millis(25),
+            Duration::from_millis(100),
         );
-        assert!(matches!(
-            result,
-            FormalResult::Unknown(reason) if reason.contains("terminated")
-        ));
+        assert!(
+            matches!(
+                &result,
+                FormalResult::Unknown(reason) if reason.contains("terminated")
+            ),
+            "unexpected timeout result: {result:?}"
+        );
     }
 
     #[cfg(unix)]
