@@ -4,7 +4,7 @@
 # Requires sorted array, returns index or -1 if not found
 
 # Iterative binary search
-f binary_search(arr: [Int], target: Int) -> Int
+f binary_search(ref arr: [Int], target: Int) -> Int
     left := 0
     right := len(arr) - 1
 
@@ -21,7 +21,7 @@ f binary_search(arr: [Int], target: Int) -> Int
     0 - 1  # Not found
 
 # Recursive binary search
-f binary_search_rec(arr: [Int], target: Int, left: Int, right: Int) -> Int
+f binary_search_rec(ref arr: [Int], target: Int, left: Int, right: Int) -> Int
     if left > right then
         0 - 1  # Not found
     else
@@ -29,12 +29,12 @@ f binary_search_rec(arr: [Int], target: Int, left: Int, right: Int) -> Int
         if arr[mid] == target then
             mid
         else if arr[mid] < target then
-            binary_search_rec(arr, target, mid + 1, right)
+            binary_search_rec(ref arr, target, mid + 1, right)
         else
-            binary_search_rec(arr, target, left, mid - 1)
+            binary_search_rec(ref arr, target, left, mid - 1)
 
 # Find first occurrence (for duplicates)
-f binary_search_first(arr: [Int], target: Int) -> Int
+f binary_search_first(ref arr: [Int], target: Int) -> Int
     left := 0
     right := len(arr) - 1
     result := 0 - 1
@@ -52,7 +52,7 @@ f binary_search_first(arr: [Int], target: Int) -> Int
     result
 
 # Find last occurrence (for duplicates)
-f binary_search_last(arr: [Int], target: Int) -> Int
+f binary_search_last(ref arr: [Int], target: Int) -> Int
     left := 0
     right := len(arr) - 1
     result := 0 - 1
@@ -75,20 +75,20 @@ f main()
 
     print("")
     print("Basic search:")
-    print(f"Search for 7: index {binary_search(arr, 7)}")    # 3
-    print(f"Search for 1: index {binary_search(arr, 1)}")    # 0
-    print(f"Search for 19: index {binary_search(arr, 19)}")  # 9
-    print(f"Search for 8: index {binary_search(arr, 8)}")    # -1
+    print(f"Search for 7: index {binary_search(ref arr, 7)}")    # 3
+    print(f"Search for 1: index {binary_search(ref arr, 1)}")    # 0
+    print(f"Search for 19: index {binary_search(ref arr, 19)}")  # 9
+    print(f"Search for 8: index {binary_search(ref arr, 8)}")    # -1
 
     print("")
     print("Recursive search:")
-    print(f"Search for 11: index {binary_search_rec(arr, 11, 0, len(arr) - 1)}")  # 5
+    print(f"Search for 11: index {binary_search_rec(ref arr, 11, 0, len(arr) - 1)}")  # 5
 
     print("")
     # Array with duplicates
     arr2 := [1, 2, 2, 2, 3, 4, 4, 5]
     print("Array with duplicates: [1, 2, 2, 2, 3, 4, 4, 5]")
-    print(f"First occurrence of 2: index {binary_search_first(arr2, 2)}")  # 1
-    print(f"Last occurrence of 2: index {binary_search_last(arr2, 2)}")    # 3
-    print(f"First occurrence of 4: index {binary_search_first(arr2, 4)}")  # 5
-    print(f"Last occurrence of 4: index {binary_search_last(arr2, 4)}")    # 6
+    print(f"First occurrence of 2: index {binary_search_first(ref arr2, 2)}")  # 1
+    print(f"Last occurrence of 2: index {binary_search_last(ref arr2, 2)}")    # 3
+    print(f"First occurrence of 4: index {binary_search_first(ref arr2, 4)}")  # 5
+    print(f"Last occurrence of 4: index {binary_search_last(ref arr2, 4)}")    # 6

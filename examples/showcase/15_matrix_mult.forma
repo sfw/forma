@@ -7,7 +7,7 @@
 # A is m x n, B is n x p, result C is m x p
 
 # Get element at (row, col) in matrix with given column count
-f mat_get(mat: [Int], row: Int, col: Int, cols: Int) -> Int
+f mat_get(ref mat: [Int], row: Int, col: Int, cols: Int) -> Int
     mat[row * cols + col]
 
 # Set element at (row, col)
@@ -15,7 +15,7 @@ f mat_set(ref mut mat: [Int], row: Int, col: Int, cols: Int, value: Int) -> Unit
     mat[row * cols + col] := value
 
 # Multiply matrices A (m x n) and B (n x p), result in C (m x p)
-f mat_mult(a: [Int], b: [Int], ref mut c: [Int], m: Int, n: Int, p: Int) -> Unit
+f mat_mult(ref a: [Int], ref b: [Int], ref mut c: [Int], m: Int, n: Int, p: Int) -> Unit
     i := 0
     wh i < m
         j := 0
@@ -23,14 +23,14 @@ f mat_mult(a: [Int], b: [Int], ref mut c: [Int], m: Int, n: Int, p: Int) -> Unit
             sum := 0
             k := 0
             wh k < n
-                sum := sum + mat_get(a, i, k, n) * mat_get(b, k, j, p)
+                sum := sum + mat_get(ref a, i, k, n) * mat_get(ref b, k, j, p)
                 k := k + 1
             mat_set(ref mut c, i, j, p, sum)
             j := j + 1
         i := i + 1
 
 # Print matrix
-f mat_print(mat: [Int], rows: Int, cols: Int, name: String) -> Unit
+f mat_print(ref mat: [Int], rows: Int, cols: Int, name: String) -> Unit
     print(f"{name}:")
     r := 0
     wh r < rows
@@ -39,7 +39,7 @@ f mat_print(mat: [Int], rows: Int, cols: Int, name: String) -> Unit
         wh c < cols
             if c > 0 then
                 line := line + ", "
-            val := mat_get(mat, r, c, cols)
+            val := mat_get(ref mat, r, c, cols)
             line := line + f"{val}"
             c := c + 1
         line := line + "]"
@@ -47,13 +47,13 @@ f mat_print(mat: [Int], rows: Int, cols: Int, name: String) -> Unit
         r := r + 1
 
 # Identity matrix check
-f mat_is_identity(mat: [Int], n: Int) -> Bool
+f mat_is_identity(ref mat: [Int], n: Int) -> Bool
     i := 0
     wh i < n
         j := 0
         wh j < n
             expected := if i == j then 1 else 0
-            if mat_get(mat, i, j, n) != expected then
+            if mat_get(ref mat, i, j, n) != expected then
                 return false
             j := j + 1
         i := i + 1
@@ -68,13 +68,13 @@ f main()
     b1 := [7, 8, 9, 10, 11, 12]  # 3x2
     c1 := [0, 0, 0, 0]  # 2x2 result
 
-    mat_print(a1, 2, 3, "A")
+    mat_print(ref a1, 2, 3, "A")
     print("")
-    mat_print(b1, 3, 2, "B")
+    mat_print(ref b1, 3, 2, "B")
     print("")
 
-    mat_mult(a1, b1, ref mut c1, 2, 3, 2)
-    mat_print(c1, 2, 2, "A * B")
+    mat_mult(ref a1, ref b1, ref mut c1, 2, 3, 2)
+    mat_print(ref c1, 2, 2, "A * B")
 
     print("")
     print("=" * 40)
@@ -88,13 +88,13 @@ f main()
     b2 := [9, 8, 7, 6, 5, 4, 3, 2, 1]  # 3x3
     c2 := [0, 0, 0, 0, 0, 0, 0, 0, 0]  # 3x3 result
 
-    mat_print(a2, 3, 3, "A")
+    mat_print(ref a2, 3, 3, "A")
     print("")
-    mat_print(b2, 3, 3, "B")
+    mat_print(ref b2, 3, 3, "B")
     print("")
 
-    mat_mult(a2, b2, ref mut c2, 3, 3, 3)
-    mat_print(c2, 3, 3, "A * B")
+    mat_mult(ref a2, ref b2, ref mut c2, 3, 3, 3)
+    mat_print(ref c2, 3, 3, "A * B")
 
     print("")
     print("=" * 40)
@@ -107,9 +107,9 @@ f main()
     identity := [1, 0, 0, 0, 1, 0, 0, 0, 1]  # 3x3 identity
     result := [0, 0, 0, 0, 0, 0, 0, 0, 0]
 
-    mat_mult(a2, identity, ref mut result, 3, 3, 3)
-    mat_print(a2, 3, 3, "A")
+    mat_mult(ref a2, ref identity, ref mut result, 3, 3, 3)
+    mat_print(ref a2, 3, 3, "A")
     print("")
-    mat_print(identity, 3, 3, "I")
+    mat_print(ref identity, 3, 3, "I")
     print("")
-    mat_print(result, 3, 3, "A * I")
+    mat_print(ref result, 3, 3, "A * I")

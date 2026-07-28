@@ -5,7 +5,7 @@
 # Empty cells are 0, filled cells are 1-9
 
 # Get value at (row, col)
-f get_cell(grid: [Int], row: Int, col: Int) -> Int
+f get_cell(ref grid: [Int], row: Int, col: Int) -> Int
     grid[row * 9 + col]
 
 # Set value at (row, col)
@@ -13,18 +13,18 @@ f set_cell(ref mut grid: [Int], row: Int, col: Int, value: Int) -> Unit
     grid[row * 9 + col] := value
 
 # Check if placing value at (row, col) is valid
-f is_valid(grid: [Int], row: Int, col: Int, value: Int) -> Bool
+f is_valid(ref grid: [Int], row: Int, col: Int, value: Int) -> Bool
     # Check row
     c := 0
     wh c < 9
-        if get_cell(grid, row, c) == value then
+        if get_cell(ref grid, row, c) == value then
             return false
         c := c + 1
 
     # Check column
     r := 0
     wh r < 9
-        if get_cell(grid, r, col) == value then
+        if get_cell(ref grid, r, col) == value then
             return false
         r := r + 1
 
@@ -35,7 +35,7 @@ f is_valid(grid: [Int], row: Int, col: Int, value: Int) -> Bool
     wh r < 3
         c := 0
         wh c < 3
-            if get_cell(grid, box_row + r, box_col + c) == value then
+            if get_cell(ref grid, box_row + r, box_col + c) == value then
                 return false
             c := c + 1
         r := r + 1
@@ -43,12 +43,12 @@ f is_valid(grid: [Int], row: Int, col: Int, value: Int) -> Bool
     true
 
 # Find next empty cell, returns (row, col) or (-1, -1) if none
-f find_empty(grid: [Int]) -> (Int, Int)
+f find_empty(ref grid: [Int]) -> (Int, Int)
     r := 0
     wh r < 9
         c := 0
         wh c < 9
-            if get_cell(grid, r, c) == 0 then
+            if get_cell(ref grid, r, c) == 0 then
                 return (r, c)
             c := c + 1
         r := r + 1
@@ -56,7 +56,7 @@ f find_empty(grid: [Int]) -> (Int, Int)
 
 # Solve sudoku using backtracking
 f solve(ref mut grid: [Int]) -> Bool
-    pos := find_empty(grid)
+    pos := find_empty(ref grid)
     row := pos.0
     col := pos.1
 
@@ -65,7 +65,7 @@ f solve(ref mut grid: [Int]) -> Bool
 
     value := 1
     wh value <= 9
-        if is_valid(grid, row, col, value) then
+        if is_valid(ref grid, row, col, value) then
             set_cell(ref mut grid, row, col, value)
             if solve(ref mut grid) then
                 return true
@@ -75,7 +75,7 @@ f solve(ref mut grid: [Int]) -> Bool
     false
 
 # Print sudoku grid
-f print_grid(grid: [Int]) -> Unit
+f print_grid(ref grid: [Int]) -> Unit
     r := 0
     wh r < 9
         if r % 3 == 0 && r != 0 then
@@ -85,7 +85,7 @@ f print_grid(grid: [Int]) -> Unit
         wh c < 9
             if c % 3 == 0 && c != 0 then
                 line := line + "| "
-            val := get_cell(grid, r, c)
+            val := get_cell(ref grid, r, c)
             if val == 0 then
                 line := line + ". "
             else
@@ -111,7 +111,7 @@ f main()
 
     print("Sudoku Puzzle:")
     print("")
-    print_grid(grid)
+    print_grid(ref grid)
 
     print("")
     print("Solving...")
@@ -120,6 +120,6 @@ f main()
         print("")
         print("Solution:")
         print("")
-        print_grid(grid)
+        print_grid(ref grid)
     else
         print("No solution exists!")

@@ -697,7 +697,10 @@ pub f continue_live_workflow(
                     prompt := "Execute this engineering workflow node.\nGoal: " +
                         goal + "\nNode: " + node_id + "\nRole: " + role +
                         "\nUse configured tools when evidence or changes are needed. " +
-                        "Do not claim work you have not verified.\n\nRecall:\n" +
+                        "Do not claim work you have not verified. Complete the " +
+                        "artifact appropriate to this role as a durable handoff; " +
+                        "do not block merely because a downstream role owns the " +
+                        "tools for the final deliverable.\n\nRecall:\n" +
                         recall + "\n\nWorkspace context:\n" + workspace
                     child_settings := str(settings_source)
                     child_run_id := str(run_id)

@@ -39,7 +39,7 @@ f sort(ref mut arr: [Int]) -> Unit
         quicksort(ref mut arr, 0, n - 1)
 
 # Print array
-f print_array(arr: [Int], label: String) -> Unit
+f print_array(ref arr: [Int], label: String) -> Unit
     s := label + ": ["
     i := 0
     wh i < len(arr)
@@ -53,30 +53,30 @@ f print_array(arr: [Int], label: String) -> Unit
 f main()
     # Test 1: Random array
     arr1 := [64, 34, 25, 12, 22, 11, 90]
-    print_array(arr1, "Before")
+    print_array(ref arr1, "Before")
     sort(ref mut arr1)
-    print_array(arr1, "After ")
+    print_array(ref arr1, "After ")
 
     print("")
 
     # Test 2: Already sorted
     arr2 := [1, 2, 3, 4, 5]
-    print_array(arr2, "Already sorted before")
+    print_array(ref arr2, "Already sorted before")
     sort(ref mut arr2)
-    print_array(arr2, "Already sorted after ")
+    print_array(ref arr2, "Already sorted after ")
 
     print("")
 
     # Test 3: Reverse sorted
     arr3 := [5, 4, 3, 2, 1]
-    print_array(arr3, "Reverse before")
+    print_array(ref arr3, "Reverse before")
     sort(ref mut arr3)
-    print_array(arr3, "Reverse after ")
+    print_array(ref arr3, "Reverse after ")
 
     print("")
 
     # Test 4: With duplicates
     arr4 := [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5]
-    print_array(arr4, "Duplicates before")
+    print_array(ref arr4, "Duplicates before")
     sort(ref mut arr4)
-    print_array(arr4, "Duplicates after ")
+    print_array(ref arr4, "Duplicates after ")

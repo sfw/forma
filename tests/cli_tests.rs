@@ -930,6 +930,17 @@ fn test_cli_grants_explicit_capabilities_to_spawned_tasks() {
         String::from_utf8_lossy(&allowed.stderr)
     );
 
+    let allowed_all = Command::new(forma_bin())
+        .args(["run", "--allow-all"])
+        .arg(forma_test("test_spawned_task_capabilities.forma"))
+        .output()
+        .expect("failed to execute forma");
+    assert!(
+        allowed_all.status.success(),
+        "spawned task should inherit read through --allow-all: {}",
+        String::from_utf8_lossy(&allowed_all.stderr)
+    );
+
     let denied = Command::new(forma_bin())
         .arg("run")
         .arg(forma_test("test_spawned_task_capabilities.forma"))

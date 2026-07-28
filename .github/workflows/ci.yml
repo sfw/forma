@@ -103,11 +103,12 @@ jobs:
               fi
               continue
             fi
-            if ./target/release/forma run --allow-all "$f" > /dev/null 2>&1; then
+            if ./target/release/forma run --allow-all "$f" > /tmp/forma-test.log 2>&1; then
               echo "PASS: $name"
               PASS=$((PASS + 1))
             else
               echo "FAIL: $name"
+              cat /tmp/forma-test.log
               FAIL=$((FAIL + 1))
             fi
           done
@@ -157,11 +158,12 @@ jobs:
           FAIL=0
           for f in examples/showcase/*.forma; do
             name=$(basename "$f")
-            if ./target/release/forma run --allow-all "$f" > /dev/null 2>&1; then
+            if ./target/release/forma run --allow-all "$f" > /tmp/forma-showcase.log 2>&1; then
               echo "PASS: $name"
               PASS=$((PASS + 1))
             else
               echo "FAIL: $name"
+              cat /tmp/forma-showcase.log
               FAIL=$((FAIL + 1))
             fi
           done

@@ -814,10 +814,8 @@ fn get_signature_help(content: &str, position: Position) -> Option<SignatureHelp
                     fn_name = None;
                 }
             }
-            crate::lexer::TokenKind::Comma => {
-                if fn_name.is_some() && paren_depth > 0 {
-                    active_param += 1;
-                }
+            crate::lexer::TokenKind::Comma if fn_name.is_some() && paren_depth > 0 => {
+                active_param += 1;
             }
             _ => {}
         }

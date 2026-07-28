@@ -40,7 +40,7 @@ f bst_insert(ref mut values: [Int], ref mut left: [Int], ref mut right: [Int], r
         (root, free + 1)
 
 # Search for value in BST
-f bst_search(values: [Int], left: [Int], right: [Int], root: Int, target: Int) -> Bool
+f bst_search(ref values: [Int], ref left: [Int], ref right: [Int], root: Int, target: Int) -> Bool
     current := root
     wh current != 0 - 1
         if values[current] == target then
@@ -52,14 +52,14 @@ f bst_search(values: [Int], left: [Int], right: [Int], root: Int, target: Int) -
     false
 
 # In-order traversal (prints sorted order)
-f bst_inorder(values: [Int], left: [Int], right: [Int], node: Int) -> Unit
+f bst_inorder(ref values: [Int], ref left: [Int], ref right: [Int], node: Int) -> Unit
     if node != 0 - 1 then
-        bst_inorder(values, left, right, left[node])
+        bst_inorder(ref values, ref left, ref right, left[node])
         print(values[node])
-        bst_inorder(values, left, right, right[node])
+        bst_inorder(ref values, ref left, ref right, right[node])
 
 # Find minimum value
-f bst_min(values: [Int], left: [Int], root: Int) -> Int
+f bst_min(ref values: [Int], ref left: [Int], root: Int) -> Int
     if root == 0 - 1 then 0 - 1
     else
         current := root
@@ -68,7 +68,7 @@ f bst_min(values: [Int], left: [Int], root: Int) -> Int
         values[current]
 
 # Find maximum value
-f bst_max(values: [Int], right: [Int], root: Int) -> Int
+f bst_max(ref values: [Int], ref right: [Int], root: Int) -> Int
     if root == 0 - 1 then 0 - 1
     else
         current := root
@@ -77,18 +77,18 @@ f bst_max(values: [Int], right: [Int], root: Int) -> Int
         values[current]
 
 # Calculate tree height
-f bst_height(left: [Int], right: [Int], node: Int) -> Int
+f bst_height(ref left: [Int], ref right: [Int], node: Int) -> Int
     if node == 0 - 1 then 0
     else
-        left_h := bst_height(left, right, left[node])
-        right_h := bst_height(left, right, right[node])
+        left_h := bst_height(ref left, ref right, left[node])
+        right_h := bst_height(ref left, ref right, right[node])
         1 + (if left_h > right_h then left_h else right_h)
 
 # Count nodes
-f bst_count(left: [Int], right: [Int], node: Int) -> Int
+f bst_count(ref left: [Int], ref right: [Int], node: Int) -> Int
     if node == 0 - 1 then 0
     else
-        1 + bst_count(left, right, left[node]) + bst_count(left, right, right[node])
+        1 + bst_count(ref left, ref right, left[node]) + bst_count(ref left, ref right, right[node])
 
 f main()
     # Allocate node pool
@@ -131,17 +131,17 @@ f main()
 
     print("")
     print("In-order traversal (sorted):")
-    bst_inorder(values, left, right, root)
+    bst_inorder(ref values, ref left, ref right, root)
 
     print("")
     print("Tree statistics:")
-    print(f"Node count: {bst_count(left, right, root)}")
-    print(f"Height: {bst_height(left, right, root)}")
-    print(f"Minimum: {bst_min(values, left, root)}")
-    print(f"Maximum: {bst_max(values, right, root)}")
+    print(f"Node count: {bst_count(ref left, ref right, root)}")
+    print(f"Height: {bst_height(ref left, ref right, root)}")
+    print(f"Minimum: {bst_min(ref values, ref left, root)}")
+    print(f"Maximum: {bst_max(ref values, ref right, root)}")
 
     print("")
     print("Search tests:")
-    print(f"Search 40: {bst_search(values, left, right, root, 40)}")  # true
-    print(f"Search 25: {bst_search(values, left, right, root, 25)}")  # false
-    print(f"Search 70: {bst_search(values, left, right, root, 70)}")  # true
+    print(f"Search 40: {bst_search(ref values, ref left, ref right, root, 40)}")  # true
+    print(f"Search 25: {bst_search(ref values, ref left, ref right, root, 25)}")  # false
+    print(f"Search 70: {bst_search(ref values, ref left, ref right, root, 70)}")  # true

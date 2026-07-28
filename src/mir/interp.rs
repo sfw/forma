@@ -787,6 +787,8 @@ struct Frame {
     contract_result: Option<Value>,
     /// Captured pre-state values for old(expr), keyed by expression span (start, end).
     contract_old_values: HashMap<(usize, usize), Value>,
+    /// Entry values retained solely for contracts after affine parameters are consumed.
+    contract_param_values: HashMap<String, Value>,
     /// Contract-local bindings (e.g., quantifier variables).
     contract_bindings: HashMap<String, Value>,
 }
@@ -800,6 +802,7 @@ impl Frame {
             current_block: entry,
             contract_result: None,
             contract_old_values: HashMap::new(),
+            contract_param_values: HashMap::new(),
             contract_bindings: HashMap::new(),
         }
     }
@@ -1131,6 +1134,11 @@ impl Interpreter {
 
         // Initialize parameters
         for (i, ((local, _ty), value)) in func.params.iter().zip(args.iter()).enumerate() {
+            if let Some((name, _)) = func.param_names.get(i) {
+                frame
+                    .contract_param_values
+                    .insert(name.clone(), value.clone());
+            }
             if let Some(Some(rb)) = ref_bindings.get(i) {
                 // This param is a reference - don't copy the value, just set up the binding
                 frame.ref_bindings.insert(*local, rb.clone());
@@ -1385,6 +1393,9 @@ impl Interpreter {
                                 return Ok(value.clone());
                             }
                             if let Some(value) = frame.locals.get(local) {
+                                return Ok(value.clone());
+                            }
+                            if let Some(value) = frame.contract_param_values.get(name) {
                                 return Ok(value.clone());
                             }
                         }
@@ -2675,11 +2686,12 @@ impl Interpreter {
                             .as_millis()
                             .min(u128::from(u64::MAX)) as u64
                     });
-                    let child_capabilities: HashSet<String> = self
-                        .task_capabilities
-                        .intersection(&self.capabilities)
-                        .cloned()
-                        .collect();
+                    // `set_task_capabilities` already intersects the requested
+                    // child authority through `has_capability`. A parent with
+                    // the aggregate `all` grant will not contain the individual
+                    // capability names, so a raw set intersection would
+                    // incorrectly strip every child grant.
+                    let child_capabilities = self.task_capabilities.clone();
                     let shared_channels = Arc::clone(&self.channels);
                     let shared_mutexes = Arc::clone(&self.mutexes);
 
@@ -14867,6 +14879,18 @@ f main() -> Int
 f inc(x: Int) -> Int = x + 1
 
 f main() -> Int = inc(41)
+"#;
+        let result = run_source(source).unwrap();
+        assert_eq!(result, Value::Int(42));
+    }
+
+    #[test]
+    fn postcondition_can_observe_an_affine_parameter_after_consumption() {
+        let source = r#"
+@post(result == items[0])
+f first(items: [Int]) -> Int = items[0]
+
+f main() -> Int = first([42])
 "#;
         let result = run_source(source).unwrap();
         assert_eq!(result, Value::Int(42));

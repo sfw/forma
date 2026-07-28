@@ -19,8 +19,9 @@ f stack_pop(stack: [Int]) -> (Int, [Int])
 f main()
     stack := [10, 20, 30]
     pushed := stack_push(stack, 40)
+    pushed_text := f"{pushed}"
     popped := stack_pop(pushed)
     print("Verified stack demo")
-    print(f"  after push: {pushed}")
+    print("  after push: " + pushed_text)
     print(f"  pop value:  {popped.0}")
     print(f"  pop rest:   {popped.1}")

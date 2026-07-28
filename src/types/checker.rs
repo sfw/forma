@@ -792,16 +792,14 @@ impl BoundsChecker {
     ) -> Result<(), TypeError> {
         for (trait_id, _args) in bounds {
             match ty {
-                Ty::Named(type_id, _) => {
-                    if !self.implements(type_id, trait_id) {
-                        return Err(TypeError::new(
-                            format!(
-                                "type {} does not implement trait {}",
-                                type_id.name, trait_id.name
-                            ),
-                            span,
-                        ));
-                    }
+                Ty::Named(type_id, _) if !self.implements(type_id, trait_id) => {
+                    return Err(TypeError::new(
+                        format!(
+                            "type {} does not implement trait {}",
+                            type_id.name, trait_id.name
+                        ),
+                        span,
+                    ));
                 }
                 _ => {
                     // Primitive types have built-in trait impls

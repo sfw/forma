@@ -4,12 +4,17 @@
 @pre(items.len() > 0, "input must be non-empty")
 @sorted(result)
 @permutation(items, result)
-f verified_sort(items: [Int]) -> [Int]
-    sort_ints(items)
+f verified_sort(ref items: [Int]) -> [Int]
+    copied := vec_new()
+    i := 0
+    wh i < items.len()
+        copied = vec_push(copied, items[i])
+        i = i + 1
+    sort_ints(copied)
 
 f main()
     input := [9, 3, 5, 1, 5, 2]
-    output := verified_sort(input)
+    output := verified_sort(ref input)
     print("Verified sort demo")
     print(f"  input:  {input}")
     print(f"  output: {output}")

@@ -70,7 +70,7 @@ changed files, commands and results, unresolved risks, and exact identifiers.
 
 [agents."run coordinator"]
 model = "gpt-5.6"
-instructions = "Clarify the objective, define completion evidence, and establish an execution contract."
+instructions = "Clarify the objective, define completion evidence, and establish an execution contract for downstream roles. Do not attempt the final deliverable and do not block merely because this coordinator intentionally has no tools. Return outcome=completed with a concrete handoff artifact when the goal can proceed."
 tools = []
 
 [agents."repository analyst"]
@@ -95,7 +95,7 @@ tools = ["read_file"]
 
 [agents."implementation agent"]
 model = "gpt-5.6"
-instructions = "Implement the approved plan in small coherent changes. Inspect before editing and verify after editing."
+instructions = "Implement only the artifacts authorized by the goal and approved plan in small coherent changes. If the goal forbids source-code changes, do not modify source code; creating an explicitly requested report or other non-code deliverable is still permitted. Inspect before editing and verify after editing."
 tools = ["list_directory", "read_file", "write_file", "run_command"]
 
 [agents."validation agent"]

@@ -10,7 +10,7 @@
 # Using 20x20 grid stored as flat array
 
 # Get cell state at (row, col) with wrapping
-f get_cell_wrap(grid: [Int], row: Int, col: Int, size: Int) -> Int
+f get_cell_wrap(ref grid: [Int], row: Int, col: Int, size: Int) -> Int
     r := (row + size) % size
     c := (col + size) % size
     grid[r * size + c]
@@ -20,26 +20,26 @@ f set_cell(ref mut grid: [Int], row: Int, col: Int, size: Int, value: Int) -> Un
     grid[row * size + col] := value
 
 # Count live neighbors (with wrapping)
-f count_neighbors(grid: [Int], row: Int, col: Int, size: Int) -> Int
+f count_neighbors(ref grid: [Int], row: Int, col: Int, size: Int) -> Int
     count := 0
     dr := 0 - 1
     wh dr <= 1
         dc := 0 - 1
         wh dc <= 1
             if dr != 0 || dc != 0 then
-                count := count + get_cell_wrap(grid, row + dr, col + dc, size)
+                count := count + get_cell_wrap(ref grid, row + dr, col + dc, size)
             dc := dc + 1
         dr := dr + 1
     count
 
 # Compute next generation
-f next_generation(current: [Int], ref mut next: [Int], size: Int) -> Unit
+f next_generation(ref current: [Int], ref mut next: [Int], size: Int) -> Unit
     r := 0
     wh r < size
         c := 0
         wh c < size
-            neighbors := count_neighbors(current, r, c, size)
-            alive := get_cell_wrap(current, r, c, size) == 1
+            neighbors := count_neighbors(ref current, r, c, size)
+            alive := get_cell_wrap(ref current, r, c, size) == 1
 
             if alive then
                 # Live cell survives with 2-3 neighbors
@@ -58,21 +58,21 @@ f next_generation(current: [Int], ref mut next: [Int], size: Int) -> Unit
         r := r + 1
 
 # Copy grid
-f copy_grid(src: [Int], ref mut dst: [Int], len: Int) -> Unit
+f copy_grid(ref src: [Int], ref mut dst: [Int], len: Int) -> Unit
     i := 0
     wh i < len
         dst[i] := src[i]
         i := i + 1
 
 # Print grid
-f print_grid(grid: [Int], size: Int, gen: Int) -> Unit
+f print_grid(ref grid: [Int], size: Int, gen: Int) -> Unit
     print(f"Generation {gen}:")
     r := 0
     wh r < size
         line := ""
         c := 0
         wh c < size
-            if get_cell_wrap(grid, r, c, size) == 1 then
+            if get_cell_wrap(ref grid, r, c, size) == 1 then
                 line := line + "#"
             else
                 line := line + "."
@@ -82,7 +82,7 @@ f print_grid(grid: [Int], size: Int, gen: Int) -> Unit
     print("")
 
 # Count total live cells
-f count_alive(grid: [Int], size: Int) -> Int
+f count_alive(ref grid: [Int], size: Int) -> Int
     count := 0
     i := 0
     wh i < size * size
@@ -132,12 +132,12 @@ f main()
     # Run simulation for 20 generations
     gen := 0
     wh gen <= 20
-        print_grid(grid1, size, gen)
-        print(f"Live cells: {count_alive(grid1, size)}")
+        print_grid(ref grid1, size, gen)
+        print(f"Live cells: {count_alive(ref grid1, size)}")
         print("")
 
         # Compute next generation
-        next_generation(grid1, ref mut grid2, size)
-        copy_grid(grid2, ref mut grid1, size * size)
+        next_generation(ref grid1, ref mut grid2, size)
+        copy_grid(ref grid2, ref mut grid1, size * size)
 
         gen := gen + 1

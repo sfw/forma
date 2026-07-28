@@ -17,6 +17,7 @@ f sample_response() -> Json
 f run_checks() -> Int
     passed := 0
     implementation_role := "implementation agent"
+    coordinator_role := "run coordinator"
     write_tool := "write_file"
     run_id := "run-1"
     m file_read("examples/forge/forge.settings.toml")
@@ -26,11 +27,21 @@ f run_checks() -> Int
                 Err(_) -> print("FAIL: settings decode")
                 Ok(settings) ->
                     passed = passed + 1
-                    if agent_allows_tool(
+                    implementation_can_write := agent_allows_tool(
                         ref settings,
                         ref implementation_role,
                         ref write_tool
                     )
+                    coordinator_can_write := agent_allows_tool(
+                        ref settings,
+                        ref coordinator_role,
+                        ref write_tool
+                    )
+                    coordinator_catalog := agent_tool_catalog(
+                        ref settings,
+                        ref coordinator_role
+                    )
+                    if implementation_can_write && !coordinator_can_write && str_contains(coordinator_catalog, "durable handoff")
                         passed = passed + 1
                     request := build_response_request(
                         ref settings,

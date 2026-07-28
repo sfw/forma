@@ -338,4 +338,9 @@ pub f agent_tool_catalog(
                 "\n  tool_payload: " +
                 settings.tool_plugins[i].payload_description
         i = i + 1
-    if found then catalog else catalog + "\n- none"
+    if found
+        catalog
+    else
+        catalog + "\n- none\nThis role is intentionally deliberative. " +
+            "Produce a durable handoff for downstream roles and do not block " +
+            "solely because a downstream deliverable requires tools."
