@@ -5,7 +5,22 @@ and backend compatibility policy are evolving.
 
 ## Unreleased
 
-- Nothing yet.
+- Added Switchyard, a deterministic railway-interlocking example with connected
+  topology validation, contracts and struct invariants, SQLite event replay,
+  bounded state exploration, negative safety probes, and isolated SMT targets.
+- Expanded formal verification from one basic block to path-sensitive acyclic
+  `Bool`/signed-64-bit-`Int` MIR, including short-circuit branches, direct pure
+  source calls, checked arithmetic obligations, truncating division semantics,
+  MIR type validation, loop rejection, and proof-vacuity checks.
+- Added structural symbolic values derived from MIR for tuples and named
+  structs, including construction, projection, equality, projected updates,
+  implicit struct-invariant establishment/preservation obligations, and
+  per-struct formal status reporting.
+- Added explicit SMT solver selection and timeout controls, solver/version
+  metadata, auditable proof, assumption, and counterexample-query artifacts, and strict
+  `--fail-on-unknown` / `--require-proved` CI policies.
+- Aligned interpreter and LLVM integer negation/add/subtract/multiply/divide/
+  remainder behavior on checked overflow and division errors.
 
 ## 0.2.0 — semantic foundation
 

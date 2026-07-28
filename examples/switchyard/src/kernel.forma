@@ -1,0 +1,555 @@
+# Pure railway interlocking transition kernel.
+#
+# No function in this module reads files, opens databases, uses wall time, or
+# performs network I/O. Rejected commands are recorded as data and preserve the
+# last safe operational state.
+
+us model
+us graph
+
+@pre(sequence >= 0)
+@post(result == sequence + 1)
+@post(result > sequence)
+pub f next_audit_sequence(sequence: Int) -> Int
+    sequence + 1
+
+@pre(index >= 0)
+@post(result == index + 1)
+@post(result > index)
+pub f next_route_index(index: Int) -> Int
+    index + 1
+
+@post(result => at_entry)
+@post(result => !occupied)
+@post(result => !conflicting_reservation)
+pub f scalar_grant_is_safe(
+    at_entry: Bool,
+    occupied: Bool,
+    conflicting_reservation: Bool
+) -> Bool
+    at_entry && !occupied && !conflicting_reservation
+
+pub f train_index(ref state: InterlockingState, ref train_id: Str) -> Int
+    found := -1
+    i := 0
+    wh i < state.trains.len()
+        if state.trains[i].id == train_id
+            found = i
+        i = i + 1
+    found
+
+pub f reservation_index(
+    ref state: InterlockingState,
+    ref train_id: Str
+) -> Int
+    found := -1
+    i := 0
+    wh i < state.reservations.len()
+        if (
+            state.reservations[i].train_id == train_id &&
+            state.reservations[i].active
+        )
+            found = i
+        i = i + 1
+    found
+
+pub f train_identifier(
+    ref state: InterlockingState,
+    index: Int
+) -> Str
+    str(state.trains[index].id)
+
+pub f segment_is_occupied(
+    ref state: InterlockingState,
+    ref segment_id: Str,
+    ref except_train: Str
+) -> Bool
+    occupied := false
+    i := 0
+    wh i < state.trains.len()
+        if (
+            state.trains[i].id != except_train &&
+            state.trains[i].segment_id == segment_id &&
+            state.trains[i].segment_id.len() > 0
+        )
+            occupied = true
+        i = i + 1
+    occupied
+
+pub f route_has_conflicting_reservation(
+    ref topology: Topology,
+    ref state: InterlockingState,
+    ref route_id: Str,
+    ref except_train: Str
+) -> Bool
+    conflict := false
+    i := 0
+    wh i < state.reservations.len()
+        if (
+            state.reservations[i].active &&
+            state.reservations[i].train_id != except_train &&
+            routes_conflict(
+                ref topology,
+                ref state.reservations[i].route_id,
+                ref route_id
+            )
+        )
+            conflict = true
+        i = i + 1
+    conflict
+
+@post(result.tick == 0)
+@post(result.trains.len() == train_ids.len())
+@post(result.reservations.len() == 0)
+@post(result.events.len() == 0)
+@post(result.next_sequence == 0)
+pub f initial_state(
+    ref train_ids: [Str],
+    ref start_nodes: [Str]
+) -> InterlockingState
+    trains := []
+    i := 0
+    wh i < train_ids.len()
+        trains = vec_push(
+            trains,
+            train_at(str(train_ids[i]), str(start_nodes[i]))
+        )
+        i = i + 1
+    InterlockingState {
+        tick: 0,
+        trains: trains,
+        reservations: [],
+        events: [],
+        next_sequence: 0
+    }
+
+@pre(state.next_sequence == state.events.len())
+@post(result.events.len() == old(state.events).len() + 1)
+@post(result.next_sequence == old(state.next_sequence) + 1)
+@post(result.tick == old(state.tick) + 1)
+pub f append_event(
+    state: InterlockingState,
+    train_id: Str,
+    kind: Str,
+    route_id: Str,
+    segment_id: Str,
+    accepted: Bool,
+    reason: Str
+) -> InterlockingState
+    next := state
+    event := InterlockingEvent {
+        sequence: next.next_sequence,
+        tick: next.tick,
+        train_id: train_id,
+        kind: kind,
+        route_id: route_id,
+        segment_id: segment_id,
+        accepted: accepted,
+        reason: reason
+    }
+    next.events = vec_push(next.events, event)
+    next.next_sequence = next_audit_sequence(next.next_sequence)
+    next.tick = next.tick + 1
+    next
+
+pub f rejected_transition(
+    state: InterlockingState,
+    train_id: Str,
+    kind: Str,
+    route_id: Str,
+    reason: Str
+) -> Transition
+    next := append_event(
+        state,
+        train_id,
+        kind + "_rejected",
+        route_id,
+        "",
+        false,
+        str(reason)
+    )
+    Transition { state: next, accepted: false, error: reason }
+
+pub f replace_train(
+    state: InterlockingState,
+    index: Int,
+    replacement: Train
+) -> InterlockingState
+    next := state
+    if index >= 0 && index < next.trains.len()
+        next.trains = vec_set(next.trains, index, replacement)
+    next
+
+pub f deactivate_reservation(
+    state: InterlockingState,
+    train_id: Str
+) -> InterlockingState
+    next := state
+    index := reservation_index(ref next, ref train_id)
+    if index >= 0
+        replacement := Reservation {
+            train_id: str(next.reservations[index].train_id),
+            route_id: str(next.reservations[index].route_id),
+            active: false
+        }
+        next.reservations = vec_set(next.reservations, index, replacement)
+    next
+
+pub f request_route(
+    ref topology: Topology,
+    state: InterlockingState,
+    train_id: Str,
+    route_id: Str
+) -> Transition
+    train_position := train_index(ref state, ref train_id)
+    route_position := route_index(ref topology, ref route_id)
+    if train_position < 0
+        rejected_transition(state, train_id, "request", route_id, "unknown train")
+    else if route_position < 0
+        rejected_transition(state, train_id, "request", route_id, "unknown route")
+    else if state.trains[train_position].status != "idle"
+        rejected_transition(
+            state,
+            train_id,
+            "request",
+            route_id,
+            "train is not idle"
+        )
+    else if (
+        state.trains[train_position].node_id !=
+        topology.routes[route_position].entry
+    )
+        rejected_transition(
+            state,
+            train_id,
+            "request",
+            route_id,
+            "train is not at the route entry"
+        )
+    else if (
+        route_has_conflicting_reservation(
+            ref topology,
+            ref state,
+            ref route_id,
+            ref train_id
+        )
+    )
+        rejected_transition(
+            state,
+            train_id,
+            "request",
+            route_id,
+            "conflicting route is locked"
+        )
+    else
+        event_train_id := str(train_id)
+        event_route_id := str(route_id)
+        replacement := Train {
+            id: train_id,
+            node_id: str(state.trains[train_position].node_id),
+            route_id: str(route_id),
+            segment_id: "",
+            next_segment: 0,
+            status: "reserved"
+        }
+        next := replace_train(state, train_position, replacement)
+        next.reservations = vec_push(
+            next.reservations,
+            active_reservation(
+                str(event_train_id),
+                str(event_route_id)
+            )
+        )
+        next = append_event(
+            next,
+            event_train_id,
+            "route_reserved",
+            event_route_id,
+            "",
+            true,
+            ""
+        )
+        Transition { state: next, accepted: true, error: "" }
+
+pub f advance_train(
+    ref topology: Topology,
+    state: InterlockingState,
+    train_id: Str
+) -> Transition
+    train_position := train_index(ref state, ref train_id)
+    if train_position < 0
+        rejected_transition(state, train_id, "advance", "", "unknown train")
+    else if (
+        state.trains[train_position].status != "reserved" &&
+        state.trains[train_position].status != "moving"
+    )
+        rejected_transition(
+            state,
+            train_id,
+            "advance",
+            "",
+            "train has no active movement authority"
+        )
+    else
+        route_position := route_index(
+            ref topology,
+            ref state.trains[train_position].route_id
+        )
+        reservation_position := reservation_index(ref state, ref train_id)
+        if route_position < 0 || reservation_position < 0
+            rejected_transition(
+                state,
+                train_id,
+                "advance",
+                "",
+                "movement requires an active reservation"
+            )
+        else if (
+            state.trains[train_position].next_segment >=
+            topology.routes[route_position].segments.len()
+        )
+            replacement := Train {
+                id: str(state.trains[train_position].id),
+                node_id: str(topology.routes[route_position].exit),
+                route_id: str(state.trains[train_position].route_id),
+                segment_id: "",
+                next_segment: state.trains[train_position].next_segment,
+                status: "arrived"
+            }
+            route_for_event := str(state.trains[train_position].route_id)
+            train_for_event := str(state.trains[train_position].id)
+            next := replace_train(state, train_position, replacement)
+            next = deactivate_reservation(next, str(train_for_event))
+            next = append_event(
+                next,
+                train_for_event,
+                "route_released",
+                route_for_event,
+                "",
+                true,
+                ""
+            )
+            Transition { state: next, accepted: true, error: "" }
+        else
+            segment_id := str(
+                topology.routes[route_position].segments[
+                    state.trains[train_position].next_segment
+                ]
+            )
+            if (
+                segment_is_occupied(
+                    ref state,
+                    ref segment_id,
+                    ref train_id
+                )
+            )
+                rejected_transition(
+                    state,
+                    train_id,
+                    "advance",
+                    str(state.trains[train_position].route_id),
+                    "next segment is occupied"
+                )
+            else
+                segment_position := segment_index(
+                    ref topology,
+                    ref segment_id
+                )
+                replacement := Train {
+                    id: str(state.trains[train_position].id),
+                    node_id: str(topology.segments[segment_position].target),
+                    route_id: str(state.trains[train_position].route_id),
+                    segment_id: str(segment_id),
+                    next_segment: next_route_index(
+                        state.trains[train_position].next_segment
+                    ),
+                    status: "moving"
+                }
+                route_for_event := str(
+                    state.trains[train_position].route_id
+                )
+                train_for_event := str(state.trains[train_position].id)
+                next := replace_train(state, train_position, replacement)
+                next = append_event(
+                    next,
+                    train_for_event,
+                    "train_advanced",
+                    route_for_event,
+                    segment_id,
+                    true,
+                    ""
+                )
+                Transition { state: next, accepted: true, error: "" }
+
+pub f emergency_stop(
+    state: InterlockingState,
+    train_id: Str
+) -> Transition
+    position := train_index(ref state, ref train_id)
+    if position < 0
+        rejected_transition(
+            state,
+            train_id,
+            "emergency_stop",
+            "",
+            "unknown train"
+        )
+    else if state.trains[position].status == "arrived"
+        rejected_transition(
+            state,
+            train_id,
+            "emergency_stop",
+            "",
+            "arrived train is already clear"
+        )
+    else
+        replacement := Train {
+            id: str(state.trains[position].id),
+            node_id: str(state.trains[position].node_id),
+            route_id: str(state.trains[position].route_id),
+            segment_id: str(state.trains[position].segment_id),
+            next_segment: state.trains[position].next_segment,
+            status: "emergency_stopped"
+        }
+        event_train_id := str(state.trains[position].id)
+        event_route_id := str(state.trains[position].route_id)
+        event_segment_id := str(state.trains[position].segment_id)
+        next := replace_train(state, position, replacement)
+        next = append_event(
+            next,
+            event_train_id,
+            "emergency_stopped",
+            event_route_id,
+            event_segment_id,
+            true,
+            ""
+        )
+        Transition { state: next, accepted: true, error: "" }
+
+pub f apply_command(
+    ref topology: Topology,
+    state: InterlockingState,
+    ref command: Command
+) -> Transition
+    if command.kind == "request"
+        request_route(
+            ref topology,
+            state,
+            str(command.train_id),
+            str(command.route_id)
+        )
+    else if command.kind == "advance"
+        advance_train(ref topology, state, str(command.train_id))
+    else emergency_stop(state, str(command.train_id))
+
+@post(result.events.len() == old(transition.state.events).len())
+pub f take_transition_state(transition: Transition) -> InterlockingState
+    transition.state
+
+pub f collision_freedom(ref state: InterlockingState) -> Bool
+    safe := true
+    i := 0
+    wh i < state.trains.len()
+        j := i + 1
+        wh j < state.trains.len()
+            if (
+                state.trains[i].segment_id.len() > 0 &&
+                state.trains[i].segment_id == state.trains[j].segment_id
+            )
+                safe = false
+            j = j + 1
+        i = i + 1
+    safe
+
+pub f reservation_before_entry(ref state: InterlockingState) -> Bool
+    safe := true
+    i := 0
+    wh i < state.trains.len()
+        if (
+            state.trains[i].segment_id.len() > 0 &&
+            reservation_index(ref state, ref state.trains[i].id) < 0
+        )
+            safe = false
+        i = i + 1
+    safe
+
+pub f route_exclusion(
+    ref topology: Topology,
+    ref state: InterlockingState
+) -> Bool
+    safe := true
+    i := 0
+    wh i < state.reservations.len()
+        j := i + 1
+        wh j < state.reservations.len()
+            if (
+                state.reservations[i].active &&
+                state.reservations[j].active &&
+                routes_conflict(
+                    ref topology,
+                    ref state.reservations[i].route_id,
+                    ref state.reservations[j].route_id
+                )
+            )
+                safe = false
+            j = j + 1
+        i = i + 1
+    safe
+
+pub f unique_trains(ref state: InterlockingState) -> Bool
+    ids := []
+    i := 0
+    wh i < state.trains.len()
+        ids = vec_push(ids, str(state.trains[i].id))
+        i = i + 1
+    unique_strings(ref ids)
+
+pub f event_sequence_is_valid(ref state: InterlockingState) -> Bool
+    valid := state.next_sequence == state.events.len()
+    i := 0
+    wh i < state.events.len()
+        if state.events[i].sequence != i
+            valid = false
+        i = i + 1
+    valid
+
+pub f event_is_rejection(
+    ref state: InterlockingState,
+    index: Int,
+    ref kind: Str
+) -> Bool
+    index >= 0 && index < state.events.len() &&
+        !state.events[index].accepted && state.events[index].kind == kind
+
+pub f event_count(ref state: InterlockingState) -> Int
+    state.events.len()
+
+pub f check_safety(
+    ref topology: Topology,
+    ref state: InterlockingState
+) -> SafetyReport
+    if !collision_freedom(ref state)
+        safety_report(false, "collision_freedom", "two trains occupy one segment")
+    else if !reservation_before_entry(ref state)
+        safety_report(
+            false,
+            "reservation_before_entry",
+            "a train entered without movement authority"
+        )
+    else if !route_exclusion(ref topology, ref state)
+        safety_report(
+            false,
+            "route_exclusion",
+            "conflicting routes are simultaneously active"
+        )
+    else if !unique_trains(ref state)
+        safety_report(false, "train_conservation", "train identity was duplicated")
+    else if !event_sequence_is_valid(ref state)
+        safety_report(false, "event_monotonicity", "audit sequence has a gap")
+    else safety_report(true, "", "")
+
+pub f report_is_safe(ref report: SafetyReport) -> Bool
+    report.safe
+
+pub f report_property(ref report: SafetyReport) -> Str
+    str(report.property)

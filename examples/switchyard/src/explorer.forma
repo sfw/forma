@@ -1,0 +1,286 @@
+# Bounded state-space exploration.
+#
+# The explorer enumerates every accepted command successor through max_depth.
+# Unsafe states return a replayable command trace instead of aborting.
+
+us model
+us graph
+us kernel
+
+pub f copy_strings(ref values: [Str]) -> [Str]
+    result := []
+    i := 0
+    wh i < values.len()
+        result = vec_push(result, str(values[i]))
+        i = i + 1
+    result
+
+pub f string_at(ref values: [Str], index: Int) -> Str
+    str(values[index])
+
+pub f copy_train(ref train: Train) -> Train
+    Train {
+        id: str(train.id),
+        node_id: str(train.node_id),
+        route_id: str(train.route_id),
+        segment_id: str(train.segment_id),
+        next_segment: train.next_segment,
+        status: str(train.status)
+    }
+
+pub f copy_reservation(ref reservation: Reservation) -> Reservation
+    Reservation {
+        train_id: str(reservation.train_id),
+        route_id: str(reservation.route_id),
+        active: reservation.active
+    }
+
+pub f copy_event(ref event: InterlockingEvent) -> InterlockingEvent
+    InterlockingEvent {
+        sequence: event.sequence,
+        tick: event.tick,
+        train_id: str(event.train_id),
+        kind: str(event.kind),
+        route_id: str(event.route_id),
+        segment_id: str(event.segment_id),
+        accepted: event.accepted,
+        reason: str(event.reason)
+    }
+
+@post(result.tick == state.tick)
+@post(result.trains.len() == state.trains.len())
+@post(result.reservations.len() == state.reservations.len())
+@post(result.events.len() == state.events.len())
+pub f copy_state(ref state: InterlockingState) -> InterlockingState
+    trains := []
+    i := 0
+    wh i < state.trains.len()
+        trains = vec_push(trains, copy_train(ref state.trains[i]))
+        i = i + 1
+    reservations := []
+    i = 0
+    wh i < state.reservations.len()
+        reservations = vec_push(
+            reservations,
+            copy_reservation(ref state.reservations[i])
+        )
+        i = i + 1
+    events := []
+    i = 0
+    wh i < state.events.len()
+        events = vec_push(events, copy_event(ref state.events[i]))
+        i = i + 1
+    InterlockingState {
+        tick: state.tick,
+        trains: trains,
+        reservations: reservations,
+        events: events,
+        next_sequence: state.next_sequence
+    }
+
+pub f operational_key(ref state: InterlockingState) -> Str
+    key := ""
+    i := 0
+    wh i < state.trains.len()
+        key = key + state.trains[i].id + ":" + state.trains[i].node_id + ":" +
+            state.trains[i].route_id + ":" + state.trains[i].segment_id + ":" +
+            int_to_str(state.trains[i].next_segment) + ":" +
+            state.trains[i].status + "|"
+        i = i + 1
+    key = key + "#"
+    i = 0
+    wh i < state.reservations.len()
+        if state.reservations[i].active
+            key = key + state.reservations[i].train_id + ":" +
+                state.reservations[i].route_id + "|"
+        i = i + 1
+    key
+
+pub f operationally_equal(
+    ref left: InterlockingState,
+    ref right: InterlockingState
+) -> Bool
+    operational_key(ref left) == operational_key(ref right)
+
+pub f command_count(
+    ref topology: Topology,
+    ref state: InterlockingState
+) -> Int
+    state.trains.len() * (topology.routes.len() + 2)
+
+pub f command_at(
+    ref topology: Topology,
+    ref state: InterlockingState,
+    choice: Int
+) -> Command
+    choices_per_train := topology.routes.len() + 2
+    train_position := choice / choices_per_train
+    action_position := choice % choices_per_train
+    if action_position < topology.routes.len()
+        command(
+            "request",
+            str(state.trains[train_position].id),
+            str(topology.routes[action_position].id)
+        )
+    else if action_position == topology.routes.len()
+        command("advance", str(state.trains[train_position].id), "")
+    else
+        command(
+            "emergency_stop",
+            str(state.trains[train_position].id),
+            ""
+        )
+
+pub f command_description(ref command: Command) -> Str
+    if command.kind == "request"
+        command.train_id + " request " + command.route_id
+    else command.train_id + " " + command.kind
+
+pub f search_state_copy(ref node: SearchNode) -> InterlockingState
+    copy_state(ref node.state)
+
+pub f search_trace_copy(ref node: SearchNode) -> [Str]
+    copy_strings(ref node.trace)
+
+pub f search_depth(ref node: SearchNode) -> Int
+    node.depth
+
+pub f transition_state_copy(ref transition: Transition) -> InterlockingState
+    copy_state(ref transition.state)
+
+pub f transition_was_accepted(ref transition: Transition) -> Bool
+    transition.accepted
+
+pub f transition_safety(
+    ref topology: Topology,
+    ref transition: Transition
+) -> SafetyReport
+    check_safety(ref topology, ref transition.state)
+
+pub f transition_key(ref transition: Transition) -> Str
+    operational_key(ref transition.state)
+
+pub f exploration_is_safe(ref result: ExplorationResult) -> Bool
+    result.safe
+
+pub f exploration_state_count(ref result: ExplorationResult) -> Int
+    result.explored_states
+
+pub f exploration_depth(ref result: ExplorationResult) -> Int
+    result.max_depth
+
+pub f exploration_property(ref result: ExplorationResult) -> Str
+    str(result.property)
+
+pub f exploration_trace(ref result: ExplorationResult) -> [Str]
+    copy_strings(ref result.counterexample)
+
+@pre(max_depth >= 0, "bounded exploration depth must be non-negative")
+@post(result.max_depth == max_depth)
+@post(result.explored_states > 0)
+pub f explore(
+    ref topology: Topology,
+    initial: InterlockingState,
+    max_depth: Int
+) -> ExplorationResult
+    initial_key := operational_key(ref initial)
+    frontier := [
+        SearchNode { state: initial, depth: 0, trace: [] }
+    ]
+    visited := [initial_key]
+    explored := 0
+    failure_property := ""
+    failure_trace := []
+
+    wh frontier.len() > 0 && failure_property.len() == 0
+        (rest, maybe_node) := vec_pop(frontier)
+        frontier = rest
+        m maybe_node
+            None -> frontier = frontier
+            Some(node) ->
+                explored = explored + 1
+                report := check_safety(ref topology, ref node.state)
+                if !report.safe
+                    failure_property = str(report.property)
+                    failure_trace = search_trace_copy(ref node)
+                else if search_depth(ref node) < max_depth
+                    choices := command_count(ref topology, ref node.state)
+                    i := 0
+                    wh i < choices && failure_property.len() == 0
+                        next_command := command_at(
+                            ref topology,
+                            ref node.state,
+                            i
+                        )
+                        description := command_description(ref next_command)
+                        transition := apply_command(
+                            ref topology,
+                            search_state_copy(ref node),
+                            ref next_command
+                        )
+                        successor_report := transition_safety(
+                            ref topology,
+                            ref transition
+                        )
+                        trace := search_trace_copy(ref node)
+                        trace = vec_push(trace, description)
+                        if !successor_report.safe
+                            failure_property = str(successor_report.property)
+                            failure_trace = trace
+                        else if transition_was_accepted(ref transition)
+                            key := transition_key(ref transition)
+                            if !contains_str(ref visited, ref key)
+                                visited = vec_push(visited, str(key))
+                                frontier = vec_push(
+                                    frontier,
+                                    SearchNode {
+                                        state: transition_state_copy(
+                                            ref transition
+                                        ),
+                                        depth: search_depth(ref node) + 1,
+                                        trace: trace
+                                    }
+                                )
+                        i = i + 1
+
+    ExplorationResult {
+        safe: failure_property.len() == 0,
+        explored_states: explored,
+        max_depth: max_depth,
+        property: failure_property,
+        counterexample: failure_trace
+    }
+
+# A deliberately corrupted global state used to prove that the bounded checker
+# can find a collision. Each individual value satisfies its local invariant;
+# the cross-train safety property is what fails.
+pub f collision_probe(
+    ref train_ids: [Str],
+    ref start_nodes: [Str]
+) -> InterlockingState
+    state := initial_state(ref train_ids, ref start_nodes)
+    first_id := train_identifier(ref state, 0)
+    second_id := train_identifier(ref state, 1)
+    first := Train {
+        id: str(first_id),
+        node_id: "diamond",
+        route_id: "north-south",
+        segment_id: "north-in",
+        next_segment: 1,
+        status: "moving"
+    }
+    second := Train {
+        id: str(second_id),
+        node_id: "diamond",
+        route_id: "west-east",
+        segment_id: "north-in",
+        next_segment: 1,
+        status: "moving"
+    }
+    state.trains = vec_set(state.trains, 0, first)
+    state.trains = vec_set(state.trains, 1, second)
+    state.reservations = [
+        active_reservation(first_id, "north-south"),
+        active_reservation(second_id, "west-east")
+    ]
+    state

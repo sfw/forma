@@ -1163,36 +1163,36 @@ impl<'ctx> LLVMCodegen<'ctx> {
         let rhs_int = self.as_int_value(rhs)?;
 
         let result: IntValue = match op {
-            BinOp::Add => self
-                .builder
-                .build_int_add(lhs_int, rhs_int, "add")
-                .map_err(|e| CodegenError {
-                    message: format!("add failed: {:?}", e),
-                })?,
-            BinOp::Sub => self
-                .builder
-                .build_int_sub(lhs_int, rhs_int, "sub")
-                .map_err(|e| CodegenError {
-                    message: format!("sub failed: {:?}", e),
-                })?,
-            BinOp::Mul => self
-                .builder
-                .build_int_mul(lhs_int, rhs_int, "mul")
-                .map_err(|e| CodegenError {
-                    message: format!("mul failed: {:?}", e),
-                })?,
-            BinOp::Div => self
-                .builder
-                .build_int_signed_div(lhs_int, rhs_int, "div")
-                .map_err(|e| CodegenError {
-                    message: format!("div failed: {:?}", e),
-                })?,
-            BinOp::Rem => self
-                .builder
-                .build_int_signed_rem(lhs_int, rhs_int, "rem")
-                .map_err(|e| CodegenError {
-                    message: format!("rem failed: {:?}", e),
-                })?,
+            BinOp::Add => self.call_checked_integer_binop(
+                "forma_add_overflow_check",
+                lhs_int,
+                rhs_int,
+                "checked_add",
+            )?,
+            BinOp::Sub => self.call_checked_integer_binop(
+                "forma_sub_overflow_check",
+                lhs_int,
+                rhs_int,
+                "checked_sub",
+            )?,
+            BinOp::Mul => self.call_checked_integer_binop(
+                "forma_mul_overflow_check",
+                lhs_int,
+                rhs_int,
+                "checked_mul",
+            )?,
+            BinOp::Div => self.call_checked_integer_binop(
+                "forma_div_overflow_check",
+                lhs_int,
+                rhs_int,
+                "checked_div",
+            )?,
+            BinOp::Rem => self.call_checked_integer_binop(
+                "forma_rem_overflow_check",
+                lhs_int,
+                rhs_int,
+                "checked_rem",
+            )?,
             BinOp::Eq => self
                 .builder
                 .build_int_compare(IntPredicate::EQ, lhs_int, rhs_int, "eq")
@@ -1278,6 +1278,28 @@ impl<'ctx> LLVMCodegen<'ctx> {
         Ok(result.into())
     }
 
+    fn call_checked_integer_binop(
+        &mut self,
+        function_name: &str,
+        lhs: IntValue<'ctx>,
+        rhs: IntValue<'ctx>,
+        label: &str,
+    ) -> Result<IntValue<'ctx>, CodegenError> {
+        let function = self.get_or_declare_runtime_function(function_name)?;
+        let result = self
+            .builder
+            .build_call(function, &[lhs.into(), rhs.into()], label)
+            .map_err(|error| CodegenError {
+                message: format!("{label} runtime call failed: {error:?}"),
+            })?
+            .try_as_basic_value()
+            .left()
+            .ok_or_else(|| CodegenError {
+                message: format!("{label} runtime call returned void"),
+            })?;
+        self.as_int_value(result)
+    }
+
     /// Compile a unary operation.
     fn compile_unaryop(
         &mut self,
@@ -1286,12 +1308,12 @@ impl<'ctx> LLVMCodegen<'ctx> {
     ) -> Result<BasicValueEnum<'ctx>, CodegenError> {
         let int_val = self.as_int_value(val)?;
         let result = match op {
-            UnOp::Neg => self
-                .builder
-                .build_int_neg(int_val, "neg")
-                .map_err(|e| CodegenError {
-                    message: format!("neg failed: {:?}", e),
-                })?,
+            UnOp::Neg => self.call_checked_integer_binop(
+                "forma_sub_overflow_check",
+                int_val.get_type().const_zero(),
+                int_val,
+                "checked_neg",
+            )?,
             UnOp::Not | UnOp::BitNot => {
                 self.builder
                     .build_not(int_val, "not")
@@ -1802,6 +1824,13 @@ impl<'ctx> LLVMCodegen<'ctx> {
             "forma_unreachable" => void_type.fn_type(&[], false),
             "forma_bounds_check" => void_type.fn_type(&[i64_type.into(), i64_type.into()], false),
             "forma_div_check" => void_type.fn_type(&[i64_type.into()], false),
+            "forma_add_overflow_check"
+            | "forma_sub_overflow_check"
+            | "forma_mul_overflow_check"
+            | "forma_div_overflow_check"
+            | "forma_rem_overflow_check" => {
+                i64_type.fn_type(&[i64_type.into(), i64_type.into()], false)
+            }
 
             _ => {
                 return Err(CodegenError {
@@ -2778,9 +2807,11 @@ mod tests {
         let mut codegen = LLVMCodegen::new(&ctx, "test_arith");
         assert!(codegen.compile(&program).is_ok());
         let ir = codegen.get_llvm_ir();
-        // LLVM may constant-fold 2+3=5, so just verify compilation succeeded
-        // and produced valid IR with a main function
         assert!(ir.contains("main"), "IR should contain main function");
+        assert!(
+            ir.contains("forma_add_overflow_check"),
+            "native integer addition must use the checked runtime helper"
+        );
     }
 
     #[test]

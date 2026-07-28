@@ -961,25 +961,12 @@ fn explicit_rvalue(
             );
         }
         Rvalue::BinaryOp(_, left, right) => {
-            // Operators observe their operands.  Their result is a fresh value;
-            // spelling `a + b` must not silently transfer ownership of `a` or
-            // `b` (notably for string concatenation).
-            explicit_operand(
-                left,
-                local_types,
-                PassMode::Ref,
-                copy_types,
-                borrowed_params,
-            );
-            explicit_operand(
-                right,
-                local_types,
-                PassMode::Ref,
-                copy_types,
-                borrowed_params,
-            );
-            make_operand_borrow(left);
-            make_operand_borrow(right);
+            // Operators observe affine operands (notably strings), while Copy
+            // scalars should remain values. Keeping integers and booleans as
+            // `Copy` is important both for MIR type consistency and for formal
+            // verification; a scalar arithmetic expression is not a reference.
+            explicit_observed_operand(left, local_types, copy_types, borrowed_params);
+            explicit_observed_operand(right, local_types, copy_types, borrowed_params);
         }
         Rvalue::Index(left, right) => {
             explicit_operand(
@@ -1055,6 +1042,46 @@ fn explicit_rvalue(
         | Rvalue::Ref(_, _)
         | Rvalue::Discriminant(_)
         | Rvalue::EnumField(_, _) => {}
+    }
+}
+
+fn explicit_observed_operand(
+    operand: &mut Operand,
+    local_types: &[Ty],
+    copy_types: &HashSet<String>,
+    borrowed_params: &LocalSet,
+) {
+    let is_copy = match operand {
+        Operand::Local(local)
+        | Operand::Copy(local)
+        | Operand::Move(local)
+        | Operand::Borrow(local, _) => local_types
+            .get(local.0 as usize)
+            .is_some_and(|ty| is_copy_type(ty, copy_types)),
+        Operand::CopyPlace(place) | Operand::MovePlace(place) | Operand::BorrowPlace(place, _) => {
+            local_types
+                .get(place.local.0 as usize)
+                .is_some_and(|ty| is_copy_type(ty, copy_types))
+        }
+        Operand::Constant(_) => true,
+    };
+    if is_copy {
+        explicit_operand(
+            operand,
+            local_types,
+            PassMode::Owned,
+            copy_types,
+            borrowed_params,
+        );
+    } else {
+        explicit_operand(
+            operand,
+            local_types,
+            PassMode::Ref,
+            copy_types,
+            borrowed_params,
+        );
+        make_operand_borrow(operand);
     }
 }
 

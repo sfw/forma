@@ -144,14 +144,21 @@ forma explain rules.forma --format human
 forma verify rules.forma --level test --examples 200 --seed 42 --report
 forma verify rules.forma --level exhaustive --max-domain 4096 --report
 forma verify rules.forma --level formal --report
+forma verify rules.forma --level formal --report --solver z3 \
+  --require-proved --emit-smt target/formal
 ```
 
 Reports use distinct confidence states: `UNCONTRACTED`, `TESTED`,
 `COUNTEREXAMPLE`, `EXHAUSTIVE`, `PROVED`, `UNKNOWN`, and `SKIPPED`.
 Generated examples never produce `PROVED`. Formal verification is Experimental
-and limited to a documented pure subset. Invariant obligations appear in
-explain/verification output, but struct preservation remains `UNKNOWN` until the
-SMT struct subset is implemented.
+and limited to a documented pure subset. Formal mode supports acyclic scalar
+`Int`/`Bool` control flow plus tuples and named structs whose leaves are in that
+scalar subset. It models construction, projection, structural equality,
+projected field updates, checked signed 64-bit arithmetic, and invariant
+establishment/preservation at function boundaries. Reports also include vacuity
+detection and solver metadata; strict `--require-proved` /
+`--fail-on-unknown` policies and auditable SMT-LIB artifacts make proofs usable
+as CI evidence.
 
 ### Structured concurrency
 
@@ -237,6 +244,16 @@ Forge remains in this repository during the 0.2 series so that a realistic
 agentic application continuously pressures the language, compiler, and
 documentation together. Every place it requires Rust is recorded in the
 [Forge Rust gap ledger](planning/design/FORGE_RUST_GAP_LEDGER.md).
+
+## Verified systems example: Switchyard
+
+[Switchyard](examples/switchyard/README.md) is a no-key, deterministic railway
+interlocking simulator and bounded model checker written entirely in Forma. It
+combines connected route graphs, affine state transitions, contracts and struct
+invariants, safe command rejection, counterexample traces, structured
+tasks/channels, capability-gated TOML/JSON/file/network boundaries, and an exact
+SQLite event-replay check. Its isolated solver targets turn current `UNKNOWN`
+boundaries into a concrete roadmap toward transition-system verification.
 
 ## Project status
 

@@ -555,8 +555,9 @@ fn test_cli_verify_exhausts_finite_bool_domain() {
         .expect("failed to execute forma");
     assert!(
         output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
     );
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let function = &report["files"][0]["functions"][0];
@@ -566,10 +567,17 @@ fn test_cli_verify_exhausts_finite_bool_domain() {
 }
 
 #[test]
-fn test_cli_formal_level_reports_unknown_without_solver() {
+fn test_cli_formal_level_reports_unknown_when_solver_is_missing() {
     let output = Command::new(forma_bin())
         .args([
-            "verify", "--report", "--format", "json", "--level", "formal",
+            "verify",
+            "--report",
+            "--format",
+            "json",
+            "--level",
+            "formal",
+            "--solver",
+            "/definitely/missing/forma-z3",
         ])
         .arg(fixture("verify_contract_pass.forma"))
         .output()
@@ -578,6 +586,221 @@ fn test_cli_formal_level_reports_unknown_without_solver() {
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["files"][0]["functions"][0]["status"], "UNKNOWN");
     assert_eq!(report["summary"]["proved"], 0);
+}
+
+#[test]
+fn test_scalar_arithmetic_mir_remains_typed_copy_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("scalar_mir.forma");
+    std::fs::write(
+        &source,
+        r#"f increment(value: Int) -> Int = value + 1
+
+f main() -> Int = increment(-1)
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(forma_bin())
+        .args(["run", "--dump-mir", "--no-optimize"])
+        .arg(&source)
+        .output()
+        .expect("failed to dump scalar MIR");
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let rendered = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(rendered.contains("_1: Int (_)"), "{rendered}");
+    assert!(rendered.contains("_1 = copy _0 Add 1"), "{rendered}");
+    assert!(!rendered.contains("_1 = borrow _0 Add 1"), "{rendered}");
+}
+
+#[test]
+fn test_interpreter_reports_integer_overflow_instead_of_wrapping_or_panicking() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("overflow.forma");
+    std::fs::write(&source, "f main() -> Int = 9223372036854775807 + 1\n").unwrap();
+
+    let output = Command::new(forma_bin())
+        .args(["run", "--no-optimize"])
+        .arg(&source)
+        .output()
+        .expect("failed to run overflow fixture");
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("integer overflow in addition"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn test_formal_strict_policy_and_smt_artifacts() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("identity.forma");
+    let solver = dir.path().join("fake-z3");
+    let artifacts = dir.path().join("smt");
+    std::fs::write(
+        &source,
+        r#"@post(result == value)
+f identity(value: Int) -> Int = value
+
+@post(result == value)
+f identity_wrapper(value: Int) -> Int = identity(value)
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &solver,
+        r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf 'fake-z3 1.0\n'
+  exit 0
+fi
+input=$(cat)
+case "$input" in
+  *"(or (not"*) printf 'unsat\n' ;;
+  *) printf 'sat\n((v_value 0))\n' ;;
+esac
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&solver).unwrap().permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(&solver, permissions).unwrap();
+
+    let output = Command::new(forma_bin())
+        .args([
+            "verify", "--report", "--format", "json", "--level", "formal", "--solver",
+        ])
+        .arg(&solver)
+        .args(["--require-proved", "--emit-smt"])
+        .arg(&artifacts)
+        .arg(&source)
+        .output()
+        .expect("failed to run strict formal verification");
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["summary"]["proved"], 2);
+    assert!(
+        report["files"][0]["functions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|function| function["status"] == "PROVED")
+    );
+    assert_eq!(report["formal"]["solver_version"], "fake-z3 1.0");
+    assert!(artifacts.join("identity--identity.smt2").is_file());
+    assert!(
+        artifacts
+            .join("identity--identity.assumptions.smt2")
+            .is_file()
+    );
+    assert!(artifacts.join("identity--identity_wrapper.smt2").is_file());
+}
+
+#[cfg(unix)]
+#[test]
+fn test_switchyard_structural_targets_all_reach_the_solver() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let solver = dir.path().join("fake-z3");
+    std::fs::write(
+        &solver,
+        r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf 'fake-z3 1.0\n'
+  exit 0
+fi
+input=$(cat)
+case "$input" in
+  *"(or (not"*) printf 'unsat\n' ;;
+  *) printf 'sat\n((v_sequence 0))\n' ;;
+esac
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&solver).unwrap().permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(&solver, permissions).unwrap();
+    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/switchyard/src/solver_targets.forma");
+
+    let output = Command::new(forma_bin())
+        .args([
+            "verify", "--report", "--format", "json", "--level", "formal", "--solver",
+        ])
+        .arg(&solver)
+        .arg("--require-proved")
+        .arg(&source)
+        .output()
+        .expect("failed to verify Switchyard structural targets");
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["summary"]["proved"], 7);
+    assert_eq!(report["summary"]["unknown"], 0);
+    assert_eq!(
+        report["files"][0]["invariants"][0]["formal_status"],
+        "PROVED"
+    );
+}
+
+#[test]
+fn test_real_z3_finds_invalid_struct_invariant_construction() {
+    if Command::new("z3").arg("--version").output().is_err() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("invalid_invariant.forma");
+    std::fs::write(
+        &source,
+        r#"@inv(balance >= 0)
+s Account
+    balance: Int
+
+f invalid_account() -> Account
+    Account { balance: -1 }
+"#,
+    )
+    .unwrap();
+    let output = Command::new(forma_bin())
+        .args([
+            "verify", "--report", "--format", "json", "--level", "formal", "--solver", "z3",
+        ])
+        .arg(&source)
+        .output()
+        .expect("failed to verify invalid invariant construction");
+    assert!(!output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report["files"][0]["functions"][0]["status"],
+        "COUNTEREXAMPLE"
+    );
+    assert_eq!(
+        report["files"][0]["invariants"][0]["formal_status"],
+        "COUNTEREXAMPLE"
+    );
 }
 
 #[test]

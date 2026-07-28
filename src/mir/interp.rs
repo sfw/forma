@@ -13025,16 +13025,35 @@ impl Interpreter {
     fn eval_binop(&self, op: BinOp, left: Value, right: Value) -> Result<Value, InterpError> {
         match (op, &left, &right) {
             // Integer arithmetic
-            (BinOp::Add, Value::Int(a), Value::Int(b)) => Ok(Value::Int(a + b)),
-            (BinOp::Sub, Value::Int(a), Value::Int(b)) => Ok(Value::Int(a - b)),
-            (BinOp::Mul, Value::Int(a), Value::Int(b)) => Ok(Value::Int(a * b)),
+            (BinOp::Add, Value::Int(a), Value::Int(b)) => a
+                .checked_add(*b)
+                .map(Value::Int)
+                .ok_or_else(|| InterpError {
+                    message: "integer overflow in addition".to_string(),
+                }),
+            (BinOp::Sub, Value::Int(a), Value::Int(b)) => a
+                .checked_sub(*b)
+                .map(Value::Int)
+                .ok_or_else(|| InterpError {
+                    message: "integer overflow in subtraction".to_string(),
+                }),
+            (BinOp::Mul, Value::Int(a), Value::Int(b)) => a
+                .checked_mul(*b)
+                .map(Value::Int)
+                .ok_or_else(|| InterpError {
+                    message: "integer overflow in multiplication".to_string(),
+                }),
             (BinOp::Div, Value::Int(a), Value::Int(b)) => {
                 if *b == 0 {
                     Err(InterpError {
                         message: "division by zero".to_string(),
                     })
                 } else {
-                    Ok(Value::Int(a / b))
+                    a.checked_div(*b)
+                        .map(Value::Int)
+                        .ok_or_else(|| InterpError {
+                            message: "integer overflow in division".to_string(),
+                        })
                 }
             }
             (BinOp::Rem, Value::Int(a), Value::Int(b)) => {
@@ -13043,7 +13062,11 @@ impl Interpreter {
                         message: "remainder by zero".to_string(),
                     })
                 } else {
-                    Ok(Value::Int(a % b))
+                    a.checked_rem(*b)
+                        .map(Value::Int)
+                        .ok_or_else(|| InterpError {
+                            message: "integer overflow in remainder".to_string(),
+                        })
                 }
             }
 
@@ -13120,7 +13143,11 @@ impl Interpreter {
 
     fn eval_unop(&self, op: UnOp, val: Value) -> Result<Value, InterpError> {
         match (op, &val) {
-            (UnOp::Neg, Value::Int(n)) => Ok(Value::Int(-n)),
+            (UnOp::Neg, Value::Int(n)) => {
+                n.checked_neg().map(Value::Int).ok_or_else(|| InterpError {
+                    message: "integer overflow in negation".to_string(),
+                })
+            }
             (UnOp::Neg, Value::Float(n)) => Ok(Value::Float(-n)),
             (UnOp::Not, Value::Bool(b)) => Ok(Value::Bool(!b)),
             (UnOp::BitNot, Value::Int(n)) => Ok(Value::Int(!n)),

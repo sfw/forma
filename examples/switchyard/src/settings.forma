@@ -1,0 +1,51 @@
+# Human-authored TOML configuration boundary.
+
+us model
+us graph
+
+pub f load_settings(source: Str) -> SwitchyardSettings!Str
+    m toml_parse(source)
+        Err(error) -> Err("invalid Switchyard settings TOML: " + error)
+        Ok(root) ->
+            simulation := json_object_or_empty(ref root, "simulation")
+            network := json_object_or_empty(ref root, "network")
+            train_json := array_or_empty(ref simulation, "train_ids")
+            node_json := array_or_empty(ref simulation, "start_nodes")
+            candidate := SwitchyardSettings {
+                version: int_or(ref root, "version", 0),
+                topology_path: string_or(ref root, "topology_path", ""),
+                database_path: string_or(ref root, "database_path", ""),
+                bounded_depth: int_or(ref root, "bounded_depth", 0),
+                train_ids: json_strings(ref train_json),
+                start_nodes: json_strings(ref node_json),
+                status_url: string_or(ref network, "status_url", ""),
+                network_timeout_ms: int_or(ref network, "timeout_ms", 3000)
+            }
+            m validate_settings(ref candidate)
+                Some(error) -> Err(error)
+                None -> Ok(candidate)
+
+pub f validate_settings(ref settings: SwitchyardSettings) -> Str?
+    if !unique_strings(ref settings.train_ids)
+        Some("simulation train identifiers must be unique")
+    else if !unique_strings(ref settings.start_nodes)
+        Some("simulation start nodes must be unique")
+    else if settings.bounded_depth > 16
+        Some("bounded_depth must not exceed 16 for this reference model")
+    else if settings.network_timeout_ms > 60000
+        Some("network.timeout_ms must not exceed 60000")
+    else None
+
+@post(result.len() == 64)
+pub f settings_digest(ref settings: SwitchyardSettings) -> Str
+    body := int_to_str(settings.version) + "\n" +
+        settings.topology_path + "\n" +
+        settings.database_path + "\n" +
+        int_to_str(settings.bounded_depth) + "\n"
+    i := 0
+    wh i < settings.train_ids.len()
+        body = body + settings.train_ids[i] + ":" + settings.start_nodes[i] + "\n"
+        i = i + 1
+    body = body + settings.status_url + "\n" +
+        int_to_str(settings.network_timeout_ms)
+    sha256(body)

@@ -1,0 +1,96 @@
+# Complete no-network, no-API-key acceptance check.
+
+us model
+us graph
+us kernel
+us explorer
+us settings
+us journal
+us scenarios
+
+f sample_settings() -> Str
+    "version = 1\n" +
+        "topology_path = \"examples/switchyard/fixtures/crossing.json\"\n" +
+        "database_path = \"examples/switchyard/.switchyard/events.db\"\n" +
+        "bounded_depth = 8\n" +
+        "[simulation]\n" +
+        "train_ids = [\"freight-7\", \"local-2\"]\n" +
+        "start_nodes = [\"north\", \"west\"]\n" +
+        "[network]\n" +
+        "status_url = \"\"\n" +
+        "timeout_ms = 3000\n"
+
+f run_checks() -> Int
+    passed := 0
+    topology := crossing_topology()
+    train_ids := scenario_train_ids()
+    start_nodes := scenario_start_nodes()
+    north_south := "north-south"
+    west_east := "west-east"
+
+    if is_none(validate_topology(ref topology))
+        passed = passed + 1
+    if routes_conflict(ref topology, ref north_south, ref west_east)
+        passed = passed + 1
+    if scalar_grant_is_safe(true, false, false)
+        passed = passed + 1
+    if next_audit_sequence(7) == 8 && next_route_index(2) == 3
+        passed = passed + 1
+
+    initial := initial_state(ref train_ids, ref start_nodes)
+    if check_safety(ref topology, ref initial).safe
+        passed = passed + 1
+
+    final_state := run_crossing_scenario(
+        ref topology,
+        copy_state(ref initial)
+    )
+    final_report := check_safety(ref topology, ref final_state)
+    if final_report.safe && event_count(ref final_state) == 9
+        passed = passed + 1
+    rejection_kind := "request_rejected"
+    if event_is_rejection(ref final_state, 1, ref rejection_kind)
+        passed = passed + 1
+
+    exploration := explore(
+        ref topology,
+        copy_state(ref initial),
+        8
+    )
+    if exploration.safe && exploration.explored_states > 1
+        passed = passed + 1
+
+    probe := collision_probe(ref train_ids, ref start_nodes)
+    probe_report := check_safety(ref topology, ref probe)
+    if !probe_report.safe && probe_report.property == "collision_freedom"
+        passed = passed + 1
+
+    m load_settings(sample_settings())
+        Err(_) -> print("FAIL: TOML settings")
+        Ok(loaded) ->
+            if (
+                loaded.bounded_depth == 8 &&
+                settings_digest(ref loaded).len() == 64
+            )
+                passed = passed + 1
+
+    m db_open_memory()
+        Err(_) -> print("FAIL: SQLite open")
+        Ok(db) ->
+            m initialize_journal(ref db)
+                Some(_) -> print("FAIL: SQLite schema")
+                None ->
+                    if journal_round_trip(
+                        ref db,
+                        ref topology,
+                        ref initial,
+                        ref final_state
+                    )
+                        passed = passed + 1
+            db_close(db)
+
+    print("Switchyard offline checks: " + int_to_str(passed) + "/11")
+    if passed == 11 then 0 else 1
+
+f main() -> Int
+    run_checks()

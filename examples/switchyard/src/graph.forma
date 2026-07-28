@@ -1,0 +1,266 @@
+# Topology decoding and connected-route validation.
+
+us model
+
+pub f string_or(ref value: Json, key: Str, fallback: Str) -> Str
+    m json_get_str(value, key)
+        Some(result) -> result
+        None -> fallback
+
+pub f int_or(ref value: Json, key: Str, fallback: Int) -> Int
+    m json_get_int(value, key)
+        Some(result) -> result
+        None -> fallback
+
+pub f json_object_or_empty(ref value: Json, key: Str) -> Json
+    m json_get(value, key)
+        Some(result) -> if json_is_object(result) then result else json_object()
+        None -> json_object()
+
+pub f array_or_empty(ref value: Json, key: Str) -> [Json]
+    m json_get_array(value, key)
+        Some(result) -> result
+        None -> []
+
+pub f json_strings(ref values: [Json]) -> [Str]
+    result := []
+    i := 0
+    wh i < values.len()
+        result = vec_push(result, json_to_value(values[i]))
+        i = i + 1
+    result
+
+pub f contains_str(ref values: [Str], ref target: Str) -> Bool
+    found := false
+    i := 0
+    wh i < values.len()
+        if values[i] == target
+            found = true
+        i = i + 1
+    found
+
+pub f unique_strings(ref values: [Str]) -> Bool
+    unique := true
+    i := 0
+    wh i < values.len()
+        j := i + 1
+        wh j < values.len()
+            if values[i] == values[j]
+                unique = false
+            j = j + 1
+        i = i + 1
+    unique
+
+pub f segment_index(ref topology: Topology, ref id: Str) -> Int
+    found := -1
+    i := 0
+    wh i < topology.segments.len()
+        if topology.segments[i].id == id
+            found = i
+        i = i + 1
+    found
+
+pub f route_index(ref topology: Topology, ref id: Str) -> Int
+    found := -1
+    i := 0
+    wh i < topology.routes.len()
+        if topology.routes[i].id == id
+            found = i
+        i = i + 1
+    found
+
+pub f decode_segment(ref value: Json) -> Segment
+    Segment {
+        id: string_or(ref value, "id", ""),
+        source: string_or(ref value, "source", ""),
+        target: string_or(ref value, "target", ""),
+        conflict_group: string_or(ref value, "conflict_group", "")
+    }
+
+pub f decode_segments(ref values: [Json]) -> [Segment]
+    result := []
+    i := 0
+    wh i < values.len()
+        result = vec_push(result, decode_segment(ref values[i]))
+        i = i + 1
+    result
+
+pub f decode_route(ref value: Json) -> Route
+    segment_json := array_or_empty(ref value, "segments")
+    Route {
+        id: string_or(ref value, "id", ""),
+        entry: string_or(ref value, "entry", ""),
+        exit: string_or(ref value, "exit", ""),
+        segments: json_strings(ref segment_json)
+    }
+
+pub f decode_routes(ref values: [Json]) -> [Route]
+    result := []
+    i := 0
+    wh i < values.len()
+        result = vec_push(result, decode_route(ref values[i]))
+        i = i + 1
+    result
+
+pub f decode_conflict(ref value: Json) -> RouteConflict
+    RouteConflict {
+        left: string_or(ref value, "left", ""),
+        right: string_or(ref value, "right", "")
+    }
+
+pub f decode_conflicts(ref values: [Json]) -> [RouteConflict]
+    result := []
+    i := 0
+    wh i < values.len()
+        result = vec_push(result, decode_conflict(ref values[i]))
+        i = i + 1
+    result
+
+pub f segment_ids_are_unique(ref topology: Topology) -> Bool
+    ids := []
+    i := 0
+    wh i < topology.segments.len()
+        ids = vec_push(ids, str(topology.segments[i].id))
+        i = i + 1
+    unique_strings(ref ids)
+
+pub f route_ids_are_unique(ref topology: Topology) -> Bool
+    ids := []
+    i := 0
+    wh i < topology.routes.len()
+        ids = vec_push(ids, str(topology.routes[i].id))
+        i = i + 1
+    unique_strings(ref ids)
+
+pub f segments_are_well_formed(ref topology: Topology) -> Bool
+    valid := true
+    i := 0
+    wh i < topology.segments.len()
+        if (
+            topology.segments[i].id.len() == 0 ||
+            topology.segments[i].source.len() == 0 ||
+            topology.segments[i].target.len() == 0 ||
+            topology.segments[i].source == topology.segments[i].target
+        )
+            valid = false
+        if (
+            !contains_str(ref topology.nodes, ref topology.segments[i].source) ||
+            !contains_str(ref topology.nodes, ref topology.segments[i].target)
+        )
+            valid = false
+        i = i + 1
+    valid
+
+pub f route_is_connected(ref topology: Topology, ref route: Route) -> Bool
+    if route.segments.len() == 0
+        false
+    else
+        valid := true
+        first_index := segment_index(ref topology, ref route.segments[0])
+        if first_index < 0
+            valid = false
+        else if topology.segments[first_index].source != route.entry
+            valid = false
+        i := 0
+        wh i < route.segments.len()
+            current := segment_index(ref topology, ref route.segments[i])
+            if current < 0
+                valid = false
+            if i + 1 < route.segments.len()
+                next := segment_index(ref topology, ref route.segments[i + 1])
+                if (
+                    current >= 0 && next >= 0 &&
+                    topology.segments[current].target != topology.segments[next].source
+                )
+                    valid = false
+            i = i + 1
+        last_index := segment_index(
+            ref topology,
+            ref route.segments[route.segments.len() - 1]
+        )
+        if (
+            last_index < 0 ||
+            topology.segments[last_index].target != route.exit
+        )
+            valid = false
+        valid
+
+pub f routes_are_well_formed(ref topology: Topology) -> Bool
+    valid := true
+    i := 0
+    wh i < topology.routes.len()
+        if (
+            topology.routes[i].id.len() == 0 ||
+            !contains_str(ref topology.nodes, ref topology.routes[i].entry) ||
+            !contains_str(ref topology.nodes, ref topology.routes[i].exit) ||
+            !unique_strings(ref topology.routes[i].segments) ||
+            !route_is_connected(ref topology, ref topology.routes[i])
+        )
+            valid = false
+        i = i + 1
+    valid
+
+pub f conflicts_are_well_formed(ref topology: Topology) -> Bool
+    valid := true
+    i := 0
+    wh i < topology.conflicts.len()
+        if (
+            topology.conflicts[i].left == topology.conflicts[i].right ||
+            route_index(ref topology, ref topology.conflicts[i].left) < 0 ||
+            route_index(ref topology, ref topology.conflicts[i].right) < 0
+        )
+            valid = false
+        i = i + 1
+    valid
+
+pub f routes_conflict(ref topology: Topology, ref left: Str, ref right: Str) -> Bool
+    if left == right
+        true
+    else
+        conflict := false
+        i := 0
+        wh i < topology.conflicts.len()
+            if (
+                topology.conflicts[i].left == left &&
+                topology.conflicts[i].right == right
+            ) || (
+                topology.conflicts[i].left == right &&
+                topology.conflicts[i].right == left
+            )
+                conflict = true
+            i = i + 1
+        conflict
+
+pub f validate_topology(ref topology: Topology) -> Str?
+    if !unique_strings(ref topology.nodes)
+        Some("topology node identifiers must be unique")
+    else if !segment_ids_are_unique(ref topology)
+        Some("segment identifiers must be unique")
+    else if !route_ids_are_unique(ref topology)
+        Some("route identifiers must be unique")
+    else if !segments_are_well_formed(ref topology)
+        Some("topology contains an invalid segment")
+    else if !routes_are_well_formed(ref topology)
+        Some("every route must be a connected path from entry to exit")
+    else if !conflicts_are_well_formed(ref topology)
+        Some("topology contains an invalid route conflict")
+    else None
+
+pub f topology_from_json(source: Str) -> Topology!Str
+    m json_parse(source)
+        Err(error) -> Err("invalid topology JSON: " + error)
+        Ok(root) ->
+            nodes_json := array_or_empty(ref root, "nodes")
+            segments_json := array_or_empty(ref root, "segments")
+            routes_json := array_or_empty(ref root, "routes")
+            conflicts_json := array_or_empty(ref root, "conflicts")
+            candidate := Topology {
+                id: string_or(ref root, "id", ""),
+                nodes: json_strings(ref nodes_json),
+                segments: decode_segments(ref segments_json),
+                routes: decode_routes(ref routes_json),
+                conflicts: decode_conflicts(ref conflicts_json)
+            }
+            m validate_topology(ref candidate)
+                Some(error) -> Err(error)
+                None -> Ok(candidate)

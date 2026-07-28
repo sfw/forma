@@ -54,6 +54,10 @@ Literals: `true`/`T`, `false`/`F`, `none`/`N`, `Some`, `Ok`/`ok`, `Err`/`err`
 ### Primitives
 `Int`, `Float`, `Bool`, `Char`, `Str`, `()` (Unit), `!` (Never)
 
+`Int` is signed 64-bit. Integer negation and `+ - * / %` trap on overflow or a
+zero divisor in Hosted and Native execution; signed division truncates toward
+zero.
+
 ### Sized integers
 `i8` `i16` `i32` `i64` `i128` `u8` `u16` `u32` `u64` `u128` `isize` `usize`
 
@@ -609,6 +613,7 @@ forma verify <path> --report --format json --examples 20 --seed 42
 forma verify <path> --level test --report
 forma verify <path> --level exhaustive --max-domain 4096 --report
 forma verify <path> --level formal --report
+forma verify <path> --level formal --report --solver z3 --require-proved --emit-smt target/formal
 forma verify <path> --report --max-steps 10000 --timeout 1000
 forma verify <path> --report --allow-side-effects
 forma grammar --format ebnf             # export grammar
@@ -623,6 +628,19 @@ forma lsp                               # start LSP server for IDE support
 forma typeof <file> --position L:C      # type at position
 forma complete <file> --position L:C    # completions
 ```
+
+Formal verification covers acyclic `Bool`/signed-64-bit-`Int` MIR
+path-sensitively and structural tuples/named structs composed from those leaves.
+It proves construction, projection, equality, projected field updates, and
+struct-invariant establishment/preservation at return boundaries; invariant
+parameters are assumed valid at entry. Arithmetic safety is checked and
+unsatisfiable preconditions/invariant assumptions are rejected as vacuous. Use
+`--fail-on-unknown` for a strict incompleteness gate or `--require-proved` to
+require every obligation-bearing function to be `PROVED`. The JSON report
+records solver identity, version when available, timeout, proof policy, and
+per-struct aggregate proof status. Direct pure source calls are symbolically
+inlined. Loops, recursive/indirect or effectful calls, arrays/vectors, indexing,
+and reference/dereference reasoning report `UNKNOWN`.
 
 **Security:** `--allow-all` enables file, network, process, env, and unsafe operations. Do not use on untrusted code. Prefer least-privilege: `--allow-read`, `--allow-write`, `--allow-network`, `--allow-exec`, `--allow-env`, `--allow-unsafe`. The `--allow-exec` flag permits shell command execution and should be treated as full shell access.
 

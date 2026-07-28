@@ -164,6 +164,12 @@ to another binding moves it unless the value is explicitly cloned.
 | `Str` | String | `"hello"` |
 | `()` | Unit (void) | `()` |
 
+`Int` is a signed 64-bit value. Negation, addition, subtraction,
+multiplication, division, and remainder are checked: overflow and a zero divisor
+are runtime errors in both Hosted interpretation and Native LLVM builds. Signed
+division truncates toward zero and remainder follows the dividend's sign.
+Formal verification uses these same semantics.
+
 ### Sized Integer Types
 
 | Signed | Unsigned |
@@ -921,10 +927,13 @@ Validate them in a fallible decoder before constructing an invariant-bearing
 value. Invariant failure is a programming defect, not an expected input error.
 
 `forma explain` includes invariant clauses and their runtime boundaries.
-`forma verify --report` counts them as obligations and reports formal
-preservation as `UNKNOWN`; the current SMT subset does not prove struct
-invariant preservation. The 0.2 LLVM path type-checks invariant declarations but
-does not yet inject native runtime checks.
+`forma verify --level formal --report` treats invariant establishment and
+preservation as implicit obligations. Invariant-bearing parameters are assumed
+valid at entry; struct literals, projected field updates, and returned values
+must satisfy their invariants. Named structs and tuples are supported when
+their scalar leaves are `Bool` or signed 64-bit `Int`. The 0.2 LLVM path
+type-checks invariant declarations but does not yet inject native runtime
+checks.
 
 Contracts are checked at runtime by default:
 
@@ -1065,9 +1074,28 @@ forma verify src --level exhaustive --max-domain 4096 --report
 
 # Attempt proof over the Experimental pure subset
 forma verify src --level formal --report
+
+# Make formal proof a CI gate and retain auditable obligations
+forma verify src --level formal --report --solver z3 \
+  --require-proved --emit-smt target/formal
 ```
 
 Verification runs with capabilities revoked by default (no file/network/exec side effects) unless `--allow-side-effects` is explicitly set. This makes it CI-safe and reproducible.
+
+The formal subset supports acyclic `Bool` and signed 64-bit `Int` MIR,
+including path-sensitive short-circuit control flow, plus structural tuples and
+named structs made from supported leaves. Construction, projection, structural
+equality, projected field updates, and struct-invariant establishment and
+return preservation become solver obligations. Arithmetic is checked for
+overflow, division uses truncation toward zero, and an unsatisfiable
+precondition or invariant assumption is reported `UNKNOWN` as a vacuous proof.
+`--solver` selects the solver executable, `--solver-timeout` bounds each query,
+`--emit-smt` retains proof and assumption queries, `--fail-on-unknown` rejects
+incomplete attempts, and `--require-proved` requires every obligation-bearing
+function to be `PROVED`. Direct pure source calls are symbolically inlined.
+Loops, recursive/indirect or effectful calls, arrays/vectors, indexing, and
+reference/dereference reasoning remain outside this subset and report
+`UNKNOWN`.
 
 Example:
 
@@ -1487,6 +1515,11 @@ When running `forma verify`, capabilities are revoked by default. Only use `--al
 - Resource controls for verify:
   - `--max-steps` limits interpreter steps per generated example
   - `--timeout` sets per-example timeout budget in milliseconds
+  - `--solver-timeout` sets the formal solver timeout per query
+  - `--emit-smt DIR` writes decision-only proof, precondition-satisfiability,
+    and conditional counterexample-model SMT-LIB files
+  - `--fail-on-unknown` makes incomplete formal coverage fail the command
+  - `--require-proved` requires all contracted functions to be formally proved
 
 ### Error Formats
 

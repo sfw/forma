@@ -1,0 +1,176 @@
+# Durable SQLite event journal and deterministic replay.
+
+us model
+us graph
+us kernel
+us explorer
+
+pub f initialize_journal(ref db: Database) -> Str?
+    m db_execute(
+        db,
+        "CREATE TABLE IF NOT EXISTS switchyard_events (run_id TEXT NOT NULL, sequence INTEGER NOT NULL, tick INTEGER NOT NULL, train_id TEXT NOT NULL, kind TEXT NOT NULL, route_id TEXT NOT NULL, segment_id TEXT NOT NULL, accepted INTEGER NOT NULL, reason TEXT NOT NULL, PRIMARY KEY(run_id, sequence))"
+    )
+        Err(error) -> Some(error)
+        Ok(_) -> None
+
+pub f persist_event(
+    ref db: Database,
+    run_id: Str,
+    ref event: InterlockingEvent
+) -> Str?
+    m db_prepare(
+        db,
+        "INSERT INTO switchyard_events(run_id, sequence, tick, train_id, kind, route_id, segment_id, accepted, reason) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    )
+        Err(error) -> Some(error)
+        Ok(statement) ->
+            m db_execute_prepared(
+                statement,
+                [
+                    run_id,
+                    int_to_str(event.sequence),
+                    int_to_str(event.tick),
+                    str(event.train_id),
+                    str(event.kind),
+                    str(event.route_id),
+                    str(event.segment_id),
+                    if event.accepted then "1" else "0",
+                    str(event.reason)
+                ]
+            )
+                Err(error) -> Some(error)
+                Ok(_) -> None
+
+pub f persist_events(
+    ref db: Database,
+    run_id: Str,
+    ref events: [InterlockingEvent]
+) -> Str?
+    error := None
+    i := 0
+    wh i < events.len()
+        m persist_event(ref db, str(run_id), ref events[i])
+            Some(message) ->
+                if is_none(error)
+                    error = Some(message)
+            None -> error = error
+        i = i + 1
+    error
+
+pub f load_events(
+    ref db: Database,
+    ref run_id: Str
+) -> [InterlockingEvent]!Str
+    m db_prepare(
+        db,
+        "SELECT sequence, tick, train_id, kind, route_id, segment_id, accepted, reason FROM switchyard_events WHERE run_id = ? ORDER BY sequence ASC"
+    )
+        Err(error) -> Err(error)
+        Ok(statement) ->
+            m db_query_prepared(statement, [str(run_id)])
+                Err(error) -> Err(error)
+                Ok(rows) ->
+                    result := []
+                    i := 0
+                    wh i < rows.len()
+                        result = vec_push(
+                            result,
+                            InterlockingEvent {
+                                sequence: row_get_int(rows[i], 0),
+                                tick: row_get_int(rows[i], 1),
+                                train_id: row_get_str(rows[i], 2),
+                                kind: row_get_str(rows[i], 3),
+                                route_id: row_get_str(rows[i], 4),
+                                segment_id: row_get_str(rows[i], 5),
+                                accepted: row_get_int(rows[i], 6) == 1,
+                                reason: row_get_str(rows[i], 7)
+                            }
+                        )
+                        i = i + 1
+                    Ok(result)
+
+pub f replay(
+    ref topology: Topology,
+    initial: InterlockingState,
+    ref events: [InterlockingEvent]
+) -> InterlockingState
+    state := initial
+    i := 0
+    wh i < events.len()
+        if (
+            events[i].kind == "route_reserved" ||
+            events[i].kind == "request_rejected"
+        )
+            transition := request_route(
+                ref topology,
+                state,
+                str(events[i].train_id),
+                str(events[i].route_id)
+            )
+            state = take_transition_state(transition)
+        else if (
+            events[i].kind == "train_advanced" ||
+            events[i].kind == "route_released" ||
+            events[i].kind == "advance_rejected"
+        )
+            transition := advance_train(
+                ref topology,
+                state,
+                str(events[i].train_id)
+            )
+            state = take_transition_state(transition)
+        else if (
+            events[i].kind == "emergency_stopped" ||
+            events[i].kind == "emergency_stop_rejected"
+        )
+            transition := emergency_stop(state, str(events[i].train_id))
+            state = take_transition_state(transition)
+        i = i + 1
+    state
+
+pub f events_equal(
+    ref left: InterlockingEvent,
+    ref right: InterlockingEvent
+) -> Bool
+    left.sequence == right.sequence &&
+        left.tick == right.tick &&
+        left.train_id == right.train_id &&
+        left.kind == right.kind &&
+        left.route_id == right.route_id &&
+        left.segment_id == right.segment_id &&
+        left.accepted == right.accepted &&
+        left.reason == right.reason
+
+pub f event_logs_equal(
+    ref left: [InterlockingEvent],
+    ref right: [InterlockingEvent]
+) -> Bool
+    equal := left.len() == right.len()
+    i := 0
+    wh i < left.len() && i < right.len()
+        if !events_equal(ref left[i], ref right[i])
+            equal = false
+        i = i + 1
+    equal
+
+pub f journal_round_trip(
+    ref db: Database,
+    ref topology: Topology,
+    ref initial: InterlockingState,
+    ref final_state: InterlockingState
+) -> Bool
+    run_id := uuid_v4()
+    m persist_events(ref db, str(run_id), ref final_state.events)
+        Some(_) -> false
+        None ->
+            m load_events(ref db, ref run_id)
+                Err(_) -> false
+                Ok(loaded) ->
+                    replayed := replay(
+                        ref topology,
+                        copy_state(ref initial),
+                        ref loaded
+                    )
+                    operationally_equal(ref replayed, ref final_state) &&
+                        event_sequence_is_valid(ref replayed) &&
+                        event_logs_equal(ref replayed.events, ref final_state.events)

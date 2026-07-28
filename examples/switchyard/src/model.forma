@@ -1,0 +1,165 @@
+# Switchyard domain model.
+#
+# The topology is immutable. InterlockingState is owned by the pure transition
+# kernel, so each accepted command creates the next complete state.
+
+pub s Segment
+    id: Str
+    source: Str
+    target: Str
+    conflict_group: Str
+
+pub s Route
+    id: Str
+    entry: Str
+    exit: Str
+    segments: [Str]
+
+pub s RouteConflict
+    left: Str
+    right: Str
+
+@inv(id.len() > 0, "topology id must not be empty")
+@inv(nodes.len() > 0, "topology must contain nodes")
+@inv(segments.len() > 0, "topology must contain segments")
+@inv(routes.len() > 0, "topology must contain routes")
+pub s Topology
+    id: Str
+    nodes: [Str]
+    segments: [Segment]
+    routes: [Route]
+    conflicts: [RouteConflict]
+
+@inv(id.len() > 0, "train id must not be empty")
+@inv(
+    status == "idle" || status == "reserved" || status == "moving" ||
+        status == "arrived" || status == "emergency_stopped",
+    "train status must be recognized"
+)
+@inv(next_segment >= 0, "next segment index must be non-negative")
+@inv(status == "idle" => route_id.len() == 0)
+@inv(status == "idle" => segment_id.len() == 0)
+@inv(status == "arrived" => segment_id.len() == 0)
+pub s Train
+    id: Str
+    node_id: Str
+    route_id: Str
+    segment_id: Str
+    next_segment: Int
+    status: Str
+
+@inv(train_id.len() > 0, "reservation train id must not be empty")
+@inv(route_id.len() > 0, "reservation route id must not be empty")
+pub s Reservation
+    train_id: Str
+    route_id: Str
+    active: Bool
+
+@inv(sequence >= 0, "event sequence must be non-negative")
+@inv(tick >= 0, "event tick must be non-negative")
+@inv(kind.len() > 0, "event kind must not be empty")
+@inv(accepted => reason.len() == 0)
+@inv(!accepted => reason.len() > 0)
+pub s InterlockingEvent
+    sequence: Int
+    tick: Int
+    train_id: Str
+    kind: Str
+    route_id: Str
+    segment_id: Str
+    accepted: Bool
+    reason: Str
+
+@inv(tick >= 0, "logical tick must be non-negative")
+@inv(trains.len() > 0, "state must retain every train")
+@inv(next_sequence == events.len(), "event sequence must remain contiguous")
+pub s InterlockingState
+    tick: Int
+    trains: [Train]
+    reservations: [Reservation]
+    events: [InterlockingEvent]
+    next_sequence: Int
+
+@inv(kind == "request" || kind == "advance" || kind == "emergency_stop")
+@inv(train_id.len() > 0, "command train id must not be empty")
+@inv(kind != "request" => route_id.len() == 0)
+pub s Command
+    kind: Str
+    train_id: Str
+    route_id: Str
+
+@inv(accepted => error.len() == 0, "accepted transitions cannot contain errors")
+@inv(!accepted => error.len() > 0, "rejected transitions require an error")
+pub s Transition
+    state: InterlockingState
+    accepted: Bool
+    error: Str
+
+pub s SafetyReport
+    safe: Bool
+    property: Str
+    detail: Str
+
+@inv(depth >= 0, "search depth must be non-negative")
+pub s SearchNode
+    state: InterlockingState
+    depth: Int
+    trace: [Str]
+
+@inv(explored_states >= 0, "explored state count must be non-negative")
+@inv(max_depth >= 0, "maximum search depth must be non-negative")
+@inv(safe => property.len() == 0)
+@inv(!safe => property.len() > 0)
+pub s ExplorationResult
+    safe: Bool
+    explored_states: Int
+    max_depth: Int
+    property: Str
+    counterexample: [Str]
+
+@inv(version == 1, "settings version must be 1")
+@inv(topology_path.len() > 0, "topology path must not be empty")
+@inv(database_path.len() > 0, "database path must not be empty")
+@inv(bounded_depth > 0, "bounded depth must be positive")
+@inv(train_ids.len() == start_nodes.len(), "every train requires one start node")
+@inv(train_ids.len() > 0, "at least one train must be configured")
+@inv(network_timeout_ms > 0, "network timeout must be positive")
+pub s SwitchyardSettings
+    version: Int
+    topology_path: Str
+    database_path: Str
+    bounded_depth: Int
+    train_ids: [Str]
+    start_nodes: [Str]
+    status_url: Str
+    network_timeout_ms: Int
+
+@post(result.id == old(id))
+@post(result.status == "idle")
+@post(result.route_id.len() == 0)
+@post(result.segment_id.len() == 0)
+pub f train_at(id: Str, node_id: Str) -> Train
+    Train {
+        id: id,
+        node_id: node_id,
+        route_id: "",
+        segment_id: "",
+        next_segment: 0,
+        status: "idle"
+    }
+
+@post(result.train_id == old(train_id))
+@post(result.route_id == old(route_id))
+@post(result.active)
+pub f active_reservation(train_id: Str, route_id: Str) -> Reservation
+    Reservation { train_id: train_id, route_id: route_id, active: true }
+
+@post(result.kind == old(kind))
+@post(result.train_id == old(train_id))
+@post(result.route_id == old(route_id))
+pub f command(kind: Str, train_id: Str, route_id: Str) -> Command
+    Command { kind: kind, train_id: train_id, route_id: route_id }
+
+@post(result.safe == safe)
+pub f safety_report(safe: Bool, property: Str, detail: Str) -> SafetyReport
+    SafetyReport { safe: safe, property: property, detail: detail }

@@ -1,0 +1,232 @@
+# Switchyard: verified railway-interlocking reference application.
+
+us model
+us graph
+us kernel
+us explorer
+us settings
+us journal
+us scenarios
+
+f usage() -> Int
+    print("Forma Switchyard")
+    print("Usage:")
+    print("  forma run --allow-read main.forma check [settings.toml]")
+    print("  forma run --allow-read main.forma verify [settings.toml]")
+    print("  forma run --allow-read --allow-write main.forma simulate [settings.toml]")
+    print("  forma run --allow-read --allow-network main.forma publish [settings.toml]")
+    2
+
+f load_configuration(
+    settings_path: Str
+) -> (SwitchyardSettings, Topology)!Str
+    m file_read(settings_path)
+        Err(error) -> Err("settings read failed: " + error)
+        Ok(source) ->
+            m load_settings(source)
+                Err(error) -> Err(error)
+                Ok(settings) ->
+                    m file_read(settings.topology_path)
+                        Err(error) -> Err("topology read failed: " + error)
+                        Ok(topology_source) ->
+                            m topology_from_json(topology_source)
+                                Err(error) -> Err(error)
+                                Ok(topology) -> Ok((settings, topology))
+
+as f candidate_count_worker(train_count: Int, route_count: Int) -> Int
+    train_count * (route_count + 2)
+
+f concurrent_candidate_count(train_count: Int, route_count: Int) -> Int
+    task := sp candidate_count_worker(train_count, route_count)
+    aw task
+
+f status_channel_round_trip() -> Str!Str
+    channel := channel_new(1)
+    sender := channel.0
+    receiver := channel.1
+    sent := channel_send(sender, "bounded exploration started")
+    channel_close(sender)
+    if !is_ok(sent)
+        Err("verification status channel send failed")
+    else channel_recv(receiver)
+
+f verify_configuration(
+    settings: SwitchyardSettings,
+    topology: Topology
+) -> Int
+    initial := initial_state(ref settings.train_ids, ref settings.start_nodes)
+    probe := collision_probe(ref settings.train_ids, ref settings.start_nodes)
+    probe_report := check_safety(ref topology, ref probe)
+    candidates_per_state := concurrent_candidate_count(
+        settings.train_ids.len(),
+        topology.routes.len()
+    )
+    result := explore(ref topology, initial, settings.bounded_depth)
+    status_message := status_channel_round_trip()
+    m status_message
+        Err(error) ->
+            print("Verification status channel failed: " + error)
+            1
+        Ok(message) ->
+            print(message)
+            print(
+                "Bounded exploration: " +
+                    int_to_str(exploration_state_count(ref result)) +
+                    " states through depth " +
+                    int_to_str(exploration_depth(ref result))
+            )
+            print(
+                "Candidate commands per state: " +
+                    int_to_str(candidates_per_state)
+            )
+            if !exploration_is_safe(ref result)
+                print(
+                    "Counterexample: " +
+                        exploration_property(ref result)
+                )
+                counterexample := exploration_trace(ref result)
+                i := 0
+                wh i < counterexample.len()
+                    print("  " + string_at(ref counterexample, i))
+                    i = i + 1
+                1
+            else if (
+                report_is_safe(ref probe_report) ||
+                report_property(ref probe_report) != "collision_freedom"
+            )
+                print("Checker self-test failed")
+                1
+            else
+                print("Safety properties hold within the explored bound")
+                print("Counterexample self-test: detected collision_freedom")
+                0
+
+f ensure_parent(ref path: Str) -> Bool
+    m path_parent(path)
+        None -> true
+        Some(parent) ->
+            m dir_create_all(parent)
+                Ok(_) -> true
+                Err(_) -> false
+
+f simulate(
+    ref settings: SwitchyardSettings,
+    ref topology: Topology
+) -> Int
+    initial := initial_state(ref settings.train_ids, ref settings.start_nodes)
+    final_state := run_crossing_scenario(
+        ref topology,
+        copy_state(ref initial)
+    )
+    report := check_safety(ref topology, ref final_state)
+    if !report.safe
+        print("Simulation unsafe: " + report.property)
+        1
+    else if !ensure_parent(ref settings.database_path)
+        print("Could not create journal directory")
+        1
+    else
+        m db_open(settings.database_path)
+            Err(error) ->
+                print("Journal open failed: " + error)
+                1
+            Ok(db) ->
+                m initialize_journal(ref db)
+                    Some(error) ->
+                        print("Journal schema failed: " + error)
+                        db_close(db)
+                        1
+                    None ->
+                        round_trip := journal_round_trip(
+                            ref db,
+                            ref topology,
+                            ref initial,
+                            ref final_state
+                        )
+                        db_close(db)
+                        print(
+                            "Simulation completed with " +
+                                int_to_str(final_state.events.len()) +
+                                " audited transitions"
+                        )
+                        if round_trip
+                            print("SQLite replay matches final operational state")
+                            0
+                        else
+                            print("SQLite replay mismatch")
+                            1
+
+f publish_status(
+    ref settings: SwitchyardSettings,
+    ref topology: Topology
+) -> Int
+    if settings.status_url.len() == 0
+        print("network.status_url is empty; deterministic operation needs no network")
+        2
+    else
+        initial := initial_state(ref settings.train_ids, ref settings.start_nodes)
+        result := explore(ref topology, initial, settings.bounded_depth)
+        document := json_object()
+        document = json_set(
+            document,
+            "topology",
+            json_from_str(str(topology.id))
+        )
+        document = json_set(document, "safe", json_from_bool(result.safe))
+        document = json_set(
+            document,
+            "explored_states",
+            json_from_int(result.explored_states)
+        )
+        document = json_set(
+            document,
+            "max_depth",
+            json_from_int(result.max_depth)
+        )
+        headers := map_new()
+        headers = map_insert(headers, "content-type", "application/json")
+        m http_request(
+            "POST",
+            settings.status_url,
+            json_stringify(document),
+            headers,
+            settings.network_timeout_ms,
+            false
+        )
+            Err(error) ->
+                print("Status publication failed: " + error)
+                1
+            Ok(response) ->
+                print("Status endpoint returned HTTP " + int_to_str(response.0))
+                if response.0 >= 200 && response.0 < 300 then 0 else 1
+
+f run_command(command_name: Str, settings_path: Str) -> Int
+    m load_configuration(settings_path)
+        Err(error) ->
+            print(error)
+            1
+        Ok(configuration) ->
+            settings := configuration.0
+            topology := configuration.1
+            if command_name == "check"
+                print("Switchyard configuration valid")
+                print("Topology: " + topology.id)
+                print("Settings digest: " + settings_digest(ref settings))
+                0
+            else if command_name == "verify"
+                verify_configuration(settings, topology)
+            else if command_name == "simulate"
+                simulate(ref settings, ref topology)
+            else if command_name == "publish"
+                publish_status(ref settings, ref topology)
+            else usage()
+
+f main() -> Int
+    arguments := args()
+    command_name := m vec_get(arguments, 0)
+        Some(value) -> value
+        None -> ""
+    settings_path := m vec_get(arguments, 1)
+        Some(value) -> value
+        None -> "examples/switchyard/switchyard.settings.toml"
+    run_command(command_name, settings_path)

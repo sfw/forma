@@ -5,7 +5,8 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use forma::errors::ErrorContext;
 use forma::lexer::Span;
-use forma::mir::{Interpreter, Lowerer, Value};
+use forma::mir::mir::PassMode;
+use forma::mir::{Function, Interpreter, Lowerer, Program, Rvalue, StatementKind, Value};
 use forma::module::ModuleLoader;
 use forma::{
     BorrowChecker, Compilation, CompilerSession, Parser as FormaParser, Scanner, TypeChecker,
@@ -18,6 +19,7 @@ use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process;
+use std::time::Duration;
 
 /// Error format for output
 #[derive(Clone, Copy, Debug, Default, PartialEq, ValueEnum)]
@@ -348,6 +350,26 @@ enum Commands {
         /// Allow generated examples to run with full capabilities
         #[arg(long)]
         allow_side_effects: bool,
+
+        /// Z3-compatible SMT solver executable (defaults to FORMA_SMT_SOLVER or z3)
+        #[arg(long)]
+        solver: Option<String>,
+
+        /// SMT solver timeout per query in milliseconds
+        #[arg(long, default_value_t = 5_000)]
+        solver_timeout: u64,
+
+        /// Write generated SMT-LIB obligations to this directory
+        #[arg(long)]
+        emit_smt: Option<PathBuf>,
+
+        /// Fail when any contract- or invariant-bearing function is not formally proved
+        #[arg(long)]
+        require_proved: bool,
+
+        /// Fail when verification reports an UNKNOWN result
+        #[arg(long)]
+        fail_on_unknown: bool,
     },
 }
 
@@ -455,6 +477,11 @@ fn main() {
             max_steps,
             timeout,
             allow_side_effects,
+            solver,
+            solver_timeout,
+            emit_smt,
+            require_proved,
+            fail_on_unknown,
         } => verify(
             &path,
             VerifyConfig {
@@ -467,6 +494,13 @@ fn main() {
                 max_steps,
                 timeout_ms: timeout,
                 allow_side_effects,
+                solver: solver
+                    .or_else(|| std::env::var("FORMA_SMT_SOLVER").ok())
+                    .unwrap_or_else(|| "z3".to_string()),
+                solver_timeout_ms: solver_timeout,
+                emit_smt,
+                require_proved,
+                fail_on_unknown,
             },
             error_format,
         ),
@@ -567,7 +601,7 @@ fn output_json_errors(errors: Vec<JsonError>, items_count: Option<usize>) {
     print_json(&output);
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
 enum ContractTestStatus {
     Tested,
@@ -680,6 +714,18 @@ struct VerifySummary {
 struct VerifyOutput {
     files: Vec<VerifyFileReport>,
     summary: VerifySummary,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    formal: Option<FormalMetadata>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct FormalMetadata {
+    solver: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    solver_version: Option<String>,
+    timeout_ms: u64,
+    require_proved: bool,
+    fail_on_unknown: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -689,7 +735,7 @@ struct SafetyConfig {
     allow_side_effects: bool,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct VerifyConfig {
     report: bool,
     format: VerifyFormat,
@@ -700,6 +746,11 @@ struct VerifyConfig {
     max_steps: usize,
     timeout_ms: u64,
     allow_side_effects: bool,
+    solver: String,
+    solver_timeout_ms: u64,
+    emit_smt: Option<PathBuf>,
+    require_proved: bool,
+    fail_on_unknown: bool,
 }
 
 fn compile_program_for_analysis_shared(
@@ -1956,9 +2007,70 @@ fn collect_forma_files(path: &Path) -> Result<Vec<PathBuf>, String> {
     Ok(out)
 }
 
+fn invariant_obligation_types(program: &Program, function: &Function) -> Vec<String> {
+    let mut types = std::collections::BTreeSet::new();
+    collect_invariant_types(program, &function.return_ty, &mut types);
+    for (index, (_, ty)) in function.params.iter().enumerate() {
+        if function
+            .param_pass_modes
+            .get(index)
+            .is_some_and(|mode| *mode == PassMode::RefMut)
+        {
+            collect_invariant_types(program, ty, &mut types);
+        }
+    }
+    for block in &function.blocks {
+        for statement in &block.stmts {
+            match &statement.kind {
+                StatementKind::Assign(_, Rvalue::Struct(type_name, _))
+                    if program.struct_invariants.contains_key(type_name) =>
+                {
+                    types.insert(type_name.clone());
+                }
+                StatementKind::AssignPlace(place, _) => {
+                    if let Some(local) = function.locals.get(place.local.0 as usize) {
+                        collect_invariant_types(program, &local.ty, &mut types);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    types.into_iter().collect()
+}
+
+fn collect_invariant_types(
+    program: &Program,
+    ty: &forma::types::Ty,
+    output: &mut std::collections::BTreeSet<String>,
+) {
+    match ty {
+        forma::types::Ty::Named(id, arguments) => {
+            if program.struct_invariants.contains_key(&id.name) {
+                output.insert(id.name.clone());
+            }
+            for argument in arguments {
+                collect_invariant_types(program, argument, output);
+            }
+        }
+        forma::types::Ty::Tuple(elements) => {
+            for element in elements {
+                collect_invariant_types(program, element, output);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn verify(path: &Path, config: VerifyConfig, error_format: ErrorFormat) -> Result<(), String> {
     if !config.report {
         return Err("verify currently requires --report".to_string());
+    }
+    if config.require_proved && config.level != VerifyLevel::Formal {
+        return Err("--require-proved requires --level formal".to_string());
+    }
+    if config.emit_smt.is_some() && config.level != VerifyLevel::Formal {
+        return Err("--emit-smt requires --level formal".to_string());
     }
 
     let files = collect_forma_files(path)?;
@@ -1974,6 +2086,14 @@ fn verify(path: &Path, config: VerifyConfig, error_format: ErrorFormat) -> Resul
     let mut report_files = Vec::new();
     let mut summary = VerifySummary::default();
     let mut had_failures = false;
+    if let Some(directory) = &config.emit_smt {
+        fs::create_dir_all(directory).map_err(|error| {
+            format!(
+                "failed to create SMT artifact directory '{}': {error}",
+                directory.display()
+            )
+        })?;
+    }
 
     if config.allow_side_effects && matches!(config.format, VerifyFormat::Human) {
         eprintln!("WARNING: Running verification with side effects enabled");
@@ -2028,7 +2148,14 @@ fn verify(path: &Path, config: VerifyConfig, error_format: ErrorFormat) -> Resul
             }
             summary.total_functions += 1;
 
-            let contract_count = func.preconditions.len() + func.postconditions.len();
+            let invariant_obligations = invariant_obligation_types(&program, func);
+            let contract_count = func.preconditions.len()
+                + func.postconditions.len()
+                + if config.level == VerifyLevel::Formal {
+                    invariant_obligations.len()
+                } else {
+                    0
+                };
             if contract_count == 0 {
                 summary.warnings += 1;
                 function_reports.push(VerifyFunctionReport {
@@ -2060,7 +2187,7 @@ fn verify(path: &Path, config: VerifyConfig, error_format: ErrorFormat) -> Resul
                         vec!["effects never produce a false proof".to_string()],
                     )
                 } else {
-                    match forma::verify::build_smt_obligation(func) {
+                    match forma::verify::build_smt_obligation_in_program(&program, func) {
                         Err(reason) => {
                             summary.unknown += 1;
                             (
@@ -2074,50 +2201,128 @@ fn verify(path: &Path, config: VerifyConfig, error_format: ErrorFormat) -> Resul
                             )
                         }
                         Ok(obligation) => {
-                            let solver = std::env::var("FORMA_SMT_SOLVER")
-                                .unwrap_or_else(|_| "z3".to_string());
-                            match forma::verify::run_solver(&obligation, &solver) {
+                            if let Some(directory) = &config.emit_smt {
+                                let file_name = file
+                                    .file_stem()
+                                    .and_then(|stem| stem.to_str())
+                                    .unwrap_or("forma");
+                                let function_name = name
+                                    .chars()
+                                    .map(|character| {
+                                        if character.is_ascii_alphanumeric() || character == '_' {
+                                            character
+                                        } else {
+                                            '_'
+                                        }
+                                    })
+                                    .collect::<String>();
+                                let base = format!("{file_name}--{function_name}");
+                                fs::write(
+                                    directory.join(format!("{base}.smt2")),
+                                    &obligation.script,
+                                )
+                                .map_err(|error| {
+                                    format!("failed to write SMT obligation: {error}")
+                                })?;
+                                fs::write(
+                                    directory.join(format!("{base}.assumptions.smt2")),
+                                    &obligation.assumptions_script,
+                                )
+                                .map_err(|error| {
+                                    format!("failed to write SMT assumptions: {error}")
+                                })?;
+                                fs::write(
+                                    directory.join(format!("{base}.counterexample.smt2")),
+                                    &obligation.counterexample_script,
+                                )
+                                .map_err(|error| {
+                                    format!("failed to write SMT counterexample query: {error}")
+                                })?;
+                            }
+                            let solver_timeout = Duration::from_millis(config.solver_timeout_ms);
+                            match forma::verify::check_assumptions(
+                                &obligation,
+                                &config.solver,
+                                solver_timeout,
+                            ) {
                                 forma::verify::FormalResult::Proved => {
-                                    summary.proved += 1;
+                                    summary.unknown += 1;
                                     (
-                                        ContractTestStatus::Proved,
-                                        None,
-                                        vec![],
+                                        ContractTestStatus::Unknown,
+                                        Some(
+                                            "preconditions and parameter domains are unsatisfiable"
+                                                .to_string(),
+                                        ),
+                                        vec!["proof rejected as vacuous".to_string()],
                                         vec![format!(
-                                            "proved from a {}-byte SMT-LIB obligation",
+                                            "generated a {}-byte SMT-LIB obligation",
                                             obligation.script.len()
                                         )],
-                                    )
-                                }
-                                forma::verify::FormalResult::Counterexample(model) => {
-                                    summary.failures += 1;
-                                    had_failures = true;
-                                    let model = model
-                                        .into_iter()
-                                        .map(|(name, value)| format!("{name} = {value}"))
-                                        .collect::<Vec<_>>()
-                                        .join(", ");
-                                    (
-                                        ContractTestStatus::Counterexample,
-                                        None,
-                                        vec![format!("solver counterexample: {model}")],
-                                        vec![
-                                            "counterexample values are solver-reproducible"
-                                                .to_string(),
-                                        ],
                                     )
                                 }
                                 forma::verify::FormalResult::Unknown(reason) => {
                                     summary.unknown += 1;
                                     (
                                         ContractTestStatus::Unknown,
-                                        Some(reason),
+                                        Some(format!(
+                                            "cannot establish precondition satisfiability: {reason}"
+                                        )),
                                         vec![],
                                         vec![format!(
                                             "generated {} bytes of SMT-LIB for the pure subset",
                                             obligation.script.len()
                                         )],
                                     )
+                                }
+                                forma::verify::FormalResult::Counterexample(_) => {
+                                    match forma::verify::run_solver_with_timeout(
+                                        &obligation,
+                                        &config.solver,
+                                        solver_timeout,
+                                    ) {
+                                        forma::verify::FormalResult::Proved => {
+                                            summary.proved += 1;
+                                            (
+                                                ContractTestStatus::Proved,
+                                                None,
+                                                vec![],
+                                                vec![format!(
+                                                    "proved from a {}-byte SMT-LIB obligation after a satisfiable-precondition check",
+                                                    obligation.script.len()
+                                                )],
+                                            )
+                                        }
+                                        forma::verify::FormalResult::Counterexample(model) => {
+                                            summary.failures += 1;
+                                            had_failures = true;
+                                            let model = model
+                                                .into_iter()
+                                                .map(|(name, value)| format!("{name} = {value}"))
+                                                .collect::<Vec<_>>()
+                                                .join(", ");
+                                            (
+                                                ContractTestStatus::Counterexample,
+                                                None,
+                                                vec![format!("solver counterexample: {model}")],
+                                                vec![
+                                                    "counterexample values are solver-reproducible"
+                                                        .to_string(),
+                                                ],
+                                            )
+                                        }
+                                        forma::verify::FormalResult::Unknown(reason) => {
+                                            summary.unknown += 1;
+                                            (
+                                                ContractTestStatus::Unknown,
+                                                Some(reason),
+                                                vec![],
+                                                vec![format!(
+                                                    "generated {} bytes of SMT-LIB for the pure subset",
+                                                    obligation.script.len()
+                                                )],
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -2246,6 +2451,47 @@ fn verify(path: &Path, config: VerifyConfig, error_format: ErrorFormat) -> Resul
             });
         }
 
+        if config.level == VerifyLevel::Formal {
+            for invariant_report in &mut invariant_reports {
+                let relevant = program
+                    .functions
+                    .iter()
+                    .filter(|(name, function)| {
+                        name.as_str() != "main"
+                            && invariant_obligation_types(&program, function)
+                                .contains(&invariant_report.type_name)
+                    })
+                    .filter_map(|(name, _)| {
+                        function_reports.iter().find(|report| report.name == *name)
+                    })
+                    .collect::<Vec<_>>();
+                if relevant.is_empty() {
+                    invariant_report.limitations = vec![
+                        "no construction, mutation, or return boundary for this type was found"
+                            .to_string(),
+                    ];
+                    continue;
+                }
+                invariant_report.formal_status = if relevant
+                    .iter()
+                    .any(|report| report.status == ContractTestStatus::Counterexample)
+                {
+                    ContractTestStatus::Counterexample
+                } else if relevant
+                    .iter()
+                    .all(|report| report.status == ContractTestStatus::Proved)
+                {
+                    ContractTestStatus::Proved
+                } else {
+                    ContractTestStatus::Unknown
+                };
+                invariant_report.limitations = vec![format!(
+                    "summarizes {} function proof(s) containing establishment, projected mutation, or return obligations",
+                    relevant.len()
+                )];
+            }
+        }
+
         report_files.push(VerifyFileReport {
             path: display,
             file_error: None,
@@ -2257,12 +2503,30 @@ fn verify(path: &Path, config: VerifyConfig, error_format: ErrorFormat) -> Resul
     let output = VerifyOutput {
         files: report_files,
         summary,
+        formal: (config.level == VerifyLevel::Formal).then(|| FormalMetadata {
+            solver: config.solver.clone(),
+            solver_version: forma::verify::solver_version(&config.solver).ok(),
+            timeout_ms: config.solver_timeout_ms,
+            require_proved: config.require_proved,
+            fail_on_unknown: config.fail_on_unknown,
+        }),
     };
 
     match config.format {
         VerifyFormat::Json => print_json(&output),
         VerifyFormat::Human => {
             println!("FORMA Verification Report");
+            if let Some(formal) = &output.formal {
+                let version = formal.solver_version.as_deref().unwrap_or("unavailable");
+                println!(
+                    "Solver: {} ({version}), timeout: {} ms",
+                    formal.solver, formal.timeout_ms
+                );
+                println!(
+                    "Policy: require-proved={}, fail-on-unknown={}",
+                    formal.require_proved, formal.fail_on_unknown
+                );
+            }
             println!();
             for file in &output.files {
                 println!("{}", file.path);
@@ -2288,7 +2552,7 @@ fn verify(path: &Path, config: VerifyConfig, error_format: ErrorFormat) -> Resul
                         ContractTestStatus::Untested => "⚠ UNTESTED",
                     };
                     println!(
-                        "  {} {:<24} contracts:{} examples:{}/{}",
+                        "  {} {:<24} obligations:{} examples:{}/{}",
                         badge,
                         function.name,
                         function.contract_count,
@@ -2307,7 +2571,7 @@ fn verify(path: &Path, config: VerifyConfig, error_format: ErrorFormat) -> Resul
             println!("Summary");
             println!("  Functions: {}", output.summary.total_functions);
             println!(
-                "  With contracts: {}",
+                "  With obligations: {}",
                 output.summary.functions_with_contracts
             );
             println!(
@@ -2329,6 +2593,12 @@ fn verify(path: &Path, config: VerifyConfig, error_format: ErrorFormat) -> Resul
         }
     }
 
+    if config.fail_on_unknown && output.summary.unknown > 0 {
+        return Err("verification reported UNKNOWN results".to_string());
+    }
+    if config.require_proved && output.summary.proved < output.summary.functions_with_contracts {
+        return Err("not every contract- or invariant-bearing function was formally proved".into());
+    }
     if had_failures {
         return Err("verification found failures".to_string());
     }

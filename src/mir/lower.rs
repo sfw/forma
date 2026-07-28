@@ -781,7 +781,11 @@ impl Lowerer {
                         let l = self.lower_expr(left)?;
                         let r = self.lower_expr(right)?;
                         let bin_op = self.lower_bin_op(*op);
-                        let result_ty = self.binary_op_result_type(bin_op, &l, &r);
+                        // Use the typed source expression rather than reconstructing
+                        // the result type from an operand. Ownership normalization may
+                        // later turn that operand into a borrow, but the fresh result is
+                        // still the scalar/string value described by the expression.
+                        let result_ty = self.infer_expr_type(expr);
                         let result = self.new_temp(result_ty);
                         self.emit(StatementKind::Assign(
                             result,
@@ -3762,30 +3766,6 @@ impl Lowerer {
         }
     }
 
-    /// Get the type of an operand
-    fn operand_type(&self, operand: &Operand) -> Ty {
-        match operand {
-            Operand::Constant(c) => self.constant_type(c),
-            Operand::Local(local)
-            | Operand::Copy(local)
-            | Operand::Move(local)
-            | Operand::Borrow(local, _) => self.local_types.get(local).cloned().unwrap_or(Ty::Unit),
-            Operand::CopyPlace(place)
-            | Operand::MovePlace(place)
-            | Operand::BorrowPlace(place, _) => self
-                .local_types
-                .get(&place.local)
-                .cloned()
-                .unwrap_or(Ty::Unit),
-        }
-    }
-
-    /// Get the type of a constant
-    fn constant_type(&self, constant: &Constant) -> Ty {
-        // Use the type method provided by Constant
-        constant.ty()
-    }
-
     /// Get the return type of a function
     fn get_function_return_type(&self, name: &str) -> Ty {
         // Check registered function return types
@@ -3907,27 +3887,6 @@ impl Lowerer {
             "parse_int" => Ty::Option(Box::new(Ty::Int)),
             "parse_float" => Ty::Option(Box::new(Ty::Float)),
             _ => Ty::Unit,
-        }
-    }
-
-    /// Infer result type for binary operations
-    fn binary_op_result_type(&self, op: BinOp, left: &Operand, _right: &Operand) -> Ty {
-        match op {
-            // Comparison operators always return Bool
-            BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => Ty::Bool,
-            // Logical operators return Bool
-            BinOp::And | BinOp::Or => Ty::Bool,
-            // Arithmetic and bitwise operators return same type as operands
-            BinOp::Add
-            | BinOp::Sub
-            | BinOp::Mul
-            | BinOp::Div
-            | BinOp::Rem
-            | BinOp::BitAnd
-            | BinOp::BitOr
-            | BinOp::BitXor
-            | BinOp::Shl
-            | BinOp::Shr => self.operand_type(left),
         }
     }
 

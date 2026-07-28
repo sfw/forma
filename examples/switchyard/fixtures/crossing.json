@@ -1,0 +1,17 @@
+{
+  "id": "diamond-crossing",
+  "nodes": ["north", "west", "diamond", "east", "south"],
+  "segments": [
+    {"id": "north-in", "source": "north", "target": "diamond", "conflict_group": "north-south"},
+    {"id": "south-out", "source": "diamond", "target": "south", "conflict_group": "north-south"},
+    {"id": "west-in", "source": "west", "target": "diamond", "conflict_group": "west-east"},
+    {"id": "east-out", "source": "diamond", "target": "east", "conflict_group": "west-east"}
+  ],
+  "routes": [
+    {"id": "north-south", "entry": "north", "exit": "south", "segments": ["north-in", "south-out"]},
+    {"id": "west-east", "entry": "west", "exit": "east", "segments": ["west-in", "east-out"]}
+  ],
+  "conflicts": [
+    {"left": "north-south", "right": "west-east"}
+  ]
+}

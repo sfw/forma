@@ -1,0 +1,13 @@
+version = 1
+topology_path = "examples/switchyard/fixtures/crossing.json"
+database_path = "examples/switchyard/.switchyard/events.db"
+bounded_depth = 8
+
+[simulation]
+train_ids = ["freight-7", "local-2"]
+start_nodes = ["north", "west"]
+
+[network]
+# Optional and unauthenticated. The deterministic checks never require network.
+status_url = ""
+timeout_ms = 3000

@@ -155,6 +155,38 @@ pub extern "C" fn forma_mul_overflow_check(a: i64, b: i64) -> i64 {
     }
 }
 
+/// Checked signed division with Forma's truncation-toward-zero semantics.
+#[no_mangle]
+pub extern "C" fn forma_div_overflow_check(a: i64, b: i64) -> i64 {
+    match a.checked_div(b) {
+        Some(result) => result,
+        None if b == 0 => {
+            eprintln!("FORMA panic: division by zero");
+            process::exit(1);
+        }
+        None => {
+            eprintln!("FORMA panic: integer overflow in division: {} / {}", a, b);
+            process::exit(1);
+        }
+    }
+}
+
+/// Checked signed remainder with Forma's truncation-toward-zero semantics.
+#[no_mangle]
+pub extern "C" fn forma_rem_overflow_check(a: i64, b: i64) -> i64 {
+    match a.checked_rem(b) {
+        Some(result) => result,
+        None if b == 0 => {
+            eprintln!("FORMA panic: remainder by zero");
+            process::exit(1);
+        }
+        None => {
+            eprintln!("FORMA panic: integer overflow in remainder: {} % {}", a, b);
+            process::exit(1);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -181,6 +213,8 @@ mod tests {
         assert_eq!(forma_add_overflow_check(1, 2), 3);
         assert_eq!(forma_sub_overflow_check(5, 3), 2);
         assert_eq!(forma_mul_overflow_check(3, 4), 12);
+        assert_eq!(forma_div_overflow_check(-7, 3), -2);
+        assert_eq!(forma_rem_overflow_check(-7, 3), -1);
     }
 
     #[test]

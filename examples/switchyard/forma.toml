@@ -1,0 +1,6 @@
+[package]
+name = "switchyard"
+version = "0.2.0"
+
+[deps]
+# Switchyard intentionally uses only Forma's compiler-provided standard surface.

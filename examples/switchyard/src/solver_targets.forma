@@ -1,0 +1,57 @@
+# Pure obligations for the experimental SMT path. These cover scalar rules,
+# structural values, invariant establishment, and invariant preservation.
+
+@inv(position >= 0, "verified positions cannot be negative")
+s VerifiedPosition
+    position: Int
+    clear: Bool
+
+@post(result == safe_input)
+f prove_boolean_identity(safe_input: Bool) -> Bool
+    safe_input
+
+@pre(sequence >= 0)
+@pre(sequence < 9223372036854775807)
+@post(result == sequence + 1)
+@post(result > sequence)
+f prove_sequence_progress(sequence: Int) -> Int
+    sequence + 1
+
+@pre(index >= 0)
+@pre(index < 9223372036854775807)
+@post(result == index + 1)
+@post(result > index)
+f prove_route_progress(index: Int) -> Int
+    index + 1
+
+@post(result => at_entry)
+@post(result => !occupied)
+@post(result => !conflicting)
+f prove_grant_implications(
+    at_entry: Bool,
+    occupied: Bool,
+    conflicting: Bool
+) -> Bool
+    at_entry && !occupied && !conflicting
+
+@pre(position >= 0)
+f establish_verified_position(position: Int, clear: Bool) -> VerifiedPosition
+    VerifiedPosition { position: position, clear: clear }
+
+@post(result.clear == state.clear)
+f normalize_verified_position(state: VerifiedPosition) -> VerifiedPosition
+    state.position = 0
+    state
+
+@post(result == pair)
+f preserve_tuple(pair: (Int, Bool)) -> (Int, Bool)
+    pair
+
+f main() -> Int
+    if (
+        prove_sequence_progress(0) == 1 &&
+        prove_route_progress(0) == 1 &&
+        prove_grant_implications(true, false, false)
+    )
+        0
+    else 1

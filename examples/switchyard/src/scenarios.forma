@@ -1,0 +1,105 @@
+# Deterministic scenarios shared by the CLI and offline tests.
+
+us model
+us graph
+us kernel
+us explorer
+
+pub f crossing_topology() -> Topology
+    Topology {
+        id: "diamond-crossing",
+        nodes: ["north", "west", "diamond", "east", "south"],
+        segments: [
+            Segment {
+                id: "north-in",
+                source: "north",
+                target: "diamond",
+                conflict_group: "north-south"
+            },
+            Segment {
+                id: "south-out",
+                source: "diamond",
+                target: "south",
+                conflict_group: "north-south"
+            },
+            Segment {
+                id: "west-in",
+                source: "west",
+                target: "diamond",
+                conflict_group: "west-east"
+            },
+            Segment {
+                id: "east-out",
+                source: "diamond",
+                target: "east",
+                conflict_group: "west-east"
+            }
+        ],
+        routes: [
+            Route {
+                id: "north-south",
+                entry: "north",
+                exit: "south",
+                segments: ["north-in", "south-out"]
+            },
+            Route {
+                id: "west-east",
+                entry: "west",
+                exit: "east",
+                segments: ["west-in", "east-out"]
+            }
+        ],
+        conflicts: [
+            RouteConflict { left: "north-south", right: "west-east" }
+        ]
+    }
+
+pub f scenario_train_ids() -> [Str]
+    ["freight-7", "local-2"]
+
+pub f scenario_start_nodes() -> [Str]
+    ["north", "west"]
+
+pub f run_crossing_scenario(
+    ref topology: Topology,
+    initial: InterlockingState
+) -> InterlockingState
+    state := initial
+
+    transition := request_route(
+        ref topology,
+        state,
+        "freight-7",
+        "north-south"
+    )
+    state = take_transition_state(transition)
+
+    # This request is safely rejected and retained in the audit log.
+    transition = request_route(
+        ref topology,
+        state,
+        "local-2",
+        "west-east"
+    )
+    state = take_transition_state(transition)
+
+    transition = advance_train(ref topology, state, "freight-7")
+    state = take_transition_state(transition)
+    transition = advance_train(ref topology, state, "freight-7")
+    state = take_transition_state(transition)
+    transition = advance_train(ref topology, state, "freight-7")
+    state = take_transition_state(transition)
+
+    transition = request_route(
+        ref topology,
+        state,
+        "local-2",
+        "west-east"
+    )
+    state = take_transition_state(transition)
+    transition = advance_train(ref topology, state, "local-2")
+    state = take_transition_state(transition)
+    transition = advance_train(ref topology, state, "local-2")
+    state = take_transition_state(transition)
+    transition = advance_train(ref topology, state, "local-2")
+    take_transition_state(transition)
