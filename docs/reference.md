@@ -1080,6 +1080,9 @@ forma verify src --level formal --report --solver z3 \
   --require-proved --emit-smt target/formal
 ```
 
+For a task-oriented walkthrough, see
+[Using Forma Formal Verification with Z3](smt-z3.md).
+
 Verification runs with capabilities revoked by default (no file/network/exec side effects) unless `--allow-side-effects` is explicitly set. This makes it CI-safe and reproducible.
 
 The formal subset supports acyclic `Bool` and signed 64-bit `Int` MIR,

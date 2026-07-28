@@ -27,6 +27,24 @@ parser shape.
    cargo build
    cargo test
    ```
+4. Install the repository hooks:
+   ```bash
+   python3 -m pip install pre-commit
+   pre-commit install
+   ```
+
+The pinned TruffleHog hook scans local Git changes for verified secrets before
+each commit and fails the commit when it finds one. Its first run downloads and
+builds the pinned scanner, so it can take longer than later runs. Confirm the
+hook independently with:
+
+```bash
+pre-commit run trufflehog
+```
+
+Never bypass a finding by adding the credential to Git. Remove and rotate a
+real secret before committing. Investigate false positives without exposing the
+candidate value in issues, logs, or pull requests.
 
 ## Development Workflow
 
@@ -44,7 +62,7 @@ parser shape.
    ```bash
    for f in examples/showcase/*.forma; do cargo run --quiet -- run "$f"; done
    ```
-8. Submit a pull request
+9. Submit a pull request
 
 ## What to Contribute
 

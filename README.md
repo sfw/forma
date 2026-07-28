@@ -148,6 +148,9 @@ forma verify rules.forma --level formal --report --solver z3 \
   --require-proved --emit-smt target/formal
 ```
 
+See [Using Forma Formal Verification with Z3](docs/smt-z3.md) for installation,
+proof targets, CI policy, SMT artifacts, counterexamples, and troubleshooting.
+
 Reports use distinct confidence states: `UNCONTRACTED`, `TESTED`,
 `COUNTEREXAMPLE`, `EXHAUSTIVE`, `PROVED`, `UNKNOWN`, and `SKIPPED`.
 Generated examples never produce `PROVED`. Formal verification is Experimental
