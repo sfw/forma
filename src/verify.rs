@@ -599,7 +599,7 @@ pub fn run_solver_with_timeout(
                 Some("unknown") => {
                     FormalResult::Unknown("solver returned unknown while extracting model".into())
                 }
-                other if !model.success => FormalResult::Unknown(format!(
+                _ if !model.success => FormalResult::Unknown(format!(
                     "SMT solver model error: {}",
                     model.stderr.trim()
                 )),
@@ -609,7 +609,7 @@ pub fn run_solver_with_timeout(
             }
         }
         Some("unknown") => FormalResult::Unknown("solver returned unknown".to_string()),
-        other if !decision.success => {
+        _ if !decision.success => {
             FormalResult::Unknown(format!("SMT solver error: {}", decision.stderr.trim()))
         }
         other => FormalResult::Unknown(format!("unexpected SMT solver response: {other:?}")),
